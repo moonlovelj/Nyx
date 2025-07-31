@@ -1,0 +1,20 @@
+﻿################################################################################
+# This .gitignore file is manually maintained
+################################################################################
+
+/Packages
+
+**/bin/x64
+**/obj/x64
+**/src/packages
+**/src/bin
+**/src/obj
+**/.vs
+**/.idea
+
+*.hlsl.h
+**/Build_VS16
+**/Build
+
+*.vcxproj.user
+*.opendb
