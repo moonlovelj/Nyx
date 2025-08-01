@@ -433,6 +433,9 @@
     <None Include="Shaders\SSAORS.hlsli" />
     <None Include="Shaders\TextRS.hlsli" />
   </ItemGroup>
+  <ItemGroup>
+    <Folder Include="GBufferPass\" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ItemDefinitionGroup>
     <ClCompile>

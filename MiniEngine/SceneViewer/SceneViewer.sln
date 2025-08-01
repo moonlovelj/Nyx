@@ -9,6 +9,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Core", "..\Core\Core.vcxpro
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DeferredRenderer", "..\DeferredRenderer\DeferredRenderer.vcxproj", "{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Model", "..\Model\Model.vcxproj", "{5D3AEEFB-8789-48E5-9BD9-09C667052D09}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Windows = Debug|Windows
@@ -34,6 +36,12 @@ Global
 		{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}.Profile|Windows.Build.0 = Profile|x64
 		{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}.Release|Windows.ActiveCfg = Release|x64
 		{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}.Release|Windows.Build.0 = Release|x64
+		{5D3AEEFB-8789-48E5-9BD9-09C667052D09}.Debug|Windows.ActiveCfg = Debug|x64
+		{5D3AEEFB-8789-48E5-9BD9-09C667052D09}.Debug|Windows.Build.0 = Debug|x64
+		{5D3AEEFB-8789-48E5-9BD9-09C667052D09}.Profile|Windows.ActiveCfg = Profile|x64
+		{5D3AEEFB-8789-48E5-9BD9-09C667052D09}.Profile|Windows.Build.0 = Profile|x64
+		{5D3AEEFB-8789-48E5-9BD9-09C667052D09}.Release|Windows.ActiveCfg = Release|x64
+		{5D3AEEFB-8789-48E5-9BD9-09C667052D09}.Release|Windows.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

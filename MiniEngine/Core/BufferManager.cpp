@@ -23,6 +23,10 @@ namespace Graphics
     DepthBuffer g_SceneDepthBuffer;
     ColorBuffer g_SceneColorBuffer;
     ColorBuffer g_SceneNormalBuffer;
+    ColorBuffer g_GBufferA;
+    ColorBuffer g_GBufferB;
+    ColorBuffer g_GBufferC;
+    ColorBuffer g_GBufferD;
     ColorBuffer g_PostEffectsBuffer;
     ColorBuffer g_VelocityBuffer;
     ColorBuffer g_OverlayBuffer;
@@ -112,6 +116,10 @@ void Graphics::InitializeRenderingBuffers( uint32_t bufferWidth, uint32_t buffer
 
         g_SceneColorBuffer.Create( L"Main Color Buffer", bufferWidth, bufferHeight, 1, DefaultHdrColorFormat, esram );
         g_SceneNormalBuffer.Create( L"Normals Buffer", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, esram );
+        g_GBufferA.Create( L"GBufferA", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, esram );
+        g_GBufferB.Create( L"GBufferB", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, esram );
+        g_GBufferC.Create( L"GBufferC", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, esram );
+        g_GBufferD.Create( L"GBufferD", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, esram );
         g_VelocityBuffer.Create( L"Motion Vectors", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R32_UINT );
         g_PostEffectsBuffer.Create( L"Post Effects Buffer", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R32_UINT );
 
@@ -246,6 +254,10 @@ void Graphics::DestroyRenderingBuffers()
     g_SceneDepthBuffer.Destroy();
     g_SceneColorBuffer.Destroy();
     g_SceneNormalBuffer.Destroy();
+    g_GBufferA.Destroy();
+    g_GBufferB.Destroy();
+    g_GBufferC.Destroy();
+    g_GBufferD.Destroy();
     g_VelocityBuffer.Destroy();
     g_OverlayBuffer.Destroy();
     g_HorizontalBuffer.Destroy();

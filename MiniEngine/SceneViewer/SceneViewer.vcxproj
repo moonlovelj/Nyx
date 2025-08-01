@@ -61,6 +61,10 @@
       <Project>{86A58508-0D6A-4786-A32F-01A301FDC6F3}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
+    <ProjectReference Include="..\Model\Model.vcxproj">
+      <Project>{5d3aeefb-8789-48e5-9bd9-09c667052d09}</Project>
+      <Name>Model</Name>
+    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <Image Include="Logo.png" />
@@ -78,7 +82,15 @@
       <AdditionalDependencies>zlibstatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
 	</Link>
   </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>..\Model;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <ImportGroup Label="ExtensionTargets">
+    <Import Project="..\..\Packages\zlib-msvc-x64.1.2.11.8900\build\native\zlib-msvc-x64.targets" Condition="Exists('..\..\Packages\zlib-msvc-x64.1.2.11.8900\build\native\zlib-msvc-x64.targets')" />
+    <Import Project="..\..\Packages\directxmesh_desktop_win10.2024.10.29.1\build\native\directxmesh_desktop_win10.targets" Condition="Exists('..\..\Packages\directxmesh_desktop_win10.2024.10.29.1\build\native\directxmesh_desktop_win10.targets')" />
+    <Import Project="..\..\Packages\directxtex_desktop_win10.2024.10.29.1\build\native\directxtex_desktop_win10.targets" Condition="Exists('..\..\Packages\directxtex_desktop_win10.2024.10.29.1\build\native\directxtex_desktop_win10.targets')" />
     <Import Project="..\..\Packages\WinPixEventRuntime.1.0.210209001\build\WinPixEventRuntime.targets" Condition="Exists('..\..\Packages\WinPixEventRuntime.1.0.210209001\build\WinPixEventRuntime.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
@@ -86,6 +98,8 @@
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
     </PropertyGroup>
     <Error Condition="!Exists('..\..\Packages\zlib-msvc-x64.1.2.11.8900\build\native\zlib-msvc-x64.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\Packages\zlib-msvc-x64.1.2.11.8900\build\native\zlib-msvc-x64.targets'))" />
+    <Error Condition="!Exists('..\..\Packages\directxmesh_desktop_win10.2024.10.29.1\build\native\directxmesh_desktop_win10.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\Packages\directxmesh_desktop_win10.2024.10.29.1\build\native\directxmesh_desktop_win10.targets'))" />
+    <Error Condition="!Exists('..\..\Packages\directxtex_desktop_win10.2024.10.29.1\build\native\directxtex_desktop_win10.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\Packages\directxtex_desktop_win10.2024.10.29.1\build\native\directxtex_desktop_win10.targets'))" />
     <Error Condition="!Exists('..\..\Packages\WinPixEventRuntime.1.0.210209001\build\WinPixEventRuntime.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\Packages\WinPixEventRuntime.1.0.210209001\build\WinPixEventRuntime.targets'))" />
   </Target>
 </Project>

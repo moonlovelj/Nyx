@@ -71,7 +71,7 @@ namespace Renderer
     {
     public:
 		enum BatchType { kDefault, kShadows };
-        enum DrawPass { kZPass, kOpaque, kTransparent, kNumPasses };
+        enum DrawPass { kZPass, kOpaque, kGBuffer, kTransparent, kNumPasses };
 
 		MeshSorter(BatchType type)
 		{

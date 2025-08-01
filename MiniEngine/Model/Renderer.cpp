@@ -41,6 +41,10 @@
 #include "CompiledShaders/CutoutDepthPS.h"
 #include "CompiledShaders/SkyboxVS.h"
 #include "CompiledShaders/SkyboxPS.h"
+#include "CompiledShaders/GBufferPS.h"
+#include "CompiledShaders/GBufferNoUV1PS.h"
+#include "CompiledShaders/GBufferNoTangentPS.h"
+#include "CompiledShaders/GBufferNoTangentNoUV1PS.h"
 
 #pragma warning(disable:4319) // '~': zero extending 'uint32_t' to 'uint64_t' of greater size
 
@@ -51,6 +55,8 @@ using namespace Renderer;
 namespace Renderer
 {
     BoolVar SeparateZPass("Renderer/Separate Z Pass", true);
+    
+    BoolVar DeferredRendering("Renderer/Deferred Rendering", true);
 
     bool s_Initialized = false;
 
@@ -399,6 +405,35 @@ uint8_t Renderer::GetPSO(uint16_t psoFlags)
         }
     }
 
+    if (DeferredRendering)
+    {
+        if (!(psoFlags & kAlphaBlend))
+        {
+            if (psoFlags & kHasTangent)
+            {
+                if (psoFlags & kHasUV1)
+                {
+                    ColorPSO.SetPixelShader(g_pGBufferPS, sizeof(g_pGBufferPS));
+                }
+                else
+                {
+                    ColorPSO.SetPixelShader(g_pGBufferNoUV1PS, sizeof(g_pGBufferNoUV1PS));
+                }
+            }
+            else
+            {
+                if (psoFlags & kHasUV1)
+                {
+                    ColorPSO.SetPixelShader(g_pGBufferNoTangentPS, sizeof(g_pGBufferNoTangentPS));
+                }
+                else
+                {
+                    ColorPSO.SetPixelShader(g_pGBufferNoTangentNoUV1PS, sizeof(g_pGBufferNoTangentNoUV1PS));
+                }
+            }
+        }
+    }
+
     if (psoFlags & kAlphaBlend)
     {
         ColorPSO.SetBlendState(BlendPreMultiplied);
@@ -513,19 +548,41 @@ void MeshSorter::AddMesh( const Mesh& mesh, float distance,
         m_SortKeys.push_back(key.value);
         m_PassCounts[kZPass]++;
 
-        key.passID = kOpaque;
-        key.psoIdx = mesh.pso + 1;
-        key.key = dist.u;
-        m_SortKeys.push_back(key.value);
-        m_PassCounts[kOpaque]++;
+        if (DeferredRendering)
+        {
+            key.passID = kGBuffer;
+            key.psoIdx = mesh.pso + 1;
+            key.key = dist.u;
+            m_SortKeys.push_back(key.value);
+            m_PassCounts[kGBuffer]++;
+        }
+        else
+        {
+            key.passID = kOpaque;
+            key.psoIdx = mesh.pso + 1;
+            key.key = dist.u;
+            m_SortKeys.push_back(key.value);
+            m_PassCounts[kOpaque]++;
+        }
     }
     else
     {
-        key.passID = kOpaque;
-        key.psoIdx = mesh.pso;
-        key.key = dist.u;
-        m_SortKeys.push_back(key.value);
-        m_PassCounts[kOpaque]++;
+        if (DeferredRendering)
+        {
+            key.passID = kGBuffer;
+            key.psoIdx = mesh.pso;
+            key.key = dist.u;
+            m_SortKeys.push_back(key.value);
+            m_PassCounts[kGBuffer]++;
+        }
+        else
+        {
+            key.passID = kOpaque;
+            key.psoIdx = mesh.pso;
+            key.key = dist.u;
+            m_SortKeys.push_back(key.value);
+            m_PassCounts[kOpaque]++;
+        }
     }
 
     SortObject object = { &mesh, skeleton, meshCBV, materialCBV, bufferPtr };
@@ -636,6 +693,43 @@ void MeshSorter::RenderMeshes(
 					context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), m_DSV->GetDSV());
 				}
 				break;
+			case kGBuffer:
+			    if (SeparateZPass)
+			    {
+			        context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_READ);
+			        context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
+			        context.TransitionResource(g_GBufferA, D3D12_RESOURCE_STATE_RENDER_TARGET);
+			        context.TransitionResource(g_GBufferB, D3D12_RESOURCE_STATE_RENDER_TARGET);
+			        context.TransitionResource(g_GBufferC, D3D12_RESOURCE_STATE_RENDER_TARGET);
+			        context.TransitionResource(g_GBufferD, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+			        D3D12_CPU_DESCRIPTOR_HANDLE RTVs[] = {
+			            g_SceneColorBuffer.GetRTV(),
+			            g_GBufferA.GetRTV(),
+			            g_GBufferB.GetRTV(),
+			            g_GBufferC.GetRTV(),
+			            g_GBufferD.GetRTV(),
+			        };
+			        context.SetRenderTargets(5, RTVs, m_DSV->GetDSV_DepthReadOnly());
+			    }
+			    else
+			    {
+			        context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+			        context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
+			        context.TransitionResource(g_GBufferA, D3D12_RESOURCE_STATE_RENDER_TARGET);
+			        context.TransitionResource(g_GBufferB, D3D12_RESOURCE_STATE_RENDER_TARGET);
+			        context.TransitionResource(g_GBufferC, D3D12_RESOURCE_STATE_RENDER_TARGET);
+			        context.TransitionResource(g_GBufferD, D3D12_RESOURCE_STATE_RENDER_TARGET);
+			        D3D12_CPU_DESCRIPTOR_HANDLE RTVs[] = {
+			            g_SceneColorBuffer.GetRTV(),
+                        g_GBufferA.GetRTV(),
+                        g_GBufferB.GetRTV(),
+                        g_GBufferC.GetRTV(),
+                        g_GBufferD.GetRTV(),
+                    };
+			        context.SetRenderTargets(5, RTVs, m_DSV->GetDSV());
+			    }
+			    break;
 			case kTransparent:
 				context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_READ);
 				context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);

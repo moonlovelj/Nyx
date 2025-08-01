@@ -61,6 +61,7 @@
   <ItemGroup>
     <ClInclude Include="Animation.h" />
     <ClInclude Include="ConstantBuffers.h" />
+    <ClInclude Include="DeferredRenderer.h" />
     <ClInclude Include="glTF.h" />
     <ClInclude Include="IndexOptimizePostTransform.h" />
     <ClInclude Include="json.hpp" />
@@ -77,6 +78,7 @@
   <ItemGroup>
     <ClCompile Include="Animation.cpp" />
     <ClCompile Include="BuildH3D.cpp" />
+    <ClCompile Include="DeferredRenderer.cpp" />
     <ClCompile Include="glTF.cpp" />
     <ClCompile Include="IndexOptimizePostTransform.cpp" />
     <ClCompile Include="LightManager.cpp" />
@@ -157,6 +159,18 @@
     <FxCompile Include="Shaders\FillLightGridCS_32.hlsl" />
     <FxCompile Include="Shaders\FillLightGridCS_8.hlsl" />
     <FxCompile Include="Shaders\DefaultPS.hlsl">
+      <ShaderType>Pixel</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Shaders\GBufferNoTangentNoUV1PS.hlsl">
+      <ShaderType>Pixel</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Shaders\GBufferNoTangentPS.hlsl">
+      <ShaderType>Pixel</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Shaders\GBufferNoUV1PS.hlsl">
+      <ShaderType>Pixel</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Shaders\GBufferPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
     <FxCompile Include="Shaders\ModelViewerPS.hlsl">

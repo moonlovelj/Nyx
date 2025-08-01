@@ -14,6 +14,9 @@
       <Platform>x64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Shaders\" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
