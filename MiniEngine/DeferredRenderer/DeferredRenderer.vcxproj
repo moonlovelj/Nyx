@@ -15,10 +15,10 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{TEMPLATE_GUID}</ProjectGuid>
+    <ProjectGuid>{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
-    <ProjectName>TEMPLATE_NAME</ProjectName>
-    <RootNamespace>TEMPLATE_NAME</RootNamespace>
+    <ProjectName>DeferredRenderer</ProjectName>
+    <RootNamespace>DeferredRenderer</RootNamespace>
     <DefaultLanguage>en-US</DefaultLanguage>
     <Keyword>Win32Proj</Keyword>
     <MinimumVisualStudioVersion>16.0</MinimumVisualStudioVersion>

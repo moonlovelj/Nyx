@@ -1,0 +1,41 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 16
+VisualStudioVersion = 16
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SceneViewer", "SceneViewer.vcxproj", "{2C6297F9-023F-4718-8F49-40DFA45AE522}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Core", "..\Core\Core.vcxproj", "{86A58508-0D6A-4786-A32F-01A301FDC6F3}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DeferredRenderer", "..\DeferredRenderer\DeferredRenderer.vcxproj", "{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Windows = Debug|Windows
+		Profile|Windows = Profile|Windows
+		Release|Windows = Release|Windows
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{2C6297F9-023F-4718-8F49-40DFA45AE522}.Debug|Windows.ActiveCfg = Debug|x64
+		{2C6297F9-023F-4718-8F49-40DFA45AE522}.Debug|Windows.Build.0 = Debug|x64
+		{2C6297F9-023F-4718-8F49-40DFA45AE522}.Profile|Windows.ActiveCfg = Profile|x64
+		{2C6297F9-023F-4718-8F49-40DFA45AE522}.Profile|Windows.Build.0 = Profile|x64
+		{2C6297F9-023F-4718-8F49-40DFA45AE522}.Release|Windows.ActiveCfg = Release|x64
+		{2C6297F9-023F-4718-8F49-40DFA45AE522}.Release|Windows.Build.0 = Release|x64
+		{86A58508-0D6A-4786-A32F-01A301FDC6F3}.Debug|Windows.ActiveCfg = Debug|x64
+		{86A58508-0D6A-4786-A32F-01A301FDC6F3}.Debug|Windows.Build.0 = Debug|x64
+		{86A58508-0D6A-4786-A32F-01A301FDC6F3}.Profile|Windows.ActiveCfg = Profile|x64
+		{86A58508-0D6A-4786-A32F-01A301FDC6F3}.Profile|Windows.Build.0 = Profile|x64
+		{86A58508-0D6A-4786-A32F-01A301FDC6F3}.Release|Windows.ActiveCfg = Release|x64
+		{86A58508-0D6A-4786-A32F-01A301FDC6F3}.Release|Windows.Build.0 = Release|x64
+		{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}.Debug|Windows.ActiveCfg = Debug|x64
+		{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}.Debug|Windows.Build.0 = Debug|x64
+		{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}.Profile|Windows.ActiveCfg = Profile|x64
+		{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}.Profile|Windows.Build.0 = Profile|x64
+		{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}.Release|Windows.ActiveCfg = Release|x64
+		{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}.Release|Windows.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

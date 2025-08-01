@@ -15,11 +15,11 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <RootNamespace>TEMPLATE_NAME</RootNamespace>
-    <ProjectGuid>{TEMPLATE_GUID}</ProjectGuid>
+    <RootNamespace>SceneViewer</RootNamespace>
+    <ProjectGuid>{2C6297F9-023F-4718-8F49-40DFA45AE522}</ProjectGuid>
     <DefaultLanguage>en-US</DefaultLanguage>
     <Keyword>Win32Proj</Keyword>
-    <ProjectName>TEMPLATE_NAME</ProjectName>
+    <ProjectName>SceneViewer</ProjectName>
     <PlatformToolset>v142</PlatformToolset>
     <MinimumVisualStudioVersion>16.0</MinimumVisualStudioVersion>
     <TargetRuntime>Native</TargetRuntime>
@@ -54,13 +54,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-      <ClInclude Include="pch.h" />
-  </ItemGroup>
-  <ItemGroup>
     <ClCompile Include="Main.cpp" />
-    <ClCompile Include="pch.cpp">
-      <PrecompiledHeader>Create</PrecompiledHeader>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Core/Core.vcxproj">
