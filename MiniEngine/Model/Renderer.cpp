@@ -431,6 +431,15 @@ uint8_t Renderer::GetPSO(uint16_t psoFlags)
                     ColorPSO.SetPixelShader(g_pGBufferNoTangentNoUV1PS, sizeof(g_pGBufferNoTangentNoUV1PS));
                 }
             }
+
+            DXGI_FORMAT RTVFormats[] = {
+				g_SceneColorBuffer.GetFormat(),
+                g_GBufferA.GetFormat(),
+                g_GBufferB.GetFormat(),
+                g_GBufferC.GetFormat(),
+                g_GBufferD.GetFormat()
+            };
+            ColorPSO.SetRenderTargetFormats(5, RTVFormats, g_SceneDepthBuffer.GetFormat());
         }
     }
 
@@ -665,15 +674,13 @@ void MeshSorter::RenderMeshes(
 		}
 	}
 
-    for ( ; m_CurrentPass <= pass; m_CurrentPass = (DrawPass)(m_CurrentPass + 1))
+    //for ( ; m_CurrentPass <= pass; m_CurrentPass = (DrawPass)(m_CurrentPass + 1))
+    const uint32_t passCount = m_PassCounts[pass];
+    if (passCount > 0)
     {
-        const uint32_t passCount = m_PassCounts[m_CurrentPass];
-        if (passCount == 0)
-            continue;
-
 		if (m_BatchType == kDefault)
 		{
-			switch (m_CurrentPass)
+			switch (pass)
 			{
 			case kZPass:
 				context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_WRITE);
@@ -761,7 +768,7 @@ void MeshSorter::RenderMeshes(
             }
             context.SetPipelineState(sm_PSOs[key.psoIdx]);
 
-            if (m_CurrentPass == kZPass)
+            if (pass == kZPass)
             {
                 bool alphaTest = (mesh.psoFlags & PSOFlags::kAlphaTest) == PSOFlags::kAlphaTest;
                 uint32_t stride = alphaTest ? 16u : 12u;

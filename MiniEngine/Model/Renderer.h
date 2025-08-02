@@ -84,7 +84,7 @@ namespace Renderer
 			m_SortObjects.clear();
 			m_SortKeys.clear();
 			std::memset(m_PassCounts, 0, sizeof(m_PassCounts));
-			m_CurrentPass = kZPass;
+			//m_CurrentPass = kZPass;
 			m_CurrentDraw = 0;
 		}
 
@@ -142,7 +142,7 @@ namespace Renderer
         std::vector<uint64_t> m_SortKeys;
 		BatchType m_BatchType;
         uint32_t m_PassCounts[kNumPasses];
-        DrawPass m_CurrentPass;
+        //DrawPass m_CurrentPass;
         uint32_t m_CurrentDraw;
 
 		const BaseCamera* m_Camera;

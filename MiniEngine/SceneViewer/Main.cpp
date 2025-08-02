@@ -307,8 +307,21 @@ void SceneViewer::RenderScene( void )
 
             gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
             gfxContext.ClearColor(g_SceneColorBuffer);
+            
+            //{
+            //    ScopedTimer _prof(L"Render Color", gfxContext);
+
+            //    gfxContext.TransitionResource(g_SSAOFullScreen, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+            //    gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_READ);
+            //    gfxContext.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV_DepthReadOnly());
+            //    gfxContext.SetViewportAndScissor(viewport, scissor);
+
+            //    sorter.RenderMeshes(MeshSorter::kOpaque, gfxContext, globals);
+            //}
 
             {
+                ScopedTimer _prof(L"Render GBuffer", gfxContext);
+
                 gfxContext.TransitionResource(g_GBufferA, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
                 gfxContext.ClearColor(g_GBufferA);
 
@@ -321,25 +334,20 @@ void SceneViewer::RenderScene( void )
                 gfxContext.TransitionResource(g_GBufferD, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
                 gfxContext.ClearColor(g_GBufferD);
 
-                ScopedTimer _prof(L"Render GBuffer", gfxContext);
-
                 gfxContext.TransitionResource(g_SSAOFullScreen, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
                 gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_READ);
-                gfxContext.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV_DepthReadOnly());
+
+                const D3D12_CPU_DESCRIPTOR_HANDLE RTVs[] = {
+                    g_SceneColorBuffer.GetRTV(),
+                    g_GBufferA.GetRTV(),
+                    g_GBufferB.GetRTV(),
+                    g_GBufferC.GetRTV(),
+                    g_GBufferD.GetRTV(),
+				};
+                gfxContext.SetRenderTargets(5, RTVs, g_SceneDepthBuffer.GetDSV_DepthReadOnly());
                 gfxContext.SetViewportAndScissor(viewport, scissor);
 
                 sorter.RenderMeshes(MeshSorter::kGBuffer, gfxContext, globals);
-            }
-            
-            {
-                ScopedTimer _prof(L"Render Color", gfxContext);
-
-                gfxContext.TransitionResource(g_SSAOFullScreen, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-                gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_READ);
-                gfxContext.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV_DepthReadOnly());
-                gfxContext.SetViewportAndScissor(viewport, scissor);
-
-                sorter.RenderMeshes(MeshSorter::kOpaque, gfxContext, globals);
             }
 
             Renderer::DrawSkybox(gfxContext, m_Camera, viewport, scissor);
