@@ -51,4 +51,9 @@ namespace Lighting
     void CreateRandomLights(const Math::Vector3 minBound, const Math::Vector3 maxBound);
     void FillLightGrid(GraphicsContext& gfxContext, const Math::Camera& camera);
     void Shutdown(void);
+
+    void RenderDeferredLighting(GraphicsContext& gfxContext, 
+        const Math::Vector3& inSunDirection, 
+        const Math::Vector3& inSunColor, 
+        const Math::Matrix4& inSunShadowMatrix);
 }

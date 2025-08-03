@@ -13,13 +13,13 @@
 #include "TextRenderer.h"
 #include "ParticleEffectManager.h"
 #include "GameInput.h"
-#include "DeferredRenderer.h"
 #include "glTF.h"
 #include "Renderer.h"
 #include "Model.h"
 #include "ModelLoader.h"
 #include "ShadowCamera.h"
 #include "Display.h"
+#include "LightManager.h"
 
 using namespace GameCore;
 using namespace Math;
@@ -348,6 +348,10 @@ void SceneViewer::RenderScene( void )
                 gfxContext.SetViewportAndScissor(viewport, scissor);
 
                 sorter.RenderMeshes(MeshSorter::kGBuffer, gfxContext, globals);
+            }
+
+            {
+                Lighting::RenderDeferredLighting(gfxContext, SunDirection, Vector3(Scalar(g_SunLightIntensity)), m_SunShadowCamera.GetShadowMatrix());
             }
 
             Renderer::DrawSkybox(gfxContext, m_Camera, viewport, scissor);

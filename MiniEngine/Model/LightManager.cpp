@@ -25,6 +25,8 @@
 #include "CompiledShaders/FillLightGridCS_24.h"
 #include "CompiledShaders/FillLightGridCS_32.h"
 
+#include "CompiledShaders/DeferredLightingCS.h"
+
 using namespace Math;
 using namespace Graphics;
 
@@ -66,6 +68,12 @@ namespace Lighting
     ColorBuffer m_LightShadowArray;
     ShadowBuffer m_LightShadowTempBuffer;
     Matrix4 m_LightShadowMatrix[MaxLights];
+
+    RootSignature m_DeferredLightingRootSig;
+    ComputePSO m_DeferredLightingPSO(L"Deferred Lighting PSO");
+    DescriptorHeap s_TextureHeap;
+    DescriptorHandle m_DeferredLightingTextures;
+    DescriptorHandle m_DeferredLightingUAVs;
 
     void InitializeResources(void);
     void CreateRandomLights(const Vector3 minBound, const Vector3 maxBound);
@@ -109,6 +117,52 @@ void Lighting::InitializeResources( void )
     m_LightShadowTempBuffer.Create(L"m_LightShadowTempBuffer", shadowDim, shadowDim);
 
     m_LightBuffer.Create(L"m_LightBuffer", MaxLights, sizeof(LightData));
+
+    s_TextureHeap.Create(L"Deferred Lighting Texture Descriptors", D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 128);
+    m_DeferredLightingTextures = s_TextureHeap.Alloc(10);
+    m_DeferredLightingUAVs = s_TextureHeap.Alloc(1);
+
+
+    {
+        uint32_t DestCount = 10;
+        uint32_t SourceCounts[] = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+        D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
+        {
+            g_GBufferA.GetSRV(),
+            g_GBufferB.GetSRV(),
+            g_GBufferC.GetSRV(),
+            g_GBufferD.GetSRV(),
+            g_SSAOFullScreen.GetSRV(),
+            g_ShadowBuffer.GetSRV(),
+            Lighting::m_LightBuffer.GetSRV(),
+            Lighting::m_LightGrid.GetSRV(),
+            Lighting::m_LightGridBitMask.GetSRV(),
+            Lighting::m_LightShadowArray.GetSRV(),
+        };
+
+        g_Device->CopyDescriptors(1, &m_DeferredLightingTextures, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    }
+
+    {
+        uint32_t DestCount = 1;
+        uint32_t SourceCounts[] = { 1 };
+        D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
+        {
+			g_SceneColorBuffer.GetUAV()
+        };
+
+        g_Device->CopyDescriptors(1, &m_DeferredLightingUAVs, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    }
+
+    m_DeferredLightingRootSig.Reset(3, 0);
+    m_DeferredLightingRootSig[0].InitAsConstantBuffer(0);
+    m_DeferredLightingRootSig[1].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 10);
+    m_DeferredLightingRootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1);
+    m_DeferredLightingRootSig.Finalize(L"DeferredLightingRS");
+
+	m_DeferredLightingPSO.SetRootSignature(m_DeferredLightingRootSig);
+    m_DeferredLightingPSO.SetComputeShader(g_pDeferredLightingCS, sizeof(g_pDeferredLightingCS));
+    m_DeferredLightingPSO.Finalize();
 }
 
 void Lighting::CreateRandomLights( const Vector3 minBound, const Vector3 maxBound )
@@ -265,6 +319,7 @@ void Lighting::Shutdown(void)
     m_LightGridBitMask.Destroy();
     m_LightShadowArray.Destroy();
     m_LightShadowTempBuffer.Destroy();
+    s_TextureHeap.Destroy();
 }
 
 void Lighting::FillLightGrid(GraphicsContext& gfxContext, const Camera& camera)
@@ -328,4 +383,99 @@ void Lighting::FillLightGrid(GraphicsContext& gfxContext, const Camera& camera)
     Context.TransitionResource(m_LightBuffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     Context.TransitionResource(m_LightGrid, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     Context.TransitionResource(m_LightGridBitMask, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+}
+
+void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
+    const Math::Vector3& inSunDirection,
+    const Math::Vector3& inSunColor,
+    const Math::Matrix4& inSunShadowMatrix)
+{
+    ScopedTimer _prof(L"DeferredLighting", gfxContext);
+
+    ComputeContext& Context = gfxContext.GetComputeContext();
+
+    Context.SetRootSignature(m_DeferredLightingRootSig);
+
+    Context.SetPipelineState(m_DeferredLightingPSO);
+
+    //Texture2D<float4> gBufferA : register(t0);
+    //Texture2D<float4> gBufferB : register(t1);
+    //Texture2D<float4> gBufferC : register(t2);
+    //Texture2D<float4> gBufferD : register(t3);
+
+    //Texture2D<float> texSSAO : register(t4);
+    //Texture2D<float> texShadow : register(t5);
+
+    //StructuredBuffer<LightData> lightBuffer : register(t6);
+    //ByteAddressBuffer lightGrid : register(t7);
+    //ByteAddressBuffer lightGridBitMask : register(t8);
+    //Texture2DArray<float> lightShadowArrayTex : register(t9);
+
+    Context.TransitionResource(g_GBufferA, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    Context.TransitionResource(g_GBufferB, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    Context.TransitionResource(g_GBufferC, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    Context.TransitionResource(g_GBufferD, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+    Context.TransitionResource(g_SSAOFullScreen, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    Context.TransitionResource(g_ShadowBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+    Context.TransitionResource(m_LightBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    Context.TransitionResource(m_LightGrid, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    Context.TransitionResource(m_LightGridBitMask, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    Context.TransitionResource(m_LightShadowArray, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+    Context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+    Context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+    Context.SetDescriptorTable(1, m_DeferredLightingTextures);
+    Context.SetDescriptorTable(2, m_DeferredLightingUAVs);
+
+    uint32_t tileCountX = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), LightGridDim);
+    uint32_t tileCountY = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), LightGridDim);
+
+    __declspec(align(16)) struct CSConstants
+    {
+        Vector3 SunDirection;
+        Vector3 SunColor;
+        float ShadowTexelSize[4];
+        Matrix4 SunShadowMatrix;
+
+        float InvTileDim[4];
+        uint32_t TileCount[4];
+        uint32_t FirstLightIndex[4];
+
+        uint32_t ViewportWidth;
+        uint32_t ViewportHeight;
+
+        uint32_t FrameIndexMod2;
+    } csConstants;
+
+
+    csConstants.SunDirection = inSunDirection;
+    csConstants.SunColor = inSunColor;
+    csConstants.SunShadowMatrix = inSunShadowMatrix;
+
+    csConstants.ShadowTexelSize[0] = 1.0f / g_ShadowBuffer.GetWidth();
+    csConstants.InvTileDim[0] = 1.0f / Lighting::LightGridDim;
+    csConstants.InvTileDim[1] = 1.0f / Lighting::LightGridDim;
+    csConstants.TileCount[0] = tileCountX;
+    csConstants.TileCount[1] = tileCountY;
+    csConstants.FirstLightIndex[0] = Lighting::m_FirstConeLight;
+    csConstants.FirstLightIndex[1] = Lighting::m_FirstConeShadowedLight;
+
+    csConstants.ViewportWidth = g_SceneColorBuffer.GetWidth();
+    csConstants.ViewportHeight = g_SceneColorBuffer.GetHeight();
+
+    csConstants.FrameIndexMod2 = TemporalEffects::GetFrameIndexMod2();
+    
+
+    Context.SetDynamicConstantBufferView(0, sizeof(CSConstants), &csConstants);
+
+
+    uint32_t groupCountX = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), 8);
+    uint32_t groupCountY = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), 8);
+
+    Context.Dispatch(groupCountX, groupCountY, 1);
+
+    //Context.TransitionResource(m_LightBuffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 }

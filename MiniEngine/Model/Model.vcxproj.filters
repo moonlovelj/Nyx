@@ -207,5 +207,8 @@
     <FxCompile Include="Shaders\GBufferNoTangentNoUV1PS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="Shaders\DeferredLightingCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
 </Project>
