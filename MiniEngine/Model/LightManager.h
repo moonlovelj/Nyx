@@ -52,7 +52,8 @@ namespace Lighting
     void FillLightGrid(GraphicsContext& gfxContext, const Math::Camera& camera);
     void Shutdown(void);
 
-    void RenderDeferredLighting(GraphicsContext& gfxContext, 
+    void RenderDeferredLighting(GraphicsContext& gfxContext,
+        const Math::Camera& camera,
         const Math::Vector3& inSunDirection, 
         const Math::Vector3& inSunColor, 
         const Math::Matrix4& inSunShadowMatrix);

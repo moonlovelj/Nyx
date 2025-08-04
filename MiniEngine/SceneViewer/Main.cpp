@@ -351,7 +351,7 @@ void SceneViewer::RenderScene( void )
             }
 
             {
-                Lighting::RenderDeferredLighting(gfxContext, SunDirection, Vector3(Scalar(g_SunLightIntensity)), m_SunShadowCamera.GetShadowMatrix());
+                Lighting::RenderDeferredLighting(gfxContext, m_Camera, SunDirection, Vector3(Scalar(g_SunLightIntensity)), m_SunShadowCamera.GetShadowMatrix());
             }
 
             Renderer::DrawSkybox(gfxContext, m_Camera, viewport, scissor);
