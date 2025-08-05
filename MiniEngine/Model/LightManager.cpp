@@ -118,24 +118,18 @@ void Lighting::InitializeResources( void )
 
     m_LightBuffer.Create(L"m_LightBuffer", MaxLights, sizeof(LightData));
     
-    m_DeferredLightingTextures = Renderer::s_TextureHeap.Alloc(10);
+    m_DeferredLightingTextures = Renderer::s_TextureHeap.Alloc(4);
     m_DeferredLightingUAVs = Renderer::s_TextureHeap.Alloc(1);
     
     {
-        uint32_t DestCount = 10;
-        uint32_t SourceCounts[] = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+        uint32_t DestCount = 4;
+        uint32_t SourceCounts[] = { 1, 1, 1, 1};
         D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
         {
             g_GBufferA.GetSRV(),
             g_GBufferB.GetSRV(),
             g_GBufferC.GetSRV(),
             g_GBufferD.GetSRV(),
-            g_SSAOFullScreen.GetSRV(),
-            g_ShadowBuffer.GetSRV(),
-            Lighting::m_LightBuffer.GetSRV(),
-            Lighting::m_LightGrid.GetSRV(),
-            Lighting::m_LightGridBitMask.GetSRV(),
-            Lighting::m_LightShadowArray.GetSRV(),
         };
 
         g_Device->CopyDescriptors(1, &m_DeferredLightingTextures, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -152,11 +146,17 @@ void Lighting::InitializeResources( void )
         g_Device->CopyDescriptors(1, &m_DeferredLightingUAVs, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     }
 
-    m_DeferredLightingRootSig.Reset(3, 1);
-    m_DeferredLightingRootSig.InitStaticSampler(0, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_ALL);
+    m_DeferredLightingRootSig.Reset(4, 3);
+    SamplerDesc DefaultSamplerDesc;
+    DefaultSamplerDesc.MaxAnisotropy = 8;
+    SamplerDesc CubeMapSamplerDesc = DefaultSamplerDesc;
+    m_DeferredLightingRootSig.InitStaticSampler(0, DefaultSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+    m_DeferredLightingRootSig.InitStaticSampler(1, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_ALL);
+    m_DeferredLightingRootSig.InitStaticSampler(2, CubeMapSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
     m_DeferredLightingRootSig[0].InitAsConstantBuffer(0);
-    m_DeferredLightingRootSig[1].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 10);
-    m_DeferredLightingRootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1);
+    m_DeferredLightingRootSig[1].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 4);
+    m_DeferredLightingRootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 4, 8);
+    m_DeferredLightingRootSig[3].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1);
     m_DeferredLightingRootSig.Finalize(L"DeferredLightingRS");
     
 	m_DeferredLightingPSO.SetRootSignature(m_DeferredLightingRootSig);
@@ -414,7 +414,8 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
 
     Context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Renderer::s_TextureHeap.GetHeapPointer());
     Context.SetDescriptorTable(1, m_DeferredLightingTextures);
-    Context.SetDescriptorTable(2, m_DeferredLightingUAVs);
+    Context.SetDescriptorTable(2, Renderer::m_CommonTextures);
+    Context.SetDescriptorTable(3, m_DeferredLightingUAVs);
 
     uint32_t tileCountX = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), LightGridDim);
     uint32_t tileCountY = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), LightGridDim);
@@ -436,6 +437,9 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
         uint32_t ViewportHeight;
         
         uint32_t FrameIndexMod2;
+        
+        float IBLRange;
+        float IBLBias;
     } csConstants;
     
     csConstants.SunDirection = inSunDirection;
@@ -456,6 +460,8 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
     csConstants.ViewportHeight = g_SceneColorBuffer.GetHeight();
 
     csConstants.FrameIndexMod2 = TemporalEffects::GetFrameIndexMod2();
+    csConstants.IBLRange = Renderer::s_SpecularIBLRange;
+    csConstants.IBLBias = Renderer::s_SpecularIBLBias;
     
     Context.SetDynamicConstantBufferView(0, sizeof(CSConstants), &csConstants);
     

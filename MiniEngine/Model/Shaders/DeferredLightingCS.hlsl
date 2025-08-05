@@ -30,6 +30,10 @@ cbuffer CSConstants : register(b0)
     uint ViewportHeight;
 
     uint FrameIndexMod2;
+
+    float IBLRange;
+    float IBLBias;
+
 };
 
 Texture2D<float4> gBufferA : register(t0);
@@ -37,16 +41,19 @@ Texture2D<float4> gBufferB : register(t1);
 Texture2D<float4> gBufferC : register(t2);
 Texture2D<float4> gBufferD : register(t3);
 
-Texture2D<float> texSSAO : register(t4);
-Texture2D<float> texShadow : register(t5);
+// Common textures
+TextureCube<float3> radianceIBLTexture      : register(t4);
+TextureCube<float3> irradianceIBLTexture    : register(t5);
+Texture2D<float> texSSAO : register(t6);
+Texture2D<float> texShadow : register(t7);
+StructuredBuffer<LightData> lightBuffer : register(t8);
+ByteAddressBuffer lightGrid : register(t9);
+ByteAddressBuffer lightGridBitMask : register(t10);
+Texture2DArray<float> lightShadowArrayTex : register(t11);
 
-StructuredBuffer<LightData> lightBuffer : register(t6);
-ByteAddressBuffer lightGrid : register(t7);
-ByteAddressBuffer lightGridBitMask : register(t8);
-Texture2DArray<float> lightShadowArrayTex : register(t9);
-
-SamplerComparisonState shadowSampler : register(s0);
-SamplerState cubeMapSampler : register(s1);
+SamplerState defaultSampler : register(s0);
+SamplerComparisonState shadowSampler : register(s1);
+SamplerState cubeMapSampler : register(s2);
 
 RWTexture2D<float4> sceneColor : register(u0);
 
@@ -162,27 +169,27 @@ float3 ShadeDirectionalLight(SurfaceProperties Surface, float3 L, float3 c_light
     return Light.NdotL * c_light * (diffuse + specular);
 }
 
-// // Diffuse irradiance
-// float3 Diffuse_IBL(SurfaceProperties Surface)
-// {
-//     // Assumption:  L = N
-//
-//     //return Surface.c_diff * irradianceIBLTexture.Sample(defaultSampler, Surface.N);
-//
-//     // This is nicer but more expensive, and specular can often drown out the diffuse anyway
-//     float LdotH = saturate(dot(Surface.N, normalize(Surface.N + Surface.V)));
-//     float fd90 = 0.5 + 2.0 * Surface.roughness * LdotH * LdotH;
-//     float3 DiffuseBurley = Surface.c_diff * Fresnel_Shlick(1, fd90, Surface.NdotV);
-//     return DiffuseBurley * irradianceIBLTexture.Sample(defaultSampler, Surface.N);
-// }
-//
-// // Approximate specular IBL by sampling lower mips according to roughness.  Then modulate by Fresnel. 
-// float3 Specular_IBL(SurfaceProperties Surface)
-// {
-//     float lod = Surface.roughness * IBLRange + IBLBias;
-//     float3 specular = Fresnel_Shlick(Surface.c_spec, 1, Surface.NdotV);
-//     return specular * radianceIBLTexture.SampleLevel(cubeMapSampler, reflect(-Surface.V, Surface.N), lod);
-// }
+// Diffuse irradiance
+float3 Diffuse_IBL(SurfaceProperties Surface)
+{
+    // Assumption:  L = N
+
+    // return Surface.c_diff * irradianceIBLTexture.SampleLevel(defaultSampler, Surface.N, 0);
+
+    // This is nicer but more expensive, and specular can often drown out the diffuse anyway
+    float LdotH = saturate(dot(Surface.N, normalize(Surface.N + Surface.V)));
+    float fd90 = 0.5 + 2.0 * Surface.roughness * LdotH * LdotH;
+    float3 DiffuseBurley = Surface.c_diff * Fresnel_Shlick(1, fd90, Surface.NdotV);
+    return DiffuseBurley * irradianceIBLTexture.SampleLevel(defaultSampler, Surface.N, 0);
+}
+
+// Approximate specular IBL by sampling lower mips according to roughness.  Then modulate by Fresnel. 
+float3 Specular_IBL(SurfaceProperties Surface)
+{
+    float lod = Surface.roughness * IBLRange + IBLBias;
+    float3 specular = Fresnel_Shlick(Surface.c_spec, 1, Surface.NdotV);
+    return specular * radianceIBLTexture.SampleLevel(cubeMapSampler, reflect(-Surface.V, Surface.N), lod);
+}
 
 float GetDirectionalShadow( float3 ShadowCoord, Texture2D<float> texShadow )
 {
@@ -449,15 +456,17 @@ float GetShadowConeLight(uint lightIndex, float3 shadowCoord)
 #define _RootSig \
     "RootFlags(0), " \
     "CBV(b0), " \
-    "DescriptorTable(SRV(t0, numDescriptors = 10))," \
+    "DescriptorTable(SRV(t0, numDescriptors = 4))," \
+    "DescriptorTable(SRV(t4, numDescriptors = 8))," \
     "DescriptorTable(UAV(u0, numDescriptors = 1))," \
-    "StaticSampler(s0," \
+    "StaticSampler(s0, maxAnisotropy = 8)," \
+    "StaticSampler(s1," \
         "addressU = TEXTURE_ADDRESS_CLAMP," \
         "addressV = TEXTURE_ADDRESS_CLAMP," \
         "addressW = TEXTURE_ADDRESS_CLAMP," \
         "comparisonFunc = COMPARISON_GREATER_EQUAL," \
         "filter = FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT)," \
-    "StaticSampler(s1, maxAnisotropy = 8)"
+    "StaticSampler(s2, maxAnisotropy = 8)"
 
 [RootSignature(_RootSig)]
 [numthreads(8, 8, 1)]
@@ -473,7 +482,7 @@ void main(
         float3 posW = gBufferA[DTid].xyz;
         float3 normal = gBufferB[DTid].xyz;
         float3 baseColor = gBufferC[DTid].xyz;
-        float3 metallicRoughnessOcclusion = gBufferC[DTid].xyz;
+        float3 metallicRoughnessOcclusion = gBufferD[DTid].xyz;
 
         SurfaceProperties Surface;
         Surface.N = normal;
@@ -490,14 +499,10 @@ void main(
         float sunShadow = GetDirectionalShadow(shadowCoord.xyz, texShadow);
         colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunColor);
         
-        // float ssao = texSSAO[DTid];
-        //
-        // Surface.c_diff *= ssao;
-        // Surface.c_spec *= ssao;
-
+        float ssao = texSSAO[DTid];
         // Add IBL
-        // colorAccum.rgb += Diffuse_IBL(Surface);
-        // colorAccum.rgb += Specular_IBL(Surface);
+        colorAccum.rgb += Diffuse_IBL(Surface) * ssao;
+        colorAccum.rgb += Specular_IBL(Surface) * ssao;
         
         sceneColor[DTid] = colorAccum;
     }

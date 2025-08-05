@@ -45,6 +45,9 @@ namespace Renderer
     extern DescriptorHeap s_SamplerHeap;
     extern DescriptorHandle m_CommonTextures;
 
+	extern float s_SpecularIBLRange;
+	extern float s_SpecularIBLBias;
+
     enum RootBindings
     {
         kMeshConstants,
