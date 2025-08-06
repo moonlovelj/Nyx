@@ -47,9 +47,9 @@ TextureCube<float3> irradianceIBLTexture    : register(t5);
 Texture2D<float> texSSAO : register(t6);
 Texture2D<float> texShadow : register(t7);
 StructuredBuffer<LightData> lightBuffer : register(t8);
-ByteAddressBuffer lightGrid : register(t9);
-ByteAddressBuffer lightGridBitMask : register(t10);
-Texture2DArray<float> lightShadowArrayTex : register(t11);
+Texture2DArray<float> lightShadowArrayTex : register(t9);
+ByteAddressBuffer lightGrid : register(t10);
+ByteAddressBuffer lightGridBitMask : register(t11);
 
 SamplerState defaultSampler : register(s0);
 SamplerComparisonState shadowSampler : register(s1);
@@ -223,28 +223,29 @@ float GetShadowConeLight(uint lightIndex, float3 shadowCoord)
     return result * result;
 }
 
-// float3 ApplyLightCommon(
-//     float3	diffuseColor,	// Diffuse albedo
-//     float3	specularColor,	// Specular albedo
-//     float	specularMask,	// Where is it shiny or dingy?
-//     float	gloss,			// Specular power
-//     float3	normal,			// World-space normal
-//     float3	viewDir,		// World-space vector from eye to point
-//     float3	lightDir,		// World-space vector from point to light
-//     float3	lightColor		// Radiance of directional light
-//     )
-// {
-//     float3 halfVec = normalize(lightDir - viewDir);
-//     float nDotH = saturate(dot(halfVec, normal));
-//
-//     FSchlick( diffuseColor, specularColor, lightDir, halfVec );
-//
-//     float specularFactor = specularMask * pow(nDotH, gloss) * (gloss + 2) / 8;
-//
-//     float nDotL = saturate(dot(normal, lightDir));
-//
-//     return nDotL * lightColor * (diffuseColor + specularFactor * specularColor);
-// }
+float3 ApplyLightCommon(
+    SurfaceProperties Surface, 
+    float3	L,		// World-space vector from point to light
+    float3	c_light		// Radiance of directional light
+    )
+{
+    LightProperties Light;
+    Light.L = L;
+
+    // Half vector
+    float3 H = normalize(L + Surface.V);
+
+    // Pre-compute dot products
+    Light.NdotL = saturate(dot(Surface.N, L));
+    Light.LdotH = saturate(dot(L, H));
+    Light.NdotH = saturate(dot(Surface.N, H));
+
+    // Diffuse & specular factors
+    float3 diffuse = Diffuse_Burley(Surface, Light);
+    float3 specular = Specular_BRDF(Surface, Light);
+
+    return Light.NdotL * c_light * (diffuse + specular);
+}
 
 // float3 ApplyDirectionalLight(
 //     float3	diffuseColor,	// Diffuse albedo
@@ -273,185 +274,146 @@ float GetShadowConeLight(uint lightIndex, float3 shadowCoord)
 //         );
 // }
 
-// float3 ApplyPointLight(
-//     float3	diffuseColor,	// Diffuse albedo
-//     float3	specularColor,	// Specular albedo
-//     float	specularMask,	// Where is it shiny or dingy?
-//     float	gloss,			// Specular power
-//     float3	normal,			// World-space normal
-//     float3	viewDir,		// World-space vector from eye to point
-//     float3	worldPos,		// World-space fragment position
-//     float3	lightPos,		// World-space light position
-//     float	lightRadiusSq,
-//     float3	lightColor		// Radiance of directional light
-//     )
-// {
-//     float3 lightDir = lightPos - worldPos;
-//     float lightDistSq = dot(lightDir, lightDir);
-//     float invLightDist = rsqrt(lightDistSq);
-//     lightDir *= invLightDist;
-//
-//     // modify 1/d^2 * R^2 to fall off at a fixed radius
-//     // (R/d)^2 - d/R = [(1/d^2) - (1/R^2)*(d/R)] * R^2
-//     float distanceFalloff = lightRadiusSq * (invLightDist * invLightDist);
-//     distanceFalloff = max(0, distanceFalloff - rsqrt(distanceFalloff));
-//
-//     return distanceFalloff * ApplyLightCommon(
-//         diffuseColor,
-//         specularColor,
-//         specularMask,
-//         gloss,
-//         normal,
-//         viewDir,
-//         lightDir,
-//         lightColor
-//         );
-// }
-//
-// float3 ApplyConeLight(
-//     float3	diffuseColor,	// Diffuse albedo
-//     float3	specularColor,	// Specular albedo
-//     float	specularMask,	// Where is it shiny or dingy?
-//     float	gloss,			// Specular power
-//     float3	normal,			// World-space normal
-//     float3	viewDir,		// World-space vector from eye to point
-//     float3	worldPos,		// World-space fragment position
-//     float3	lightPos,		// World-space light position
-//     float	lightRadiusSq,
-//     float3	lightColor,		// Radiance of directional light
-//     float3	coneDir,
-//     float2	coneAngles
-//     )
-// {
-//     float3 lightDir = lightPos - worldPos;
-//     float lightDistSq = dot(lightDir, lightDir);
-//     float invLightDist = rsqrt(lightDistSq);
-//     lightDir *= invLightDist;
-//
-//     // modify 1/d^2 * R^2 to fall off at a fixed radius
-//     // (R/d)^2 - d/R = [(1/d^2) - (1/R^2)*(d/R)] * R^2
-//     float distanceFalloff = lightRadiusSq * (invLightDist * invLightDist);
-//     distanceFalloff = max(0, distanceFalloff - rsqrt(distanceFalloff));
-//
-//     float coneFalloff = dot(-lightDir, coneDir);
-//     coneFalloff = saturate((coneFalloff - coneAngles.y) * coneAngles.x);
-//
-//     return (coneFalloff * distanceFalloff) * ApplyLightCommon(
-//         diffuseColor,
-//         specularColor,
-//         specularMask,
-//         gloss,
-//         normal,
-//         viewDir,
-//         lightDir,
-//         lightColor
-//         );
-// }
-//
-// float3 ApplyConeShadowedLight(
-//     float3	diffuseColor,	// Diffuse albedo
-//     float3	specularColor,	// Specular albedo
-//     float	specularMask,	// Where is it shiny or dingy?
-//     float	gloss,			// Specular power
-//     float3	normal,			// World-space normal
-//     float3	viewDir,		// World-space vector from eye to point
-//     float3	worldPos,		// World-space fragment position
-//     float3	lightPos,		// World-space light position
-//     float	lightRadiusSq,
-//     float3	lightColor,		// Radiance of directional light
-//     float3	coneDir,
-//     float2	coneAngles,
-//     float4x4 shadowTextureMatrix,
-//     uint	lightIndex
-//     )
-// {
-//     float4 shadowCoord = mul(shadowTextureMatrix, float4(worldPos, 1.0));
-//     shadowCoord.xyz *= rcp(shadowCoord.w);
-//     float shadow = GetShadowConeLight(lightIndex, shadowCoord.xyz);
-//
-//     return shadow * ApplyConeLight(
-//         diffuseColor,
-//         specularColor,
-//         specularMask,
-//         gloss,
-//         normal,
-//         viewDir,
-//         worldPos,
-//         lightPos,
-//         lightRadiusSq,
-//         lightColor,
-//         coneDir,
-//         coneAngles
-//         );
-// }
+float3 ApplyPointLight(
+    SurfaceProperties Surface,
+    float3	worldPos,		// World-space fragment position
+    float3	lightPos,		// World-space light position
+    float	lightRadiusSq,
+    float3	lightColor		// Radiance of directional light
+    )
+{
+    float3 lightDir = lightPos - worldPos;
+    float lightDistSq = dot(lightDir, lightDir);
+    float invLightDist = rsqrt(lightDistSq);
+    lightDir *= invLightDist;
 
-// void ShadeLights(inout float3 colorSum, uint2 pixelPos,
-//     float3	diffuseAlbedo,	// Diffuse albedo
-//     float3	specularAlbedo,	// Specular albedo
-//     float	specularMask,	// Where is it shiny or dingy?
-//     float gloss,
-//     float3 normal,
-//     float3 viewDir,
-//     float3 worldPos
-//     )
-// {
-//     uint2 tilePos = GetTilePos(pixelPos, InvTileDim.xy);
-//     uint tileIndex = GetTileIndex(tilePos, TileCount.x);
-//     uint tileOffset = GetTileOffset(tileIndex);
-//     uint tileLightCount = lightGrid.Load(tileOffset + 0);
-//     uint tileLightCountSphere = (tileLightCount >> 0) & 0xff;
-//     uint tileLightCountCone = (tileLightCount >> 8) & 0xff;
-//     uint tileLightCountConeShadowed = (tileLightCount >> 16) & 0xff;
-//
-//     uint tileLightLoadOffset = tileOffset + 4;
-//
-// #define POINT_LIGHT_ARGS \
-//     diffuseAlbedo, \
-//     specularAlbedo, \
-//     specularMask, \
-//     gloss, \
-//     normal, \
-//     viewDir, \
-//     worldPos, \
-//     lightData.pos, \
-//     lightData.radiusSq, \
-//     lightData.color
-//
-// #define CONE_LIGHT_ARGS \
-//     POINT_LIGHT_ARGS, \
-//     lightData.coneDir, \
-//     lightData.coneAngles
-//
-// #define SHADOWED_LIGHT_ARGS \
-//     CONE_LIGHT_ARGS, \
-//     lightData.shadowTextureMatrix, \
-//     lightIndex
-//         
-//     // sphere
-//     uint n;
-//     for (n = 0; n < tileLightCountSphere; n++, tileLightLoadOffset += 4)
-//     {
-//         uint lightIndex = lightGrid.Load(tileLightLoadOffset);
-//         LightData lightData = lightBuffer[lightIndex];
-//         colorSum += ApplyPointLight(POINT_LIGHT_ARGS);
-//     }
-//
-//     // cone
-//     for (n = 0; n < tileLightCountCone; n++, tileLightLoadOffset += 4)
-//     {
-//         uint lightIndex = lightGrid.Load(tileLightLoadOffset);
-//         LightData lightData = lightBuffer[lightIndex];
-//         colorSum += ApplyConeLight(CONE_LIGHT_ARGS);
-//     }
-//
-//     // cone w/ shadow map
-//     for (n = 0; n < tileLightCountConeShadowed; n++, tileLightLoadOffset += 4)
-//     {
-//         uint lightIndex = lightGrid.Load(tileLightLoadOffset);
-//         LightData lightData = lightBuffer[lightIndex];
-//         colorSum += ApplyConeShadowedLight(SHADOWED_LIGHT_ARGS);
-//     }
-// }
+    // modify 1/d^2 * R^2 to fall off at a fixed radius
+    // (R/d)^2 - d/R = [(1/d^2) - (1/R^2)*(d/R)] * R^2
+    float distanceFalloff = lightRadiusSq * (invLightDist * invLightDist);
+    distanceFalloff = max(0, distanceFalloff - rsqrt(distanceFalloff));
+
+    return distanceFalloff * ApplyLightCommon(
+        Surface,
+        lightDir,
+        lightColor
+        );
+}
+
+float3 ApplyConeLight(
+    SurfaceProperties Surface,
+    float3	worldPos,		// World-space fragment position
+    float3	lightPos,		// World-space light position
+    float	lightRadiusSq,
+    float3	lightColor,		// Radiance of directional light
+    float3	coneDir,
+    float2	coneAngles
+    )
+{
+    float3 lightDir = lightPos - worldPos;
+    float lightDistSq = dot(lightDir, lightDir);
+    float invLightDist = rsqrt(lightDistSq);
+    lightDir *= invLightDist;
+
+    // modify 1/d^2 * R^2 to fall off at a fixed radius
+    // (R/d)^2 - d/R = [(1/d^2) - (1/R^2)*(d/R)] * R^2
+    float distanceFalloff = lightRadiusSq * (invLightDist * invLightDist);
+    distanceFalloff = max(0, distanceFalloff - rsqrt(distanceFalloff));
+
+    float coneFalloff = dot(-lightDir, coneDir);
+    coneFalloff = saturate((coneFalloff - coneAngles.y) * coneAngles.x);
+
+    return (coneFalloff * distanceFalloff) * ApplyLightCommon(
+        Surface,
+        lightDir,
+        lightColor
+        );
+}
+
+float3 ApplyConeShadowedLight(
+    SurfaceProperties Surface,
+    float3	worldPos,		// World-space fragment position
+    float3	lightPos,		// World-space light position
+    float	lightRadiusSq,
+    float3	lightColor,		// Radiance of directional light
+    float3	coneDir,
+    float2	coneAngles,
+    float4x4 shadowTextureMatrix,
+    uint	lightIndex
+    )
+{
+    float4 shadowCoord = mul(shadowTextureMatrix, float4(worldPos, 1.0));
+    shadowCoord.xyz *= rcp(shadowCoord.w);
+    float shadow = GetShadowConeLight(lightIndex, shadowCoord.xyz);
+
+    return shadow * ApplyConeLight(
+        Surface,
+        worldPos,
+        lightPos,
+        lightRadiusSq,
+        lightColor,
+        coneDir,
+        coneAngles
+        );
+}
+
+void ShadeLights(inout float3 colorSum, 
+    SurfaceProperties Surface,
+    uint2 pixelPos,
+    float3 worldPos
+    )
+{
+    uint2 tilePos = GetTilePos(pixelPos, InvTileDim.xy);
+    uint tileIndex = GetTileIndex(tilePos, TileCount.x);
+    uint tileOffset = GetTileOffset(tileIndex);
+    uint tileLightCount = lightGrid.Load(tileOffset + 0);
+    uint tileLightCountSphere = (tileLightCount >> 0) & 0xff;
+    uint tileLightCountCone = (tileLightCount >> 8) & 0xff;
+    uint tileLightCountConeShadowed = (tileLightCount >> 16) & 0xff;
+
+    uint tileLightLoadOffset = tileOffset + 4;
+
+#define POINT_LIGHT_ARGS \
+    Surface, \
+    worldPos, \
+    lightData.pos, \
+    lightData.radiusSq, \
+    lightData.color
+
+#define CONE_LIGHT_ARGS \
+    POINT_LIGHT_ARGS, \
+    lightData.coneDir, \
+    lightData.coneAngles
+
+#define SHADOWED_LIGHT_ARGS \
+    CONE_LIGHT_ARGS, \
+    lightData.shadowTextureMatrix, \
+    lightIndex
+        
+    // sphere
+    uint n;
+    for (n = 0; n < tileLightCountSphere; n++, tileLightLoadOffset += 4)
+    {
+        uint lightIndex = lightGrid.Load(tileLightLoadOffset);
+        LightData lightData = lightBuffer[lightIndex];
+        colorSum += ApplyPointLight(POINT_LIGHT_ARGS);
+    }
+
+    // cone
+    for (n = 0; n < tileLightCountCone; n++, tileLightLoadOffset += 4)
+    {
+        uint lightIndex = lightGrid.Load(tileLightLoadOffset);
+        LightData lightData = lightBuffer[lightIndex];
+        colorSum += ApplyConeLight(CONE_LIGHT_ARGS);
+    }
+
+    // cone w/ shadow map
+    for (n = 0; n < tileLightCountConeShadowed; n++, tileLightLoadOffset += 4)
+    {
+        uint lightIndex = lightGrid.Load(tileLightLoadOffset);
+        LightData lightData = lightBuffer[lightIndex];
+        colorSum += ApplyConeShadowedLight(SHADOWED_LIGHT_ARGS);
+    }
+}
 
 #define _RootSig \
     "RootFlags(0), " \
@@ -498,6 +460,8 @@ void main(
         shadowCoord.xyz *= rcp(shadowCoord.w);
         float sunShadow = GetDirectionalShadow(shadowCoord.xyz, texShadow);
         colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunColor);
+
+        ShadeLights(colorAccum.rgb, Surface, DTid, posW);
         
         float ssao = texSSAO[DTid];
         // Add IBL

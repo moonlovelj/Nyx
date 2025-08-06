@@ -20,6 +20,7 @@
 #include "ShadowCamera.h"
 #include "Display.h"
 #include "LightManager.h"
+#include "SponzaRenderer.h"
 
 using namespace GameCore;
 using namespace Math;
@@ -174,6 +175,10 @@ void SceneViewer::Startup( void )
         m_CameraController.reset(new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector)));
     else
         m_CameraController.reset(new OrbitCamera(m_Camera, m_ModelInst.GetBoundingSphere(), Vector3(kYUnitVector)));
+
+    const Vector3 BoxCenter = m_ModelInst.GetBoundingBox().GetCenter();
+    const Vector3 BoxDimensions = m_ModelInst.GetBoundingBox().GetDimensions();
+    Lighting::CreateRandomLights(BoxCenter - BoxDimensions * 0.5f, BoxCenter + BoxDimensions * 0.5f);
 }
 
 void SceneViewer::Cleanup( void )
@@ -290,6 +295,8 @@ void SceneViewer::RenderScene( void )
 
         if (!SSAO::DebugDraw)
         {
+            Lighting::FillLightGrid(gfxContext, m_Camera);
+            
             ScopedTimer _outerprof(L"Main Render", gfxContext);
 
             {
