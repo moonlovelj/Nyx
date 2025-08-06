@@ -18,8 +18,10 @@
 #include "CommandContext.h"
 #include "Camera.h"
 #include "BufferManager.h"
+#include "Model.h"
 #include "Renderer.h"
 #include "TemporalEffects.h"
+#include "ConstantBuffers.h"
 
 #include "CompiledShaders/FillLightGridCS_8.h"
 #include "CompiledShaders/FillLightGridCS_16.h"
@@ -69,6 +71,7 @@ namespace Lighting
     ColorBuffer m_LightShadowArray;
     ShadowBuffer m_LightShadowTempBuffer;
     Matrix4 m_LightShadowMatrix[MaxLights];
+    Math::Camera m_LightCamera[MaxLights];
 
     RootSignature m_DeferredLightingRootSig;
     ComputePSO m_DeferredLightingPSO(L"Deferred Lighting PSO");
@@ -249,6 +252,7 @@ void Lighting::CreateRandomLights( const Vector3 minBound, const Vector3 maxBoun
         shadowCamera.SetEyeAtUp(pos, pos + coneDir, Vector3(0, 1, 0));
         shadowCamera.SetPerspectiveMatrix(coneOuter * 2, 1.0f, lightRadius * .05f, lightRadius * 1.0f);
         shadowCamera.Update();
+        m_LightCamera[n] = shadowCamera;
         m_LightShadowMatrix[n] = shadowCamera.GetViewProjMatrix();
         Matrix4 shadowTextureMatrix = Matrix4(AffineTransform(Matrix3::MakeScale( 0.5f, -0.5f, 1.0f ), Vector3(0.5f, 0.5f, 0.0f))) * m_LightShadowMatrix[n];
 
@@ -469,4 +473,32 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
     uint32_t groupCountY = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), 8);
 
     Context.Dispatch(groupCountX, groupCountY, 1);
+}
+
+void Lighting::RenderLightShadows(GraphicsContext& gfxContext, const ModelInstance& modelInstance, GlobalConstants& globals)
+{
+    using namespace Renderer;
+    ScopedTimer _prof(L"RenderLightShadows", gfxContext);
+
+    gfxContext.TransitionResource(m_LightShadowArray, D3D12_RESOURCE_STATE_COPY_DEST);
+
+    for (uint32_t LightIndex = 0; LightIndex < MaxLights; ++LightIndex)
+    {
+        if (m_LightData[LightIndex].type == 2)
+        {
+            std::wstring passName = L"LightIndex: " + std::to_wstring(LightIndex);
+            ScopedTimer _profShadow(passName, gfxContext);
+            MeshSorter shadowSorter(MeshSorter::kShadows);
+            shadowSorter.SetCamera(m_LightCamera[LightIndex]);
+            shadowSorter.SetDepthStencilTarget(m_LightShadowTempBuffer);
+            modelInstance.Render(shadowSorter);
+            shadowSorter.Sort();
+            shadowSorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);
+            
+            gfxContext.TransitionResource(m_LightShadowTempBuffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
+            gfxContext.CopySubresource(m_LightShadowArray, LightIndex, m_LightShadowTempBuffer, 0);
+        }
+    }
+
+    // gfxContext.TransitionResource(m_LightShadowArray, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 }

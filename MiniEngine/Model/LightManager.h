@@ -22,6 +22,8 @@ class ColorBuffer;
 class ShadowBuffer;
 class GraphicsContext;
 class IntVar;
+class ModelInstance;
+class GlobalConstants;
 namespace Math
 {
     class Vector3;
@@ -57,4 +59,6 @@ namespace Lighting
         const Math::Vector3& inSunDirection, 
         const Math::Vector3& inSunColor, 
         const Math::Matrix4& inSunShadowMatrix);
+
+    void RenderLightShadows(GraphicsContext& gfxContext, const ModelInstance& modelInstance, GlobalConstants& globals);
 }

@@ -312,6 +312,10 @@ void SceneViewer::RenderScene( void )
                 shadowSorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);
             }
 
+            {
+                Lighting::RenderLightShadows(gfxContext, m_ModelInst, globals);
+            }
+
             gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
             gfxContext.ClearColor(g_SceneColorBuffer);
             
