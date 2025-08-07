@@ -124,6 +124,12 @@ float G_Shlick_Smith_Hable(SurfaceProperties Surface, LightProperties Light)
     return 1.0 / lerp(Light.LdotH * Light.LdotH, 1, Surface.alphaSqr * 0.25);
 }
 
+float V_SmithGGXCorrelated(SurfaceProperties Surface, LightProperties Light) {
+    float GGXV = Light.NdotL * sqrt(Surface.NdotV * Surface.NdotV * (1.0 - Surface.alphaSqr) + Surface.alphaSqr);
+    float GGXL = Surface.NdotV * sqrt(Light.NdotL * Light.NdotL * (1.0 - Surface.alphaSqr) + Surface.alphaSqr);
+    return 0.5 / max(1e-6, (GGXV + GGXL));
+}
+
 
 // A microfacet based BRDF.
 // alpha:    This is roughness squared as in the Disney PBR model by Burley et al.
@@ -140,7 +146,8 @@ float3 Specular_BRDF(SurfaceProperties Surface, LightProperties Light)
 
     // Geometric Visibility term
     //float GV = G_Schlick_Smith(Surface, Light);
-    float GV = G_Shlick_Smith_Hable(Surface, Light);
+    // float GV = G_Shlick_Smith_Hable(Surface, Light);
+    float GV = V_SmithGGXCorrelated(Surface, Light);
 
     // Fresnel term
     float3 F = Fresnel_Shlick(Surface.c_spec, 1.0, Light.LdotH);
