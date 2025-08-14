@@ -59,6 +59,7 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="IBL.h" />
     <ClInclude Include="BitonicSort.h" />
     <ClInclude Include="BuddyAllocator.h" />
     <ClInclude Include="BufferManager.h" />
@@ -132,6 +133,7 @@
     <ClInclude Include="VectorMath.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="IBL.cpp" />
     <ClCompile Include="BitonicSort.cpp" />
     <ClCompile Include="BuddyAllocator.cpp" />
     <ClCompile Include="BufferManager.cpp" />
@@ -302,6 +304,9 @@
     <FxCompile Include="Shaders\GenerateMipsLinearOddCS.hlsl" />
     <FxCompile Include="Shaders\GenerateMipsLinearOddXCS.hlsl" />
     <FxCompile Include="Shaders\GenerateMipsLinearOddYCS.hlsl" />
+    <FxCompile Include="Shaders\IBLDiffuseLDMapCS.hlsl" />
+    <FxCompile Include="Shaders\IBLLutCS.hlsl" />
+    <FxCompile Include="Shaders\IBLSpecularLDMapCS.hlsl" />
     <FxCompile Include="Shaders\LanczosCS.hlsl" />
     <FxCompile Include="Shaders\LanczosFast16CS.hlsl" />
     <FxCompile Include="Shaders\LanczosFast24CS.hlsl" />
@@ -414,6 +419,7 @@
     <None Include="Shaders\FXAAPass2CS.hlsli" />
     <None Include="Shaders\FXAARootSignature.hlsli" />
     <None Include="Shaders\GenerateMipsCS.hlsli" />
+    <None Include="Shaders\IBLPrecomputeCommon.hlsli" />
     <None Include="Shaders\LanczosFunctions.hlsli" />
     <None Include="Shaders\MotionBlurRS.hlsli" />
     <None Include="Shaders\ParticleRS.hlsli" />

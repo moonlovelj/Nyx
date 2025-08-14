@@ -21,6 +21,7 @@
 #include "Display.h"
 #include "LightManager.h"
 #include "SponzaRenderer.h"
+#include "IBL.h"
 
 using namespace GameCore;
 using namespace Math;
@@ -55,7 +56,7 @@ private:
 
 CREATE_APPLICATION( SceneViewer )
 
-ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 4.0f, 0.0f, 16.0f, 0.1f);
+ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 4.0f, 0.0f, 120000.0f, 0.1f); // unit: lx
 NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0f, 0.1f );
 NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f );
 
@@ -65,6 +66,8 @@ void ChangeIBLBias(EngineVar::ActionType);
 DynamicEnumVar g_IBLSet("Viewer/Lighting/Environment", ChangeIBLSet);
 std::vector<std::pair<TextureRef, TextureRef>> g_IBLTextures;
 NumVar g_IBLBias("Viewer/Lighting/Gloss Reduction", 2.0f, 0.0f, 10.0f, 1.0f, ChangeIBLBias);
+
+std::vector<TextureRef> g_IBLHDRITextures;
 
 void ChangeIBLSet(EngineVar::ActionType)
 {
@@ -130,6 +133,35 @@ void LoadIBLTextures()
         g_IBLSet.Increment();
 }
 
+void LoadIBLHDRITextures()
+{
+    char CWD[256];
+    _getcwd(CWD, 256);
+
+    Utility::Printf("Loading IBL hdri environment maps\n");
+
+    WIN32_FIND_DATA ffd;
+    HANDLE hFind = FindFirstFile(L"Textures/HDRIs/*_bc6h.dds", &ffd);
+
+    if (hFind != INVALID_HANDLE_VALUE) do
+    {
+        if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            continue;
+
+        std::wstring baseFile = ffd.cFileName;
+        TextureRef hdriTex = TextureManager::LoadDDSFromFile(L"Textures/HDRIs/" + baseFile);
+        if (hdriTex.IsValid())
+        {
+            g_IBLHDRITextures.push_back(hdriTex);
+        }
+    }
+    while (FindNextFile(hFind, &ffd) != 0);
+
+    FindClose(hFind);
+
+    Utility::Printf("Found %u IBL hdri environment map \n", g_IBLHDRITextures.size());
+}
+
 void SceneViewer::Startup( void )
 {
     // Setup your data
@@ -140,10 +172,23 @@ void SceneViewer::Startup( void )
     // PostEffects::EnableHDR = true;
     // PostEffects::EnableAdaptation = true;
     // SSAO::Enable = true;
+
+    PostEffects::BloomEnable = false;
     
     Renderer::Initialize();
 
     LoadIBLTextures();
+    
+    LoadIBLHDRITextures();
+
+    if (g_IBLHDRITextures.size() > 0)
+    {
+        IBL::InitializeResources(g_IBLHDRITextures[0], Renderer::s_TextureHeap);
+    }
+    else
+    {
+        IBL::InitializeResources(nullptr, Renderer::s_TextureHeap);
+    }
 
     std::wstring gltfFileName;
 
@@ -188,7 +233,11 @@ void SceneViewer::Cleanup( void )
 
     g_IBLTextures.clear();
 
+    g_IBLHDRITextures.clear();
+
     Renderer::Shutdown();
+    Lighting::Shutdown();
+    IBL::Shutdown();
 }
 
 namespace Graphics
@@ -252,6 +301,8 @@ void SceneViewer::RenderScene( void )
     // Rendering something
     if (!m_ModelInst.IsNull())
     {
+        IBL::Precompute(gfxContext);
+        
          // Update global constants
         float costheta = cosf(g_SunOrientation);
         float sintheta = sinf(g_SunOrientation);

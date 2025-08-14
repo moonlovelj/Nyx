@@ -27,6 +27,9 @@ namespace Graphics
     extern ColorBuffer g_GBufferB;          // R16G16B16A16_FLOAT
     extern ColorBuffer g_GBufferC;          // R16G16B16A16_FLOAT
     extern ColorBuffer g_GBufferD;          // R16G16B16A16_FLOAT
+    extern ColorBuffer g_IBLDiffuseLDMap;   // R16G16B16A16_FLOAT
+    extern ColorBuffer g_IBLSpecularLDMap;  // R16G16B16A16_FLOAT
+    extern ColorBuffer g_IBLLut;            // R16G16B16A16_FLOAT
     extern ColorBuffer g_SceneNormalBuffer; // R16G16B16A16_FLOAT
     extern ColorBuffer g_PostEffectsBuffer; // R32_UINT (to support Read-Modify-Write with a UAV)
     extern ColorBuffer g_OverlayBuffer;     // R8G8B8A8_UNORM

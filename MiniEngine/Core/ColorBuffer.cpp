@@ -19,9 +19,9 @@
 
 using namespace Graphics;
 
-void ColorBuffer::CreateDerivedViews(ID3D12Device* Device, DXGI_FORMAT Format, uint32_t ArraySize, uint32_t NumMips)
+void ColorBuffer::CreateDerivedViews(ID3D12Device* Device, DXGI_FORMAT Format, uint32_t ArraySize, uint32_t NumMips, bool isCubeMap)
 {
-    ASSERT(ArraySize == 1 || NumMips == 1, "We don't support auto-mips on texture arrays");
+    //ASSERT(ArraySize == 1 || NumMips == 1, "We don't support auto-mips on texture arrays");
 
     m_NumMipMaps = NumMips - 1;
 
@@ -46,7 +46,7 @@ void ColorBuffer::CreateDerivedViews(ID3D12Device* Device, DXGI_FORMAT Format, u
         UAVDesc.Texture2DArray.FirstArraySlice = 0;
         UAVDesc.Texture2DArray.ArraySize = (UINT)ArraySize;
 
-        SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+        SRVDesc.ViewDimension = isCubeMap ? D3D12_SRV_DIMENSION_TEXTURECUBE : D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
         SRVDesc.Texture2DArray.MipLevels = NumMips;
         SRVDesc.Texture2DArray.MostDetailedMip = 0;
         SRVDesc.Texture2DArray.FirstArraySlice = 0;
@@ -159,6 +159,31 @@ void ColorBuffer::CreateArray( const std::wstring& Name, uint32_t Width, uint32_
 {
     CreateArray(Name, Width, Height, ArrayCount, Format);
 }
+
+void ColorBuffer::CreateCube(const std::wstring& Name, uint32_t Width, uint32_t Height, uint32_t NumMips,
+    DXGI_FORMAT Format, D3D12_GPU_VIRTUAL_ADDRESS VidMemPtr)
+{
+    NumMips = (NumMips == 0 ? ComputeNumMips(Width, Height) : NumMips);
+    D3D12_RESOURCE_FLAGS Flags = CombineResourceFlags();
+    D3D12_RESOURCE_DESC ResourceDesc = DescribeTex2D(Width, Height, 6, NumMips, Format, Flags);
+
+    D3D12_CLEAR_VALUE ClearValue = {};
+    ClearValue.Format = Format;
+    ClearValue.Color[0] = m_ClearColor.R();
+    ClearValue.Color[1] = m_ClearColor.G();
+    ClearValue.Color[2] = m_ClearColor.B();
+    ClearValue.Color[3] = m_ClearColor.A();
+
+    CreateTextureResource(Graphics::g_Device, Name, ResourceDesc, ClearValue, VidMemPtr);
+    CreateDerivedViews(Graphics::g_Device, Format, 6, NumMips, true);
+}
+
+void ColorBuffer::CreateCube(const std::wstring& Name, uint32_t Width, uint32_t Height, uint32_t NumMips,
+    DXGI_FORMAT Format, EsramAllocator& Allocator)
+{
+    CreateCube(Name, Width, Height, NumMips, Format);
+}
+
 
 void ColorBuffer::GenerateMipMaps(CommandContext& BaseContext)
 {

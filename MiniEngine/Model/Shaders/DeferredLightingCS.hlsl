@@ -7,6 +7,7 @@
 #define FLT_MIN         1.175494351e-38F        // min positive value
 #define FLT_MAX         3.402823466e+38F        // max value
 #define PI				3.1415926535f
+#define INV_PI          0.31830988618f
 #define TWOPI			6.283185307f
 
 // Numeric constants
@@ -33,6 +34,8 @@ cbuffer CSConstants : register(b0)
 
     float IBLRange;
     float IBLBias;
+    float IBLLutTextureSize;
+    uint IBLSpecularLDMapMipCount;
 
 };
 
@@ -50,6 +53,10 @@ StructuredBuffer<LightData> lightBuffer : register(t8);
 Texture2DArray<float> lightShadowArrayTex : register(t9);
 ByteAddressBuffer lightGrid : register(t10);
 ByteAddressBuffer lightGridBitMask : register(t11);
+
+TextureCube<float4> IBLDiffuseLDMap : register(t12);
+TextureCube<float4> IBLSpecularLDMap : register(t13);
+Texture2D<float4> IBLLut : register(t14);
 
 SamplerState defaultSampler : register(s0);
 SamplerComparisonState shadowSampler : register(s1);
@@ -102,7 +109,7 @@ float Fresnel_Shlick(float F0, float F90, float cosine)
 float3 Diffuse_Burley(SurfaceProperties Surface, LightProperties Light)
 {
     float fd90 = 0.5 + 2.0 * Surface.roughness * Light.LdotH * Light.LdotH;
-    return Surface.c_diff * Fresnel_Shlick(1, fd90, Light.NdotL).x * Fresnel_Shlick(1, fd90, Surface.NdotV).x;
+    return Surface.c_diff * INV_PI * Fresnel_Shlick(1, fd90, Light.NdotL).x * Fresnel_Shlick(1, fd90, Surface.NdotV).x;
 }
 
 // GGX specular D (normal distribution)
@@ -124,7 +131,17 @@ float G_Shlick_Smith_Hable(SurfaceProperties Surface, LightProperties Light)
     return 1.0 / lerp(Light.LdotH * Light.LdotH, 1, Surface.alphaSqr * 0.25);
 }
 
-float V_SmithGGXCorrelated(SurfaceProperties Surface, LightProperties Light) {
+float G_SmithGGXCorrelated(SurfaceProperties Surface, LightProperties Light)
+{
+    float NdotL2 = Light.NdotL * Light.NdotL;
+    float NdotV2 = Surface.NdotV * Surface.NdotV;
+    float lambda_l = (-1 + sqrt(Surface.alphaSqr * (1 - NdotL2) / max(1e-6, NdotL2) + 1)) * 0.5f;
+    float lambda_v = ( -1 + sqrt (Surface.alphaSqr * (1 - NdotV2 ) / max(1e-6, NdotV2) + 1) ) * 0.5f;
+	return  1.0 / max(1.0 + lambda_v + lambda_l, 1e-6);
+}
+
+float V_SmithGGXCorrelated(SurfaceProperties Surface, LightProperties Light)
+{
     float GGXV = Light.NdotL * sqrt(Surface.NdotV * Surface.NdotV * (1.0 - Surface.alphaSqr) + Surface.alphaSqr);
     float GGXL = Surface.NdotV * sqrt(Light.NdotL * Light.NdotL * (1.0 - Surface.alphaSqr) + Surface.alphaSqr);
     return 0.5 / max(1e-6, (GGXV + GGXL));
@@ -197,6 +214,82 @@ float3 Specular_IBL(SurfaceProperties Surface)
     float3 specular = Fresnel_Shlick(Surface.c_spec, 1, Surface.NdotV);
     return specular * radianceIBLTexture.SampleLevel(cubeMapSampler, reflect(-Surface.V, Surface.N), lod);
 }
+
+// diffuse retro-reflection Disney lobe
+float3 getDiffuseDominantDir(float3 N, float3 V, float NdotV, float roughness)
+{
+    // 计算两个系数 a 和 b。
+    // 这两个看起来很随意的“魔法数字”（1.02341, -1.51174, ...）
+    // 表明这是一个经验公式。它们很可能是通过离线拟合一个更精确的物理模型
+    // （比如Oren-Nayar）的结果而得到的。
+    // 目标是用最简单的线性函数来近似一个复杂的物理行为。
+    float a = 1.02341f * roughness - 1.51174f;
+    float b = -0.511705f * roughness + 0.755868f;
+
+    // 计算核心的插值因子 lerpFactor
+    // - (NdotV * a + b): 这是一个依赖于视角和粗糙度的基础因子。
+    // - * roughness: 再次乘以粗糙度，确保当 roughness 为 0 时，整个 lerpFactor 为 0。
+    // - saturate(...): 保证因子在 [0, 1] 范围内，这是lerp函数所必需的。
+    float lerpFactor = saturate((NdotV * a + b) * roughness);
+
+    //【关键步骤】返回 N 和 V 之间的线性插值结果。
+    // 这个结果就是我们最终用来采样辐照度图的“主导漫反射方向”。
+    return lerp(N, V, lerpFactor);
+}
+
+float3 EvaluateIBLDiffuse(SurfaceProperties Surface)
+{
+    float3 dominantN = getDiffuseDominantDir(Surface.N, Surface.V, Surface.NdotV, Surface.roughness);
+    float3 diffuseLighting = IBLDiffuseLDMap.SampleLevel(cubeMapSampler, dominantN, 0);
+
+    float diffF = IBLLut.SampleLevel(defaultSampler, float2(Surface.NdotV, Surface.roughness), 0).z;
+
+    return Surface.c_diff * diffuseLighting * diffF;
+
+    //return Surface.c_diff * IBLIrradianceMap.SampleLevel(cubeMapSampler, Surface.N, 0);
+}
+
+// We have a better approximation of the off-specular peak,
+// but due to other approximations we found this one performs better.
+// N is the normal direction
+// R is the mirror vector
+// This approximation works fine for G Smith correlated and uncorrelated
+float3 getSpecularDominantDir(float3 N, float3 R, float roughness)
+{
+    float smoothness = saturate(1 - roughness);
+    float lerpFactor = smoothness * (sqrt(smoothness) + roughness);
+
+    // The result is not normalized as we fetch in a cubemap
+    return lerp(N, R, lerpFactor);
+}
+
+float3 EvaluateIBLSpecular(SurfaceProperties Surface)
+{
+    float3 R = reflect(-Surface.V, Surface.N);
+
+    float3 dominantR = getSpecularDominantDir(Surface.N, R, Surface.roughness);
+
+    // Rebuild the function
+    // L · D · (f0 · Gv · (1 - Fc) + Gv · Fc) · cosTheta / (4 · NdotL · NdotV)
+    float NdotV = max(Surface.NdotV, 0.5f / IBLLutTextureSize);
+
+    float mipLevel = Surface.roughness * (IBLSpecularLDMapMipCount-1.0);
+    float3 preLD = IBLSpecularLDMap.SampleLevel(cubeMapSampler, dominantR, mipLevel).rgb;
+
+    // Sample pre-integrated DFG
+    // Fc = (1 - H · L)^5
+    // PreIntegratedDFG.r = Gv · (1 - Fc)
+    // PreIntegratedDFG.g = Gv · Fc
+    float2 preDFG = IBLLut.SampleLevel(defaultSampler, float2(NdotV, Surface.roughness), 0).xy;
+
+    //return (Surface.c_spec * preDFG.x + 1 * preDFG.y);
+
+    //return preLD;
+    // LD · (f0 · Gv · (1 - Fc) + Gv · Fc · f90)
+    return preLD * (Surface.c_spec * preDFG.x + 1 * preDFG.y);
+}
+
+
 
 float GetDirectionalShadow( float3 ShadowCoord, Texture2D<float> texShadow )
 {
@@ -427,6 +520,7 @@ void ShadeLights(inout float3 colorSum,
     "CBV(b0), " \
     "DescriptorTable(SRV(t0, numDescriptors = 4))," \
     "DescriptorTable(SRV(t4, numDescriptors = 8))," \
+    "DescriptorTable(SRV(t12, numDescriptors = 3))," \
     "DescriptorTable(UAV(u0, numDescriptors = 1))," \
     "StaticSampler(s0, maxAnisotropy = 8)," \
     "StaticSampler(s1," \
@@ -472,8 +566,11 @@ void main(
         
         float ssao = texSSAO[DTid];
         // Add IBL
-        colorAccum.rgb += Diffuse_IBL(Surface) * ssao;
-        colorAccum.rgb += Specular_IBL(Surface) * ssao;
+        //colorAccum.rgb += Diffuse_IBL(Surface) * ssao;
+        colorAccum.rgb += EvaluateIBLDiffuse(Surface) * ssao;
+
+        //colorAccum.rgb += Specular_IBL(Surface) * ssao;
+        colorAccum.rgb += EvaluateIBLSpecular(Surface) * ssao;
         
         sceneColor[DTid] = colorAccum;
     }

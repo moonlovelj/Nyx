@@ -22,6 +22,7 @@
 #include "Renderer.h"
 #include "TemporalEffects.h"
 #include "ConstantBuffers.h"
+#include "IBL.h"
 
 #include "CompiledShaders/FillLightGridCS_8.h"
 #include "CompiledShaders/FillLightGridCS_16.h"
@@ -149,7 +150,7 @@ void Lighting::InitializeResources( void )
         g_Device->CopyDescriptors(1, &m_DeferredLightingUAVs, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     }
 
-    m_DeferredLightingRootSig.Reset(4, 3);
+    m_DeferredLightingRootSig.Reset(5, 3);
     SamplerDesc DefaultSamplerDesc;
     DefaultSamplerDesc.MaxAnisotropy = 8;
     SamplerDesc CubeMapSamplerDesc = DefaultSamplerDesc;
@@ -159,7 +160,8 @@ void Lighting::InitializeResources( void )
     m_DeferredLightingRootSig[0].InitAsConstantBuffer(0);
     m_DeferredLightingRootSig[1].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 4);
     m_DeferredLightingRootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 4, 8);
-    m_DeferredLightingRootSig[3].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1);
+    m_DeferredLightingRootSig[3].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 12, 3);
+    m_DeferredLightingRootSig[4].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1);
     m_DeferredLightingRootSig.Finalize(L"DeferredLightingRS");
     
 	m_DeferredLightingPSO.SetRootSignature(m_DeferredLightingRootSig);
@@ -414,12 +416,17 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
     Context.TransitionResource(m_LightGridBitMask, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     Context.TransitionResource(m_LightShadowArray, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
+    Context.TransitionResource(g_IBLDiffuseLDMap, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    Context.TransitionResource(g_IBLSpecularLDMap, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    Context.TransitionResource(g_IBLLut, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
     Context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
     Context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Renderer::s_TextureHeap.GetHeapPointer());
     Context.SetDescriptorTable(1, m_DeferredLightingTextures);
     Context.SetDescriptorTable(2, Renderer::m_CommonTextures);
-    Context.SetDescriptorTable(3, m_DeferredLightingUAVs);
+    Context.SetDescriptorTable(3, IBL::m_IBLLightingTextures);
+    Context.SetDescriptorTable(4, m_DeferredLightingUAVs);
 
     uint32_t tileCountX = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), LightGridDim);
     uint32_t tileCountY = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), LightGridDim);
@@ -444,6 +451,8 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
         
         float IBLRange;
         float IBLBias;
+        float IBLLutTextureSize;
+        uint32_t IBLSpecularLDMapMipCount;
     } csConstants;
     
     csConstants.SunDirection = inSunDirection;
@@ -466,6 +475,8 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
     csConstants.FrameIndexMod2 = TemporalEffects::GetFrameIndexMod2();
     csConstants.IBLRange = Renderer::s_SpecularIBLRange;
     csConstants.IBLBias = Renderer::s_SpecularIBLBias;
+    csConstants.IBLLutTextureSize = IBL::g_IBLLutSize;
+    csConstants.IBLSpecularLDMapMipCount = Math::Log2(IBL::g_IBLSpecularLDMapSize) + 1;
     
     Context.SetDynamicConstantBufferView(0, sizeof(CSConstants), &csConstants);
     
@@ -477,6 +488,7 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
 
 void Lighting::RenderLightShadows(GraphicsContext& gfxContext, const ModelInstance& modelInstance, GlobalConstants& globals)
 {
+    // TODO Local Light Shadow CPU消耗很大（DC很多）
     using namespace Renderer;
     ScopedTimer _prof(L"RenderLightShadows", gfxContext);
 

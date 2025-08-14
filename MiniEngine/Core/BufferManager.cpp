@@ -17,6 +17,7 @@
 #include "CommandContext.h"
 #include "EsramAllocator.h"
 #include "TemporalEffects.h"
+#include "IBL.h"
 
 namespace Graphics
 {
@@ -27,6 +28,9 @@ namespace Graphics
     ColorBuffer g_GBufferB;
     ColorBuffer g_GBufferC;
     ColorBuffer g_GBufferD;
+    ColorBuffer g_IBLDiffuseLDMap;
+    ColorBuffer g_IBLSpecularLDMap;
+    ColorBuffer g_IBLLut;
     ColorBuffer g_PostEffectsBuffer;
     ColorBuffer g_VelocityBuffer;
     ColorBuffer g_OverlayBuffer;
@@ -120,6 +124,9 @@ void Graphics::InitializeRenderingBuffers( uint32_t bufferWidth, uint32_t buffer
         g_GBufferB.Create( L"GBufferB", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, esram );
         g_GBufferC.Create( L"GBufferC", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, esram );
         g_GBufferD.Create( L"GBufferD", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, esram );
+        g_IBLDiffuseLDMap.CreateCube( L"IBLDiffuseLDMap", IBL::g_IBLDiffuseLDMapSize, IBL::g_IBLDiffuseLDMapSize, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, esram );
+        g_IBLSpecularLDMap.CreateCube(L"IBLSpecularLDMap", IBL::g_IBLSpecularLDMapSize, IBL::g_IBLSpecularLDMapSize, 0, DXGI_FORMAT_R16G16B16A16_FLOAT, esram);
+		g_IBLLut.Create(L"IBL Lut", IBL::g_IBLLutSize, IBL::g_IBLLutSize, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
         g_VelocityBuffer.Create( L"Motion Vectors", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R32_UINT );
         g_PostEffectsBuffer.Create( L"Post Effects Buffer", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R32_UINT );
 
@@ -258,6 +265,9 @@ void Graphics::DestroyRenderingBuffers()
     g_GBufferB.Destroy();
     g_GBufferC.Destroy();
     g_GBufferD.Destroy();
+    g_IBLDiffuseLDMap.Destroy();
+    g_IBLSpecularLDMap.Destroy();
+    g_IBLLut.Destroy();
     g_VelocityBuffer.Destroy();
     g_OverlayBuffer.Destroy();
     g_HorizontalBuffer.Destroy();
