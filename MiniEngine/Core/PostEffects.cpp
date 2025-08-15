@@ -75,7 +75,7 @@ namespace Graphics
 namespace PostEffects
 {
     const float kInitialMinLog = -12.0f;
-    const float kInitialMaxLog = 4.0f;
+    const float kInitialMaxLog = 14.0f;
 
     BoolVar EnableHDR("Graphics/HDR/Enable", true);
     BoolVar EnableAdaptation("Graphics/HDR/Adaptive Exposure", true);

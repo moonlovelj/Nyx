@@ -56,7 +56,7 @@ private:
 
 CREATE_APPLICATION( SceneViewer )
 
-ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 4.0f, 0.0f, 120000.0f, 0.1f); // unit: lx
+ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 10.0f, 0.0f, 200.0f, 0.1f); // unit: lx
 NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0f, 0.1f );
 NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f );
 
@@ -168,12 +168,11 @@ void SceneViewer::Startup( void )
 
     // MotionBlur::Enable = true;
     // TemporalEffects::EnableTAA = true;
-    // FXAA::Enable = false;
-    // PostEffects::EnableHDR = true;
+	FXAA::Enable = false;
+	// PostEffects::EnableHDR = true;
     // PostEffects::EnableAdaptation = true;
     // SSAO::Enable = true;
-
-    PostEffects::BloomEnable = false;
+    // PostEffects::BloomEnable = false;
     
     Renderer::Initialize();
 

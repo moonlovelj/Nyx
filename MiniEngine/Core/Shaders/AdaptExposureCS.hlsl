@@ -32,6 +32,31 @@ cbuffer cb0 : register(b1)
 
 groupshared float gs_Accum[256];
 
+float ComputeEV100FromAvgLuminance(float avgLuminance)
+{
+    // We later use the middle gray at 12.7% in order to have
+    // a middle gray at 18% with a sqrt(2) room for specular highlights
+    // But here we deal with the spot meter measuring the middle gray
+    // which is fixed at 12.5 for matching standard camera
+    // constructor settings (i.e. calibration constant K = 12.5)
+    // Reference: http://en.wikipedia.org/wiki/Film_speed
+    return log2(avgLuminance * 100.0f / 12.5f);
+}
+
+float ConvertEV100ToExposure(float EV100)
+{
+    // Compute the maximum luminance possible with H_sbs sensitivity
+    // maxLum = 78 / (S * q) * N^2 / t
+    //         = 78 / (S * q) * 2^EV100
+    //         = 78 / (100 * 0.65) * 2^EV100
+    //         = 1.2 * 2^EV100
+    // Reference: http://en.wikipedia.org/wiki/Film_speed
+    float maxLuminance = 1.2f * pow(2.0f, EV100);
+
+    return 1.0 / maxLuminance;
+}
+
+
 [RootSignature(PostEffects_RootSig)]
 [numthreads( 256, 1, 1 )]
 void main( uint GI : SV_GroupIndex )
@@ -60,7 +85,13 @@ void main( uint GI : SV_GroupIndex )
     // minus those pixels which provided no weight (i.e. black pixels.)
     float weightedHistAvg = WeightedSum / (max(1, PixelCount - Histogram.Load(0))) - 1.0;
     float logAvgLuminance = exp2(weightedHistAvg / 254.0 * LogRange + MinLog);
-    float targetExposure = TargetLuminance / logAvgLuminance;
+
+
+    //float targetExposure = TargetLuminance / logAvgLuminance;
+
+    float AutoEV100 = ComputeEV100FromAvgLuminance(logAvgLuminance);
+	float targetExposure = ConvertEV100ToExposure(AutoEV100);
+
     //float targetExposure = -log2(1 - TargetLuminance) / logAvgLuminance;
 
     float exposure = Exposure[0];
