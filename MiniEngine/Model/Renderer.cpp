@@ -15,6 +15,7 @@
 #include "Model.h"
 #include "TextureManager.h"
 #include "ConstantBuffers.h"
+#include "IBL.h"
 #include "LightManager.h"
 #include "../Core/RootSignature.h"
 #include "../Core/PipelineState.h"
@@ -509,7 +510,8 @@ void Renderer::DrawSkybox( GraphicsContext& gfxContext, const Camera& Camera, co
     gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
     gfxContext.SetDynamicConstantBufferView(kMeshConstants, sizeof(SkyboxVSCB), &skyVSCB);
     gfxContext.SetDynamicConstantBufferView(kMaterialConstants, sizeof(SkyboxPSCB), &skyPSCB);
-    gfxContext.SetDescriptorTable(kCommonSRVs, m_CommonTextures);
+    //gfxContext.SetDescriptorTable(kCommonSRVs, m_CommonTextures);
+    gfxContext.SetDynamicDescriptor(kCommonSRVs, 0, IBL::m_IBLHDRI.IsValid() ? IBL::m_IBLHDRI.GetSRV() : GetDefaultTexture(kBlackOpaque2D));
     gfxContext.Draw(3);
 }
 

@@ -28,5 +28,5 @@ struct VSOutput
 [RootSignature(Renderer_RootSig)]
 float4 main(VSOutput vsOutput) : SV_Target0
 {
-    return float4(radianceIBLTexture.SampleLevel(defaultSampler, vsOutput.viewDir, TextureLevel), 1);
+    return float4(radianceIBLTexture.SampleLevel(defaultSampler, vsOutput.viewDir, 0), 1);
 }

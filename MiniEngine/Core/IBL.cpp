@@ -20,11 +20,12 @@ namespace IBL
     DescriptorHandle m_IBLLightingTextures;
 
     bool m_bIsPrecomputed = false;
+    bool m_bInited = false;
 }
 
 void IBL::InitializeResources(TextureRef IBLHDRI, DescriptorHeap& TextureHeap)
 {
-    m_IBLHDRI = IBLHDRI;
+    m_bInited = true;
 
 #define CreatePSO( ObjName, ShaderByteCode ) \
     ObjName.SetRootSignature(Graphics::g_CommonRS); \
@@ -38,6 +39,20 @@ void IBL::InitializeResources(TextureRef IBLHDRI, DescriptorHeap& TextureHeap)
 
     // for lighting
     m_IBLLightingTextures = TextureHeap.Alloc(3);
+
+    ChangeIBL(IBLHDRI);
+}
+
+void IBL::ChangeIBL(TextureRef IBLHDRI)
+{
+    if (!m_bInited)
+    {
+        return;
+    }
+
+    m_IBLHDRI = IBLHDRI;
+    m_bIsPrecomputed = false;
+
     uint32_t DestCount = 3;
     uint32_t SourceCounts[] = { 1, 1, 1 };
     if (m_IBLHDRI.IsValid())
