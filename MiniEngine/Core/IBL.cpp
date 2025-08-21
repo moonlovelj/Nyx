@@ -17,8 +17,6 @@ namespace IBL
 
     TextureRef m_IBLHDRI;
 
-    DescriptorHandle m_IBLLightingTextures;
-
     bool m_bIsPrecomputed = false;
     bool m_bInited = false;
 }
@@ -37,10 +35,12 @@ void IBL::InitializeResources(TextureRef IBLHDRI, DescriptorHeap& TextureHeap)
     CreatePSO(m_IBLLutPSO, g_pIBLLutCS);
 #undef CreatePSO
 
-    // for lighting
-    m_IBLLightingTextures = TextureHeap.Alloc(3);
-
     ChangeIBL(IBLHDRI);
+}
+
+bool IBL::IsValid()
+{
+    return m_bInited && m_IBLHDRI.IsValid();
 }
 
 void IBL::ChangeIBL(TextureRef IBLHDRI)
@@ -52,31 +52,6 @@ void IBL::ChangeIBL(TextureRef IBLHDRI)
 
     m_IBLHDRI = IBLHDRI;
     m_bIsPrecomputed = false;
-
-    uint32_t DestCount = 3;
-    uint32_t SourceCounts[] = { 1, 1, 1 };
-    if (m_IBLHDRI.IsValid())
-    {
-        D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
-        {
-            Graphics::g_IBLDiffuseLDMap.GetSRV(),
-            Graphics::g_IBLSpecularLDMap.GetSRV(),
-            Graphics::g_IBLLut.GetSRV()
-        };
-
-        Graphics::g_Device->CopyDescriptors(1, &m_IBLLightingTextures, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    }
-    else
-    {
-        D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
-        {
-            Graphics::GetDefaultTexture(Graphics::kBlackCubeMap),
-            Graphics::GetDefaultTexture(Graphics::kBlackCubeMap),
-            Graphics::GetDefaultTexture(Graphics::kBlackTransparent2D)
-        };
-
-        Graphics::g_Device->CopyDescriptors(1, &m_IBLLightingTextures, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    }
 }
 
 void IBL::Shutdown( void )

@@ -19,8 +19,8 @@ Texture2D<float3> texSpecular		: register(t1);
 Texture2D<float3> texNormal			: register(t3);
 //Texture2D<float4> texLightmap		: register(t4);
 //Texture2D<float4> texReflection	: register(t5);
-Texture2D<float> texSSAO			: register(t12);
-Texture2D<float> texShadow			: register(t13);
+Texture2D<float> texSSAO			: register(t13);
+Texture2D<float> texShadow			: register(t14);
 
 struct VSOutput
 {

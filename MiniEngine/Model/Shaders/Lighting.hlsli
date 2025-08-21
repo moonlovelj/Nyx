@@ -30,10 +30,10 @@ cbuffer PSConstants : register(b0)
     uint FrameIndexMod2;
 }
 
-StructuredBuffer<LightData> lightBuffer : register(t14);
-Texture2DArray<float> lightShadowArrayTex : register(t15);
-ByteAddressBuffer lightGrid : register(t16);
-ByteAddressBuffer lightGridBitMask : register(t17);
+StructuredBuffer<LightData> lightBuffer : register(t15);
+Texture2DArray<float> lightShadowArrayTex : register(t16);
+ByteAddressBuffer lightGrid : register(t17);
+ByteAddressBuffer lightGridBitMask : register(t18);
 
 void AntiAliasSpecular( inout float3 texNormal, inout float gloss )
 {

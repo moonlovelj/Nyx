@@ -95,6 +95,8 @@ void ChangeIBLSet(EngineVar::ActionType)
         IBL::ChangeIBL(IBLHDRITexture);
         //Renderer::SetIBLTextures(texturePair.first, texturePair.second);
     }
+
+    Renderer::SetIBLTextures();
 }
 
 void ChangeIBLBias(EngineVar::ActionType)
@@ -209,6 +211,8 @@ void SceneViewer::Startup( void )
         IBL::InitializeResources(nullptr, Renderer::s_TextureHeap);
     }
 
+    Renderer::SetIBLTextures();
+
     std::wstring gltfFileName;
 
     bool forceRebuild = false;
@@ -218,7 +222,8 @@ void SceneViewer::Startup( void )
 
     if (CommandLineArgs::GetString(L"model", gltfFileName) == false)
     {
-        m_ModelInst = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
+        //m_ModelInst = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
+        m_ModelInst = Renderer::LoadModel(L"Assets/Test/test.gltf", forceRebuild);
         m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
         OrientedBox obb = m_ModelInst.GetBoundingBox();
         float modelRadius = Length(obb.GetDimensions()) * 0.5f;
@@ -337,9 +342,26 @@ void SceneViewer::RenderScene( void )
         GlobalConstants globals;
         globals.ViewProjMatrix = m_Camera.GetViewProjMatrix();
         globals.SunShadowMatrix = m_SunShadowCamera.GetShadowMatrix();
-        globals.CameraPos = m_Camera.GetPosition();
+        globals.ViewerPos = m_Camera.GetPosition();
         globals.SunDirection = SunDirection;
         globals.SunIntensity = Vector3(Scalar(g_SunLightIntensity));
+
+        globals.ShadowTexelSize[0] = 1.0f / g_ShadowBuffer.GetWidth();
+        globals.InvTileDim[0] = 1.0f / Lighting::LightGridDim;
+        globals.InvTileDim[1] = 1.0f / Lighting::LightGridDim;
+        uint32_t tileCountX = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), Lighting::LightGridDim);
+        uint32_t tileCountY = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), Lighting::LightGridDim);
+        globals.TileCount[0] = tileCountX;
+        globals.TileCount[1] = tileCountY;
+        globals.FirstLightIndex[0] = Lighting::m_FirstConeLight;
+        globals.FirstLightIndex[1] = Lighting::m_FirstConeShadowedLight;
+
+        globals.ViewportWidth = g_SceneColorBuffer.GetWidth();
+        globals.ViewportHeight = g_SceneColorBuffer.GetHeight();
+
+        globals.FrameIndexMod2 = TemporalEffects::GetFrameIndexMod2();
+        globals.IBLLutTextureSize = IBL::g_IBLLutSize;
+        globals.IBLSpecularLDMapMipCount = Math::Log2(IBL::g_IBLSpecularLDMapSize) + 1;
 
         // Begin rendering depth
         gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
@@ -432,12 +454,17 @@ void SceneViewer::RenderScene( void )
             }
 
             {
-                Lighting::RenderDeferredLighting(gfxContext, m_Camera, SunDirection, Vector3(Scalar(g_SunLightIntensity)), m_SunShadowCamera.GetShadowMatrix());
+                globals.ViewProjMatrix = m_Camera.GetViewProjMatrix();
+                globals.ViewerPos = m_Camera.GetPosition();
+                Lighting::RenderDeferredLighting(gfxContext, globals);
             }
 
             Renderer::DrawSkybox(gfxContext, m_Camera, viewport, scissor);
 
-            sorter.RenderMeshes(MeshSorter::kTransparent, gfxContext, globals);
+            {
+                ScopedTimer _prof(L"Draw Transparent", gfxContext);
+                sorter.RenderMeshes(MeshSorter::kTransparent, gfxContext, globals);
+            }
         }
     }
 

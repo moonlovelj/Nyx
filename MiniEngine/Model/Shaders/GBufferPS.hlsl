@@ -26,18 +26,6 @@ cbuffer MaterialConstants : register(b0)
     uint flags;
 }
 
-cbuffer GlobalConstants : register(b1)
-{
-    float4x4 ViewProj;
-    float4x4 SunShadowMatrix;
-    float3 ViewerPos;
-    float3 SunDirection;
-    float3 SunIntensity;
-    float _pad;
-    float IBLRange;
-    float IBLBias;
-}
-
 struct VSOutput
 {
     float4 position : SV_POSITION;

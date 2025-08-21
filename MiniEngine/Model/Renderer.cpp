@@ -226,15 +226,16 @@ void Renderer::Initialize(void)
     Lighting::InitializeResources();
 
     // Allocate a descriptor table for the common textures
-    m_CommonTextures = s_TextureHeap.Alloc(8);
+    m_CommonTextures = s_TextureHeap.Alloc(9);
 
-    uint32_t DestCount = 8;
-    uint32_t SourceCounts[] = { 1, 1, 1, 1, 1, 1, 1, 1 };
+    uint32_t DestCount = 9;
+    uint32_t SourceCounts[] = { 1, 1, 1, 1, 1, 1, 1, 1, 1};
 
     D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
     {
         GetDefaultTexture(kBlackCubeMap),
         GetDefaultTexture(kBlackCubeMap),
+        GetDefaultTexture(kBlackOpaque2D),
         g_SSAOFullScreen.GetSRV(),
         g_ShadowBuffer.GetSRV(),
         Lighting::m_LightBuffer.GetSRV(),
@@ -268,7 +269,7 @@ void Renderer::UpdateGlobalDescriptors(void)
         g_ShadowBuffer.GetSRV(),
     };
 
-    DescriptorHandle dest = m_CommonTextures + 2 * s_TextureHeap.GetDescriptorSize();
+    DescriptorHandle dest = m_CommonTextures + 3 * s_TextureHeap.GetDescriptorSize();
 
     g_Device->CopyDescriptors(1, &dest, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
@@ -277,30 +278,55 @@ void Renderer::UpdateGlobalDescriptors(void)
 
 }
 
-void Renderer::SetIBLTextures(TextureRef diffuseIBL, TextureRef specularIBL)
+void Renderer::SetIBLTextures()
 {
-    s_RadianceCubeMap = specularIBL;
-    s_IrradianceCubeMap = diffuseIBL;
+    //s_RadianceCubeMap = specularIBL;
+    //s_IrradianceCubeMap = diffuseIBL;
 
-    s_SpecularIBLRange = 0.0f;
-    if (s_RadianceCubeMap.IsValid())
+    //s_SpecularIBLRange = 0.0f;
+    //if (s_RadianceCubeMap.IsValid())
+    //{
+    //    ID3D12Resource* texRes = const_cast<ID3D12Resource*>(s_RadianceCubeMap.Get()->GetResource());
+    //    const D3D12_RESOURCE_DESC& texDesc = texRes->GetDesc();
+    //    s_SpecularIBLRange = Max(0.0f, (float)texDesc.MipLevels - 1);
+    //    s_SpecularIBLBias = Min(s_SpecularIBLBias, s_SpecularIBLRange);
+    //}
+
+    //uint32_t DestCount = 2;
+    //uint32_t SourceCounts[] = { 1, 1 };
+
+    //D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
+    //{
+    //    specularIBL.IsValid() ? specularIBL.GetSRV() : GetDefaultTexture(kBlackCubeMap),
+    //    diffuseIBL.IsValid() ? diffuseIBL.GetSRV() : GetDefaultTexture(kBlackCubeMap)
+    //};
+
+    //g_Device->CopyDescriptors(1, &m_CommonTextures, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+    uint32_t DestCount = 3;
+    uint32_t SourceCounts[] = { 1, 1, 1 };
+    if (IBL::IsValid())
     {
-        ID3D12Resource* texRes = const_cast<ID3D12Resource*>(s_RadianceCubeMap.Get()->GetResource());
-        const D3D12_RESOURCE_DESC& texDesc = texRes->GetDesc();
-        s_SpecularIBLRange = Max(0.0f, (float)texDesc.MipLevels - 1);
-        s_SpecularIBLBias = Min(s_SpecularIBLBias, s_SpecularIBLRange);
+        D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
+        {
+            Graphics::g_IBLDiffuseLDMap.GetSRV(),
+            Graphics::g_IBLSpecularLDMap.GetSRV(),
+            Graphics::g_IBLLut.GetSRV()
+        };
+
+        g_Device->CopyDescriptors(1, &m_CommonTextures, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     }
-
-    uint32_t DestCount = 2;
-    uint32_t SourceCounts[] = { 1, 1 };
-
-    D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
+    else
     {
-        specularIBL.IsValid() ? specularIBL.GetSRV() : GetDefaultTexture(kBlackCubeMap),
-        diffuseIBL.IsValid() ? diffuseIBL.GetSRV() : GetDefaultTexture(kBlackCubeMap)
-    };
+        D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
+        {
+            Graphics::GetDefaultTexture(Graphics::kBlackCubeMap),
+            Graphics::GetDefaultTexture(Graphics::kBlackCubeMap),
+            Graphics::GetDefaultTexture(Graphics::kBlackTransparent2D)
+        };
 
-    g_Device->CopyDescriptors(1, &m_CommonTextures, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        g_Device->CopyDescriptors(1, &m_CommonTextures, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    }
 }
 
 void Renderer::SetIBLBias(float LODBias)
@@ -446,7 +472,7 @@ uint8_t Renderer::GetPSO(uint16_t psoFlags)
 
     if (psoFlags & kAlphaBlend)
     {
-        ColorPSO.SetBlendState(BlendPreMultiplied);
+        ColorPSO.SetBlendState(BlendTraditional);
         ColorPSO.SetDepthStencilState(DepthStateReadOnly);
     }
     if (psoFlags & kTwoSided)
@@ -625,9 +651,8 @@ void MeshSorter::RenderMeshes(
 
     // Set common shader constants
 	globals.ViewProjMatrix = m_Camera->GetViewProjMatrix();
-	globals.CameraPos = m_Camera->GetPosition();
-    globals.IBLRange = s_SpecularIBLRange - s_SpecularIBLBias;
-    globals.IBLBias = s_SpecularIBLBias;
+	globals.ViewerPos = m_Camera->GetPosition();
+
 	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &globals);
 
 	if (m_BatchType == kShadows)

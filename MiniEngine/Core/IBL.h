@@ -4,7 +4,6 @@
 
 namespace IBL
 {
-    extern DescriptorHandle m_IBLLightingTextures;
     extern TextureRef m_IBLHDRI;
 
     extern const uint32_t g_IBLDiffuseLDMapSize;
@@ -12,6 +11,8 @@ namespace IBL
     extern const uint32_t g_IBLLutSize;
 
     void InitializeResources(TextureRef IBLHDRI, DescriptorHeap& TextureHeap);
+
+    bool IsValid();
 
     void ChangeIBL(TextureRef IBLHDRI);
 

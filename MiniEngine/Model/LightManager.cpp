@@ -150,18 +150,17 @@ void Lighting::InitializeResources( void )
         g_Device->CopyDescriptors(1, &m_DeferredLightingUAVs, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     }
 
-    m_DeferredLightingRootSig.Reset(5, 3);
+    m_DeferredLightingRootSig.Reset(4, 3);
     SamplerDesc DefaultSamplerDesc;
     DefaultSamplerDesc.MaxAnisotropy = 8;
     SamplerDesc CubeMapSamplerDesc = DefaultSamplerDesc;
-    m_DeferredLightingRootSig.InitStaticSampler(0, DefaultSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-    m_DeferredLightingRootSig.InitStaticSampler(1, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_ALL);
-    m_DeferredLightingRootSig.InitStaticSampler(2, CubeMapSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-    m_DeferredLightingRootSig[0].InitAsConstantBuffer(0);
-    m_DeferredLightingRootSig[1].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 4);
-    m_DeferredLightingRootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 4, 8);
-    m_DeferredLightingRootSig[3].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 12, 3);
-    m_DeferredLightingRootSig[4].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1);
+    m_DeferredLightingRootSig.InitStaticSampler(10, DefaultSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+    m_DeferredLightingRootSig.InitStaticSampler(11, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_ALL);
+    m_DeferredLightingRootSig.InitStaticSampler(12, CubeMapSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+    m_DeferredLightingRootSig[0].InitAsConstantBuffer(1);
+    m_DeferredLightingRootSig[1].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 10);
+    m_DeferredLightingRootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 10, 10);
+    m_DeferredLightingRootSig[3].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1);
     m_DeferredLightingRootSig.Finalize(L"DeferredLightingRS");
     
 	m_DeferredLightingPSO.SetRootSignature(m_DeferredLightingRootSig);
@@ -390,10 +389,7 @@ void Lighting::FillLightGrid(GraphicsContext& gfxContext, const Camera& camera)
 }
 
 void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
-    const Math::Camera& camera,
-    const Math::Vector3& inSunDirection,
-    const Math::Vector3& inSunColor,
-    const Math::Matrix4& inSunShadowMatrix)
+    GlobalConstants& globals)
 {
     ScopedTimer _prof(L"DeferredLighting", gfxContext);
 
@@ -425,60 +421,9 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
     Context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Renderer::s_TextureHeap.GetHeapPointer());
     Context.SetDescriptorTable(1, m_DeferredLightingTextures);
     Context.SetDescriptorTable(2, Renderer::m_CommonTextures);
-    Context.SetDescriptorTable(3, IBL::m_IBLLightingTextures);
-    Context.SetDescriptorTable(4, m_DeferredLightingUAVs);
+    Context.SetDescriptorTable(3, m_DeferredLightingUAVs);
 
-    uint32_t tileCountX = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), LightGridDim);
-    uint32_t tileCountY = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), LightGridDim);
-
-    __declspec(align(16)) struct CSConstants
-    {
-        Vector3 SunDirection;
-        Vector3 SunColor;
-        float ShadowTexelSize[4];
-        Matrix4 SunShadowMatrix;
-
-        Vector3 ViewerPos;
-
-        float InvTileDim[4];
-        uint32_t TileCount[4];
-        uint32_t FirstLightIndex[4];
-
-        uint32_t ViewportWidth;
-        uint32_t ViewportHeight;
-        
-        uint32_t FrameIndexMod2;
-        
-        float IBLRange;
-        float IBLBias;
-        float IBLLutTextureSize;
-        uint32_t IBLSpecularLDMapMipCount;
-    } csConstants;
-    
-    csConstants.SunDirection = inSunDirection;
-    csConstants.SunColor = inSunColor;
-    csConstants.SunShadowMatrix = inSunShadowMatrix;
-
-    csConstants.ViewerPos = camera.GetPosition();
-
-    csConstants.ShadowTexelSize[0] = 1.0f / g_ShadowBuffer.GetWidth();
-    csConstants.InvTileDim[0] = 1.0f / Lighting::LightGridDim;
-    csConstants.InvTileDim[1] = 1.0f / Lighting::LightGridDim;
-    csConstants.TileCount[0] = tileCountX;
-    csConstants.TileCount[1] = tileCountY;
-    csConstants.FirstLightIndex[0] = Lighting::m_FirstConeLight;
-    csConstants.FirstLightIndex[1] = Lighting::m_FirstConeShadowedLight;
-
-    csConstants.ViewportWidth = g_SceneColorBuffer.GetWidth();
-    csConstants.ViewportHeight = g_SceneColorBuffer.GetHeight();
-
-    csConstants.FrameIndexMod2 = TemporalEffects::GetFrameIndexMod2();
-    csConstants.IBLRange = Renderer::s_SpecularIBLRange;
-    csConstants.IBLBias = Renderer::s_SpecularIBLBias;
-    csConstants.IBLLutTextureSize = IBL::g_IBLLutSize;
-    csConstants.IBLSpecularLDMapMipCount = Math::Log2(IBL::g_IBLSpecularLDMapSize) + 1;
-    
-    Context.SetDynamicConstantBufferView(0, sizeof(CSConstants), &csConstants);
+    Context.SetDynamicConstantBufferView(0, sizeof(GlobalConstants), &globals);
     
     uint32_t groupCountX = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), 8);
     uint32_t groupCountY = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), 8);

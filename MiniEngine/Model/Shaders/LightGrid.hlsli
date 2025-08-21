@@ -11,6 +11,8 @@
 // Author(s):	Alex Nankervis
 //
 
+#ifndef __LIGHT_GRID_HLSLI__
+#define __LIGHT_GRID_HLSLI__
 // keep in sync with C code
 #define MAX_LIGHTS 128
 #define TILE_SIZE (4 + MAX_LIGHTS * 4)
@@ -41,3 +43,5 @@ uint GetTileOffset(uint tileIndex)
 {
     return tileIndex * TILE_SIZE;
 }
+
+#endif

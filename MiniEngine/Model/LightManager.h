@@ -55,10 +55,7 @@ namespace Lighting
     void Shutdown(void);
 
     void RenderDeferredLighting(GraphicsContext& gfxContext,
-        const Math::Camera& camera,
-        const Math::Vector3& inSunDirection, 
-        const Math::Vector3& inSunColor, 
-        const Math::Matrix4& inSunShadowMatrix);
+        GlobalConstants& globals);
 
     void RenderLightShadows(GraphicsContext& gfxContext, const ModelInstance& modelInstance, GlobalConstants& globals);
 }
