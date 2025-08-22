@@ -232,6 +232,7 @@ MRT main(VSOutput vsOutput)
     float4 baseColor = baseColorFactor * baseColorTexture.Sample(baseColorSampler, UVSET(BASECOLOR));
     float2 metallicRoughness = metallicRoughnessFactor *
         metallicRoughnessTexture.Sample(metallicRoughnessSampler, UVSET(METALLICROUGHNESS)).bg;
+    metallicRoughness.y = max(0.04, metallicRoughness.y);
     float occlusion = occlusionTexture.Sample(occlusionSampler, UVSET(OCCLUSION));
     float3 emissive = emissiveFactor * emissiveTexture.Sample(emissiveSampler, UVSET(EMISSIVE));
     float3 normal = ComputeNormal(vsOutput);
@@ -247,10 +248,10 @@ MRT main(VSOutput vsOutput)
     // Surface.alphaSqr = Surface.alpha * Surface.alpha;
 
     mrt.Color = float4(emissive, 1.0f);
-    mrt.GBufferA = float4(vsOutput.worldPos, 0.0);
-    mrt.GBufferB = float4(normal, 0.0);
-    mrt.GBufferC = baseColor;
-    mrt.GBufferD = float4(metallicRoughness, occlusion, 0.f);
+    mrt.GBufferA = float4(normal, 1.0);
+    mrt.GBufferB = baseColor;
+    mrt.GBufferC = float4(metallicRoughness, occlusion, 0.f);
+    mrt.GBufferD = float4(vsOutput.worldPos, 0);
 
     return mrt;
 }

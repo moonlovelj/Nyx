@@ -60,6 +60,7 @@ __declspec(align(256)) struct MaterialConstants
 __declspec(align(256)) struct GlobalConstants
 {
     Math::Matrix4 ViewProjMatrix;
+    Math::Matrix4 InverseViewProjMatrix;
     Math::Matrix4 SunShadowMatrix;
     Math::Vector3 ViewerPos;
     Math::Vector3 SunDirection;

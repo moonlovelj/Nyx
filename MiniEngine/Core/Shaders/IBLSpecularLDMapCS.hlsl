@@ -85,7 +85,7 @@ void main(
     if (Pixel.x < SpecularLDMapSize && Pixel.y < SpecularLDMapSize)
     {
         float3 N = ConvertCubePixelToDir(Pixel.x, Pixel.y, Gid.z, SpecularLDMapSize);
-        float4 Acc = IntegrateCubeLDOnly(N, N, Roughness);
+        float4 Acc = IntegrateCubeLDOnly(N, N, max(0.04, Roughness));
         IBLSpecularLDMap[uint3(Pixel, Gid.z)] = Acc;
     }
 }

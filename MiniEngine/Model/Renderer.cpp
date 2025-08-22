@@ -90,10 +90,15 @@ void Renderer::Initialize(void)
     SamplerDesc CubeMapSamplerDesc = DefaultSamplerDesc;
     //CubeMapSamplerDesc.MaxLOD = 6.0f;
 
-    m_RootSig.Reset(kNumRootBindings, 3);
+    SamplerDesc LinearSamplerDesc;
+    LinearSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    LinearSamplerDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+
+    m_RootSig.Reset(kNumRootBindings, 4);
     m_RootSig.InitStaticSampler(10, DefaultSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
     m_RootSig.InitStaticSampler(11, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_PIXEL);
     m_RootSig.InitStaticSampler(12, CubeMapSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+    m_RootSig.InitStaticSampler(13, LinearSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
     m_RootSig[kMeshConstants].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_VERTEX);
     m_RootSig[kMaterialConstants].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL);
     m_RootSig[kMaterialSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 10, D3D12_SHADER_VISIBILITY_PIXEL);

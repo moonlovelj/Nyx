@@ -122,18 +122,19 @@ void Lighting::InitializeResources( void )
 
     m_LightBuffer.Create(L"m_LightBuffer", MaxLights, sizeof(LightData));
     
-    m_DeferredLightingTextures = Renderer::s_TextureHeap.Alloc(4);
+    m_DeferredLightingTextures = Renderer::s_TextureHeap.Alloc(5);
     m_DeferredLightingUAVs = Renderer::s_TextureHeap.Alloc(1);
     
     {
-        uint32_t DestCount = 4;
-        uint32_t SourceCounts[] = { 1, 1, 1, 1};
+        uint32_t DestCount = 5;
+        uint32_t SourceCounts[] = { 1, 1, 1, 1, 1};
         D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
         {
             g_GBufferA.GetSRV(),
             g_GBufferB.GetSRV(),
             g_GBufferC.GetSRV(),
             g_GBufferD.GetSRV(),
+        	g_SceneDepthBuffer.GetDepthSRV(),
         };
 
         g_Device->CopyDescriptors(1, &m_DeferredLightingTextures, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -150,13 +151,17 @@ void Lighting::InitializeResources( void )
         g_Device->CopyDescriptors(1, &m_DeferredLightingUAVs, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     }
 
-    m_DeferredLightingRootSig.Reset(4, 3);
+    m_DeferredLightingRootSig.Reset(4, 4);
     SamplerDesc DefaultSamplerDesc;
     DefaultSamplerDesc.MaxAnisotropy = 8;
     SamplerDesc CubeMapSamplerDesc = DefaultSamplerDesc;
     m_DeferredLightingRootSig.InitStaticSampler(10, DefaultSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
     m_DeferredLightingRootSig.InitStaticSampler(11, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_ALL);
     m_DeferredLightingRootSig.InitStaticSampler(12, CubeMapSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+    SamplerDesc LinearSamplerDesc;
+    LinearSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    LinearSamplerDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+    m_DeferredLightingRootSig.InitStaticSampler(13, LinearSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
     m_DeferredLightingRootSig[0].InitAsConstantBuffer(1);
     m_DeferredLightingRootSig[1].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 10);
     m_DeferredLightingRootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 10, 10);

@@ -17,6 +17,7 @@ static const float3 kDielectricSpecular = float3(0.04, 0.04, 0.04);
 cbuffer GlobalConstants : register(b1)
 {
     float4x4 ViewProjMatrix;
+    float4x4 InverseViewProjMatrix;
     float4x4 SunShadowMatrix;
     float3 ViewerPos;
     float3 SunDirection;
@@ -205,7 +206,7 @@ float3 EvaluateIBLDiffuse(SurfaceProperties Surface)
     float3 dominantN = getDiffuseDominantDir(Surface.N, Surface.V, Surface.NdotV, Surface.roughness);
     float3 diffuseLighting = IBLDiffuseLDMap.SampleLevel(cubeMapSampler, dominantN, 0);
 
-    float diffF = IBLLut.SampleLevel(defaultSampler, float2(Surface.NdotV, Surface.roughness), 0).z;
+    float diffF = IBLLut.SampleLevel(linearSampler, float2(Surface.NdotV, Surface.roughness), 0).z;
 
     return Surface.c_diff * diffuseLighting * diffF;
 }
@@ -241,7 +242,7 @@ float3 EvaluateIBLSpecular(SurfaceProperties Surface)
     // Fc = (1 - H ， L)^5
     // PreIntegratedDFG.r = Gv ， (1 - Fc)
     // PreIntegratedDFG.g = Gv ， Fc
-    float2 preDFG = IBLLut.SampleLevel(defaultSampler, float2(NdotV, Surface.roughness), 0).xy;
+    float2 preDFG = IBLLut.SampleLevel(linearSampler, float2(NdotV, Surface.roughness), 0).xy;
 
     //return preLD;
     // LD ， (f0 ， Gv ， (1 - Fc) + Gv ， Fc ， f90)

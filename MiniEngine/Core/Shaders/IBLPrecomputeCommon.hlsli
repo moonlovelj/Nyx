@@ -105,8 +105,8 @@ float3 ConvertCubePixelToDir(uint X, uint Y, uint Z, uint TextureSize)
     // 输入: x, y 像素坐标，width, height 每个面尺寸， d 面索引[0..5]
     // 输出: 方向向量 dir (float3)
 
-    float u = ((float) (X + 0.5) / (TextureSize - 1)) * 2.0f - 1.0f; // [-1,1]
-    float v = ((float) (Y + 0.5) / (TextureSize - 1)) * 2.0f - 1.0f; // [-1,1]
+    float u = ((float) (X + 0.5) / TextureSize) * 2.0f - 1.0f; // [-1,1]
+    float v = ((float) (Y + 0.5) / TextureSize) * 2.0f - 1.0f; // [-1,1]
     // 注意根据你的纹理坐标系统，v可能需要反转 v = -v;
 
     float3 dir;
