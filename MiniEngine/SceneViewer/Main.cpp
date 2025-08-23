@@ -56,7 +56,7 @@ private:
 
 CREATE_APPLICATION( SceneViewer )
 
-ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 10.0f, 0.0f, 200.0f, 0.1f); // unit: lx
+ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 4.0f, -5.0f, 5.0f, 0.1f); // unit: lx
 NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0f, 0.1f );
 NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f );
 
@@ -222,8 +222,8 @@ void SceneViewer::Startup( void )
 
     if (CommandLineArgs::GetString(L"model", gltfFileName) == false)
     {
-        //m_ModelInst = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
-        m_ModelInst = Renderer::LoadModel(L"Assets/Test/test.gltf", forceRebuild);
+        m_ModelInst = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
+        //m_ModelInst = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
         m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
         OrientedBox obb = m_ModelInst.GetBoundingBox();
         float modelRadius = Length(obb.GetDimensions()) * 0.5f;
@@ -341,6 +341,7 @@ void SceneViewer::RenderScene( void )
 
         GlobalConstants globals;
         globals.ViewProjMatrix = m_Camera.GetViewProjMatrix();
+		globals.InverseViewProjMatrix = Invert(m_Camera.GetViewProjMatrix());
         globals.SunShadowMatrix = m_SunShadowCamera.GetShadowMatrix();
         globals.ViewerPos = m_Camera.GetPosition();
         globals.SunDirection = SunDirection;
@@ -454,8 +455,6 @@ void SceneViewer::RenderScene( void )
             }
 
             {
-                globals.ViewProjMatrix = m_Camera.GetViewProjMatrix();
-                globals.ViewerPos = m_Camera.GetPosition();
                 Lighting::RenderDeferredLighting(gfxContext, globals);
             }
 

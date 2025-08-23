@@ -230,9 +230,7 @@ void Deferred::RenderScene(
     GraphicsContext& gfxContext,
     const Camera& camera,
     const D3D12_VIEWPORT& viewport,
-    const D3D12_RECT& scissor,
-    bool skipDiffusePass,
-    bool skipShadowMap)
+    const D3D12_RECT& scissor)
 {
     Renderer::UpdateGlobalDescriptors();
 

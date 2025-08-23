@@ -640,7 +640,7 @@ void MeshSorter::Sort()
 void MeshSorter::RenderMeshes(
     DrawPass pass,
     GraphicsContext& context,
-    GlobalConstants& globals)
+    const GlobalConstants& inGlobals)
 {
 	ASSERT(m_DSV != nullptr);
 
@@ -654,6 +654,7 @@ void MeshSorter::RenderMeshes(
     // Set common textures
     context.SetDescriptorTable(kCommonSRVs, m_CommonTextures);
 
+    GlobalConstants globals = inGlobals;
     // Set common shader constants
 	globals.ViewProjMatrix = m_Camera->GetViewProjMatrix();
 	globals.ViewerPos = m_Camera->GetPosition();

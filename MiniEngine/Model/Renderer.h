@@ -113,7 +113,7 @@ namespace Renderer
 
         void Sort();
 
-        void RenderMeshes(DrawPass pass, GraphicsContext& context, GlobalConstants& globals);
+        void RenderMeshes(DrawPass pass, GraphicsContext& context, const GlobalConstants& inGlobals);
 
     private:
 

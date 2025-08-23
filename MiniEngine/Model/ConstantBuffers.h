@@ -72,6 +72,6 @@ __declspec(align(256)) struct GlobalConstants
     uint32_t ViewportWidth;
     uint32_t ViewportHeight;
     uint32_t FrameIndexMod2;
-    float IBLLutTextureSize;
+    uint32_t IBLLutTextureSize;
     uint32_t IBLSpecularLDMapMipCount;
 };

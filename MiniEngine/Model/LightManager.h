@@ -23,7 +23,7 @@ class ShadowBuffer;
 class GraphicsContext;
 class IntVar;
 class ModelInstance;
-class GlobalConstants;
+struct GlobalConstants;
 namespace Math
 {
     class Vector3;
@@ -55,7 +55,7 @@ namespace Lighting
     void Shutdown(void);
 
     void RenderDeferredLighting(GraphicsContext& gfxContext,
-        GlobalConstants& globals);
+        const GlobalConstants& globals);
 
-    void RenderLightShadows(GraphicsContext& gfxContext, const ModelInstance& modelInstance, GlobalConstants& globals);
+    void RenderLightShadows(GraphicsContext& gfxContext, const ModelInstance& modelInstance, const GlobalConstants& globals);
 }

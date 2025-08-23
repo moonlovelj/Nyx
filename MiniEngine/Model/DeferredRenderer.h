@@ -22,9 +22,7 @@ namespace Deferred
         GraphicsContext& gfxContext,
         const Math::Camera& camera,
         const D3D12_VIEWPORT& viewport,
-        const D3D12_RECT& scissor,
-        bool skipDiffusePass = false,
-        bool skipShadowMap = false );
+        const D3D12_RECT& scissor);
 
     const ModelH3D& GetModel();
 

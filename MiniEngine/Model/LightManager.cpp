@@ -394,7 +394,7 @@ void Lighting::FillLightGrid(GraphicsContext& gfxContext, const Camera& camera)
 }
 
 void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
-    GlobalConstants& globals)
+    const GlobalConstants& globals)
 {
     ScopedTimer _prof(L"DeferredLighting", gfxContext);
 
@@ -436,7 +436,7 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
     Context.Dispatch(groupCountX, groupCountY, 1);
 }
 
-void Lighting::RenderLightShadows(GraphicsContext& gfxContext, const ModelInstance& modelInstance, GlobalConstants& globals)
+void Lighting::RenderLightShadows(GraphicsContext& gfxContext, const ModelInstance& modelInstance, const GlobalConstants& globals)
 {
     // TODO Local Light Shadow CPU消耗很大（DC很多）
     using namespace Renderer;

@@ -33,7 +33,7 @@ cbuffer GlobalConstants : register(b1)
 
     uint FrameIndexMod2;
 
-    float IBLLutTextureSize;
+    uint IBLLutTextureSize;
     uint IBLSpecularLDMapMipCount;
 
 };
