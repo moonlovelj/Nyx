@@ -56,24 +56,24 @@ float4 IntegrateDFGOnly(in float3 V, in float3 N, in float roughness)
             acc.y += Fc * GVis;
         }
 
-        // Diffuse Disney preIntegration
-        u = frac(u + 0.5);
-        float pdf;
-        // The pdf is not used because it cancels with other terms
-        // (The 1/PI from diffuse BRDF and the NdotL from Lambert¡¯s law).
-        ImportanceSampleCosDir(u, N, L, NdotL, pdf);
-        if (NdotL > 0)
-        {
-            float LdotH = saturate(dot(L, normalize(V + L)));
-            float NdotV = saturate(dot(N, V));
+        //// Diffuse Disney preIntegration
+        //u = frac(u + 0.5);
+        //float pdf;
+        //// The pdf is not used because it cancels with other terms
+        //// (The 1/PI from diffuse BRDF and the NdotL from Lambert¡¯s law).
+        //ImportanceSampleCosDir(u, N, L, NdotL, pdf);
+        //if (NdotL > 0)
+        //{
+        //    float LdotH = saturate(dot(L, normalize(V + L)));
+        //    float NdotV = saturate(dot(N, V));
             
-            acc.z += Diffuse_Burley(roughness, NdotL, NdotV, LdotH);
-        }
+        //    acc.z += Diffuse_Burley(roughness, NdotL, NdotV, LdotH);
+        //}
 
-        accWeight += 1.0;
+        //accWeight += 1.0;
     }
 
-    return acc * (1.0f / accWeight);
+    return acc * (1.0f / kSampleCount);
 }
 
 [RootSignature(Common_RootSig)]

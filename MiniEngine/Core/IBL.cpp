@@ -7,7 +7,7 @@
 
 namespace IBL
 {
-    const uint32_t g_IBLDiffuseLDMapSize = 512;
+    const uint32_t g_IBLDiffuseLDMapSize = 128;
     const uint32_t g_IBLSpecularLDMapSize = 512;
     const uint32_t g_IBLLutSize = 512;
 

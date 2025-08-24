@@ -44,6 +44,29 @@ float4 IntegrateDiffuseCube(float3 N)
     return float4(accBrdf * (1.0 / kSampleCount), 1.0);
 }
 
+float4 IntegrateIrradiance(float3 N)
+{
+    float3 irradiance = 0;
+    float deltaOmega = 4.0 * PI / (6.0 * HDRITextureSize * HDRITextureSize);
+    for (int x = 0; x < HDRITextureSize; ++x)
+    {
+        for (int y = 0; y < HDRITextureSize; ++y)
+	    {
+            for (int z = 0; z < 6; ++z)
+		    {
+                float3 L = ConvertCubePixelToDir(x, y, z, HDRITextureSize);
+                float NdotL = dot(N, L);
+                if (NdotL > 0.0)
+                {
+                    irradiance += IBLHDRITexture.SampleLevel(cubeMapSampler, L, 0).rgb * NdotL * deltaOmega;
+                }
+            }
+	    }
+    }
+
+    return float4(irradiance, 1.0);
+}
+
 [RootSignature(Common_RootSig)]
 [numthreads(8, 8, 1)]
 void main(
@@ -55,7 +78,7 @@ void main(
     if (Pixel.x < DiffuseLDMapSize && Pixel.y < DiffuseLDMapSize)
     {
         float3 N = ConvertCubePixelToDir(Pixel.x, Pixel.y, Gid.z, DiffuseLDMapSize);
-        float4 Acc = IntegrateDiffuseCube(N);
+        float4 Acc = IntegrateIrradiance(N);
         IBLDiffuseLDMapTexture[uint3(Pixel, Gid.z)] = Acc;
     }
 }

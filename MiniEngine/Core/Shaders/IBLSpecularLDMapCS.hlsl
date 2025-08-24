@@ -34,7 +34,7 @@ float4 IntegrateCubeLDOnly(in float3 V, in float3 N, in float roughness)
 
         ImportanceSampleGGX(eta, roughness, V, N, H, L);
 
-        float NdotL = dot(N, L);
+        float NdotL = saturate(dot(N, L));
         if (NdotL > 0)
         {
             // Use pre-filtered importance sampling 

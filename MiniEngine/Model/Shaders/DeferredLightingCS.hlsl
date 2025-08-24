@@ -80,7 +80,7 @@ void main(
             shadowCoord.xyz *= rcp(shadowCoord.w);
             // TODO “ı”∞”–Ë¶¥√
             float sunShadow = GetDirectionalShadow(shadowCoord.xyz, texShadow);
-            colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunColor);
+            //colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunColor);
 
             ShadeLights(colorAccum.rgb, Surface, DTid, posW);
 

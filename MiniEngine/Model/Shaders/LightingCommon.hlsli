@@ -203,12 +203,14 @@ float3 getDiffuseDominantDir(float3 N, float3 V, float NdotV, float roughness)
 
 float3 EvaluateIBLDiffuse(SurfaceProperties Surface)
 {
-    float3 dominantN = getDiffuseDominantDir(Surface.N, Surface.V, Surface.NdotV, Surface.roughness);
-    float3 diffuseLighting = IBLDiffuseLDMap.SampleLevel(cubeMapSampler, dominantN, 0);
+    //float3 dominantN = getDiffuseDominantDir(Surface.N, Surface.V, Surface.NdotV, Surface.roughness);
+    //float3 diffuseLighting = IBLDiffuseLDMap.SampleLevel(cubeMapSampler, dominantN, 0);
+    //float diffF = IBLLut.SampleLevel(linearSampler, float2(Surface.NdotV, Surface.roughness), 0).z;
 
-    float diffF = IBLLut.SampleLevel(linearSampler, float2(Surface.NdotV, Surface.roughness), 0).z;
+    //return Surface.c_diff * diffuseLighting * diffF;
 
-    return Surface.c_diff * diffuseLighting * diffF;
+    float3 diffuseLighting = IBLDiffuseLDMap.SampleLevel(cubeMapSampler, Surface.N, 0);
+    return Surface.c_diff * INV_PI * diffuseLighting;
 }
 
 // We have a better approximation of the off-specular peak,
@@ -229,24 +231,24 @@ float3 EvaluateIBLSpecular(SurfaceProperties Surface)
 {
     float3 R = reflect(-Surface.V, Surface.N);
 
-    float3 dominantR = getSpecularDominantDir(Surface.N, R, Surface.roughness);
+    //float3 dominantR = getSpecularDominantDir(Surface.N, R, Surface.roughness);
 
     // Rebuild the function
     // L ， D ， (f0 ， Gv ， (1 - Fc) + Gv ， Fc) ， cosTheta / (4 ， NdotL ， NdotV)
-    float NdotV = max(Surface.NdotV, 0.5f / IBLLutTextureSize);
+    //float NdotV = max(Surface.NdotV, 0.5f / IBLLutTextureSize);
 
     float mipLevel = Surface.roughness * (IBLSpecularLDMapMipCount-1.0);
-    float3 preLD = IBLSpecularLDMap.SampleLevel(cubeMapSampler, dominantR, mipLevel).rgb;
+    float3 preLD = IBLSpecularLDMap.SampleLevel(cubeMapSampler, R, mipLevel).rgb;
 
     // Sample pre-integrated DFG
     // Fc = (1 - H ， L)^5
     // PreIntegratedDFG.r = Gv ， (1 - Fc)
     // PreIntegratedDFG.g = Gv ， Fc
-    float2 preDFG = IBLLut.SampleLevel(linearSampler, float2(NdotV, Surface.roughness), 0).xy;
+    float2 preDFG = IBLLut.SampleLevel(linearSampler, float2(Surface.NdotV, Surface.roughness), 0).xy;
 
     //return preLD;
     // LD ， (f0 ， Gv ， (1 - Fc) + Gv ， Fc ， f90)
-    return preLD * (Surface.c_spec * preDFG.x + 1 * preDFG.y);
+    return preLD * (Surface.c_spec * preDFG.x + preDFG.y);
 }
 
 
