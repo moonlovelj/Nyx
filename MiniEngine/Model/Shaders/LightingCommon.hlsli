@@ -3,16 +3,17 @@
 
 #include "Common.hlsli"
 #include "LightGrid.hlsli"
+#include "PCSS.hlsli"
+
+#define PCSS_SHADOW     1
 
 #define FLT_MIN         1.175494351e-38F        // min positive value
 #define FLT_MAX         3.402823466e+38F        // max value
-#define PI				3.1415926535f
 #define INV_PI          0.31830988618f
 #define TWOPI			6.283185307f
 
 // Numeric constants
 static const float3 kDielectricSpecular = float3(0.04, 0.04, 0.04);
-
 
 cbuffer GlobalConstants : register(b1)
 {
@@ -251,28 +252,30 @@ float3 EvaluateIBLSpecular(SurfaceProperties Surface)
     return preLD * (Surface.c_spec * preDFG.x + preDFG.y);
 }
 
-
-
-float GetDirectionalShadow( float3 ShadowCoord, Texture2D<float> texShadow )
+float GetDirectionalShadow(float2 ScreenUV, float3 ShadowCoord, Texture2D<float> texShadow )
 {
 #ifdef SINGLE_SAMPLE
     float result = texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy, ShadowCoord.z );
+#elif PCSS_SHADOW
+    float result =  PCSS(texShadow, shadowSampler, pointSampler, ScreenUV, ShadowCoord, ShadowTexelSize);
+    return result;
 #else
     const float Dilation = 2.0;
     float d1 = Dilation * ShadowTexelSize.x * 0.125;
     float d2 = Dilation * ShadowTexelSize.x * 0.875;
     float d3 = Dilation * ShadowTexelSize.x * 0.625;
     float d4 = Dilation * ShadowTexelSize.x * 0.375;
+    float shadowBias = 1e-3;
     float result = (
         2.0 * texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy, ShadowCoord.z ) +
-        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2(-d2,  d1), ShadowCoord.z ) +
-        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2(-d1, -d2), ShadowCoord.z ) +
-        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2( d2, -d1), ShadowCoord.z ) +
-        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2( d1,  d2), ShadowCoord.z ) +
-        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2(-d4,  d3), ShadowCoord.z ) +
-        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2(-d3, -d4), ShadowCoord.z ) +
-        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2( d4, -d3), ShadowCoord.z ) +
-        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2( d3,  d4), ShadowCoord.z )
+        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2(-d2,  d1), ShadowCoord.z + shadowBias ) +
+        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2(-d1, -d2), ShadowCoord.z + shadowBias ) +
+        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2( d2, -d1), ShadowCoord.z + shadowBias ) +
+        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2( d1,  d2), ShadowCoord.z + shadowBias ) +
+        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2(-d4,  d3), ShadowCoord.z + shadowBias ) +
+        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2(-d3, -d4), ShadowCoord.z + shadowBias ) +
+        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2( d4, -d3), ShadowCoord.z + shadowBias ) +
+        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2( d3,  d4), ShadowCoord.z + shadowBias )
         ) / 10.0;
 #endif
     return result * result;

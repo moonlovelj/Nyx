@@ -40,13 +40,19 @@
         "addressU = TEXTURE_ADDRESS_CLAMP," \
         "addressV = TEXTURE_ADDRESS_CLAMP," \
         "addressW = TEXTURE_ADDRESS_CLAMP," \
-        "filter = FILTER_MIN_MAG_MIP_LINEAR)"
+        "filter = FILTER_MIN_MAG_MIP_LINEAR)," \
+    "StaticSampler(s14," \
+        "addressU = TEXTURE_ADDRESS_CLAMP," \
+        "addressV = TEXTURE_ADDRESS_CLAMP," \
+        "addressW = TEXTURE_ADDRESS_CLAMP," \
+        "filter = FILTER_MIN_MAG_MIP_POINT)"
 
 // Common (static) samplers
 SamplerState defaultSampler : register(s10);
 SamplerComparisonState shadowSampler : register(s11);
 SamplerState cubeMapSampler : register(s12);
 SamplerState linearSampler : register(s13);
+SamplerState pointSampler : register(s14);
 
 #ifndef ENABLE_TRIANGLE_ID
     #define ENABLE_TRIANGLE_ID 0

@@ -24,7 +24,6 @@ void ShadowCamera::UpdateMatrix(
 
     // Converts world units to texel units so we can quantize the camera position to whole texel units
     Vector3 RcpDimensions = Recip(ShadowBounds);
-    Vector3 QuantizeScale = Vector3((float)BufferWidth, (float)BufferHeight, (float)((1 << BufferPrecision) - 1)) * RcpDimensions;
 
     //
     // Recenter the camera at the quantized position
@@ -33,7 +32,12 @@ void ShadowCamera::UpdateMatrix(
     // Transform to view space
     ShadowCenter = ~GetRotation() * ShadowCenter;
     // Scale to texel units, truncate fractional part, and scale back to world units
-    ShadowCenter = Floor( ShadowCenter * QuantizeScale ) / QuantizeScale;
+	if (BufferPrecision < 32)
+	{
+        Vector3 QuantizeScale = Vector3((float)BufferWidth, (float)BufferHeight, (float)((1 << BufferPrecision) - 1)) * RcpDimensions;
+        ShadowCenter = Floor( ShadowCenter * QuantizeScale ) / QuantizeScale;
+	}
+    
     // Transform back into world space
     ShadowCenter = GetRotation() * ShadowCenter;
 

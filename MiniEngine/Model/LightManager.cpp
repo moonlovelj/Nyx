@@ -151,7 +151,7 @@ void Lighting::InitializeResources( void )
         g_Device->CopyDescriptors(1, &m_DeferredLightingUAVs, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     }
 
-    m_DeferredLightingRootSig.Reset(4, 4);
+    m_DeferredLightingRootSig.Reset(4, 5);
     SamplerDesc DefaultSamplerDesc;
     DefaultSamplerDesc.MaxAnisotropy = 8;
     SamplerDesc CubeMapSamplerDesc = DefaultSamplerDesc;
@@ -162,6 +162,11 @@ void Lighting::InitializeResources( void )
     LinearSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
     LinearSamplerDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
     m_DeferredLightingRootSig.InitStaticSampler(13, LinearSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+    SamplerDesc PointSamplerDesc;
+    PointSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+    PointSamplerDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+    m_DeferredLightingRootSig.InitStaticSampler(14, PointSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
+
     m_DeferredLightingRootSig[0].InitAsConstantBuffer(1);
     m_DeferredLightingRootSig[1].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 10);
     m_DeferredLightingRootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 10, 10);

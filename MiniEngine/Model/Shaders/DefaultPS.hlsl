@@ -135,10 +135,10 @@ float4 main(VSOutput vsOutput) : SV_Target0
     //colorAccum += Diffuse_IBL(Surface);
     //colorAccum += Specular_IBL(Surface);
 
-
+    float2 ScreenUV = (float2(0.5, 0.5) + pixelPos) / float2(ViewportWidth, ViewportHeight);
     float4 shadowCoord = mul(SunShadowMatrix, float4(vsOutput.worldPos, 1.0));
     shadowCoord.xyz *= rcp(shadowCoord.w);
-    float sunShadow = GetDirectionalShadow(shadowCoord.xyz, texShadow);
+    float sunShadow = GetDirectionalShadow(ScreenUV, shadowCoord.xyz, texShadow);
     colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunColor);
 
     ShadeLights(colorAccum.rgb, Surface, pixelPos, vsOutput.worldPos);

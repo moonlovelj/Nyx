@@ -45,7 +45,12 @@ float3 ConvertPixelToWorldPos(uint2 Pixel)
         "addressU = TEXTURE_ADDRESS_CLAMP," \
         "addressV = TEXTURE_ADDRESS_CLAMP," \
         "addressW = TEXTURE_ADDRESS_CLAMP," \
-        "filter = FILTER_MIN_MAG_MIP_LINEAR)"
+        "filter = FILTER_MIN_MAG_MIP_LINEAR)," \
+    "StaticSampler(s14," \
+        "addressU = TEXTURE_ADDRESS_CLAMP," \
+        "addressV = TEXTURE_ADDRESS_CLAMP," \
+        "addressW = TEXTURE_ADDRESS_CLAMP," \
+        "filter = FILTER_MIN_MAG_MIP_POINT)"
 
 [RootSignature(_RootSig)]
 [numthreads(8, 8, 1)]
@@ -60,6 +65,7 @@ void main(
         float bShading = gBufferA[DTid].w;
         if (bShading > 1e-6)
         {
+            float2 ScreenUV = (float2(0.5, 0.5) + DTid) / float2(ViewportWidth, ViewportHeight);
             float4 colorAccum = sceneColor[DTid];
             float3 posW = ConvertPixelToWorldPos(DTid);
             float3 normal = gBufferA[DTid].xyz;
@@ -79,14 +85,13 @@ void main(
             float4 shadowCoord = mul(SunShadowMatrix, float4(posW, 1.0));
             shadowCoord.xyz *= rcp(shadowCoord.w);
             // TODO 阴影有瑕疵
-            float sunShadow = GetDirectionalShadow(shadowCoord.xyz, texShadow);
-            //colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunColor);
+            float sunShadow = GetDirectionalShadow(ScreenUV, shadowCoord.xyz, texShadow);
+            colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunColor);
 
             ShadeLights(colorAccum.rgb, Surface, DTid, posW);
 
             //float3 WorldPos = gBufferD[DTid].xyz;
             //colorAccum.rgb = abs(posW - WorldPos);
-
 
             float ssao = texSSAO[DTid];
             // Add IBL
@@ -96,7 +101,7 @@ void main(
             //colorAccum.rgb += Specular_IBL(Surface) * ssao;
             colorAccum.rgb += EvaluateIBLSpecular(Surface);
 
-            //colorAccum.rgb = saturate(dot(Surface.N, SunDirection));
+            //colorAccum.rgb = sunShadow;
 
             //TODO ssao在球面有严重条纹瑕疵，待修复
 

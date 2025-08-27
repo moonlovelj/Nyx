@@ -58,7 +58,9 @@ CREATE_APPLICATION( SceneViewer )
 
 ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 4.0f, -5.0f, 5.0f, 0.1f); // unit: lx
 NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0f, 0.1f );
-NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f );
+NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f);
+NumVar g_SunLightSize("Viewer/Lighting/Sun Light Size", 0.5f, 0.0f, 2.0f, 0.1f);
+NumVar g_SunShadowBias("Viewer/Lighting/Sun Shadow Bias", 4.f, 1.0f, 20.0f, 1.f );
 
 void ChangeIBLSet(EngineVar::ActionType);
 void ChangeIBLBias(EngineVar::ActionType);
@@ -189,12 +191,13 @@ void SceneViewer::Startup( void )
     // Setup your data
 
     // MotionBlur::Enable = true;
-    // TemporalEffects::EnableTAA = true;
+    TemporalEffects::EnableTAA = true;
 	FXAA::Enable = false;
 	// PostEffects::EnableHDR = true;
     // PostEffects::EnableAdaptation = true;
     // SSAO::Enable = true;
     // PostEffects::BloomEnable = false;
+    // PostEffects::EnableAdaptation = false;
     
     Renderer::Initialize();
 
@@ -224,6 +227,7 @@ void SceneViewer::Startup( void )
     {
         m_ModelInst = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
         //m_ModelInst = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
+        //m_ModelInst = Renderer::LoadModel(L"Assets/ShadowTest/glTF/ShadowTest.gltf", forceRebuild);
         m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
         OrientedBox obb = m_ModelInst.GetBoundingBox();
         float modelRadius = Length(obb.GetDimensions()) * 0.5f;
@@ -348,6 +352,9 @@ void SceneViewer::RenderScene( void )
         globals.SunIntensity = Vector3(Scalar(g_SunLightIntensity));
 
         globals.ShadowTexelSize[0] = 1.0f / g_ShadowBuffer.GetWidth();
+        globals.ShadowTexelSize[1] = g_SunLightSize;
+        globals.ShadowTexelSize[2] = g_SunShadowBias;
+
         globals.InvTileDim[0] = 1.0f / Lighting::LightGridDim;
         globals.InvTileDim[1] = 1.0f / Lighting::LightGridDim;
         uint32_t tileCountX = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), Lighting::LightGridDim);
