@@ -136,6 +136,7 @@ float3 ConvertCubePixelToDir(uint X, uint Y, uint Z, uint TextureSize)
             break;
     }
 
+    //dir.z = -dir.z; // 转换成右手系
     dir = normalize(dir);
 
     return dir;

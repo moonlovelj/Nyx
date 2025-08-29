@@ -211,7 +211,8 @@ float3 EvaluateIBLDiffuse(SurfaceProperties Surface)
     //return Surface.c_diff * diffuseLighting * diffF;
 
     float3 diffuseLighting = IBLDiffuseLDMap.SampleLevel(cubeMapSampler, Surface.N, 0);
-    return Surface.c_diff * INV_PI * diffuseLighting;
+    return Surface.c_diff * diffuseLighting; // PI和cos重要性采样抵消了
+    //return Surface.c_diff * INV_PI * diffuseLighting;
 }
 
 // We have a better approximation of the off-specular peak,

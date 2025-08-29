@@ -47,7 +47,8 @@ float4 IntegrateDiffuseCube(float3 N)
 float4 IntegrateIrradiance(float3 N)
 {
     float3 irradiance = 0;
-    float deltaOmega = 4.0 * PI / (6.0 * HDRITextureSize * HDRITextureSize);
+
+   /* float deltaOmega = 4.0 * PI / (6.0 * HDRITextureSize * HDRITextureSize);
     for (int x = 0; x < HDRITextureSize; ++x)
     {
         for (int y = 0; y < HDRITextureSize; ++y)
@@ -62,7 +63,34 @@ float4 IntegrateIrradiance(float3 N)
                 }
             }
 	    }
+    }*/
+
+    //float3 upVector = abs(N.z) < 0.999 ? float3(0, 0, 1) : float3(1, 0, 0);
+    //float3 tangentX = normalize(cross(upVector, N));
+    //float3 tangentY = cross(N, tangentX);
+
+    float3 upVector = abs(N.y) < 0.999 ? float3(0, 1, 0) : float3(1, 0, 0);
+    float3 tangentX = normalize(cross(upVector, N));
+    float3 tangentY = cross(N, tangentX);
+
+
+    float sampleDelta = 0.005;
+    float nrSamples = 0.0;
+    for (float phi = 0.0; phi < 2.0 * PI; phi += sampleDelta)
+    {
+        for (float theta = 0.0; theta < 0.5 * PI; theta += sampleDelta)
+        {
+            // spherical to cartesian (in tangent space)
+            float3 tangentSample = float3(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
+            // tangent space to world
+            float3 L = tangentSample.x * tangentX + tangentSample.y * tangentY + tangentSample.z * N;
+
+            irradiance += IBLHDRITexture.SampleLevel(cubeMapSampler, L, 0).rgb * cos(theta) * sin(theta);
+            nrSamples++;
+        }
     }
+
+    irradiance = irradiance * PI * PI * 1.0 / (nrSamples);
 
     return float4(irradiance, 1.0);
 }
@@ -78,7 +106,7 @@ void main(
     if (Pixel.x < DiffuseLDMapSize && Pixel.y < DiffuseLDMapSize)
     {
         float3 N = ConvertCubePixelToDir(Pixel.x, Pixel.y, Gid.z, DiffuseLDMapSize);
-        float4 Acc = IntegrateIrradiance(N);
+        float4 Acc = IntegrateDiffuseCube(N);
         IBLDiffuseLDMapTexture[uint3(Pixel, Gid.z)] = Acc;
     }
 }

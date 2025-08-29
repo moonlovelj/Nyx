@@ -56,7 +56,7 @@ private:
 
 CREATE_APPLICATION( SceneViewer )
 
-ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 4.0f, -5.0f, 5.0f, 0.1f); // unit: lx
+ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 6.0f, -5.0f, 20.0f, 0.1f); // unit: lx
 NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0f, 0.1f );
 NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f);
 NumVar g_SunLightSize("Viewer/Lighting/Sun Light Size", 0.5f, 0.0f, 2.0f, 0.1f);
@@ -191,13 +191,12 @@ void SceneViewer::Startup( void )
     // Setup your data
 
     // MotionBlur::Enable = true;
-    TemporalEffects::EnableTAA = true;
+    TemporalEffects::EnableTAA = false;
 	FXAA::Enable = false;
-	// PostEffects::EnableHDR = true;
-    // PostEffects::EnableAdaptation = true;
-    // SSAO::Enable = true;
-    // PostEffects::BloomEnable = false;
-    // PostEffects::EnableAdaptation = false;
+	//PostEffects::EnableHDR = false;
+    SSAO::Enable = false;
+    PostEffects::BloomEnable = false;
+    PostEffects::EnableAdaptation = false;
     
     Renderer::Initialize();
 
@@ -225,9 +224,9 @@ void SceneViewer::Startup( void )
 
     if (CommandLineArgs::GetString(L"model", gltfFileName) == false)
     {
-        m_ModelInst = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
+        //m_ModelInst = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
         //m_ModelInst = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
-        //m_ModelInst = Renderer::LoadModel(L"Assets/ShadowTest/glTF/ShadowTest.gltf", forceRebuild);
+        m_ModelInst = Renderer::LoadModel(L"Assets/WaterBottle/glTF/WaterBottle.gltf", forceRebuild);
         m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
         OrientedBox obb = m_ModelInst.GetBoundingBox();
         float modelRadius = Length(obb.GetDimensions()) * 0.5f;

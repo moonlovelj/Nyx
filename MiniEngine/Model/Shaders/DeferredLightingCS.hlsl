@@ -76,7 +76,7 @@ void main(
             Surface.N = normal;
             Surface.V = normalize(ViewerPos - posW);
             Surface.NdotV = saturate(dot(Surface.N, Surface.V));
-            Surface.c_diff = baseColor.rgb * (1 - kDielectricSpecular) * (1 - metallicRoughnessOcclusion.x) * metallicRoughnessOcclusion.z;
+            Surface.c_diff = baseColor.rgb * (1 - metallicRoughnessOcclusion.x) * metallicRoughnessOcclusion.z;
             Surface.c_spec = lerp(kDielectricSpecular, baseColor.rgb, metallicRoughnessOcclusion.x) * metallicRoughnessOcclusion.z;
             Surface.roughness = metallicRoughnessOcclusion.y;
             Surface.alpha = metallicRoughnessOcclusion.y * metallicRoughnessOcclusion.y;
@@ -86,9 +86,9 @@ void main(
             shadowCoord.xyz *= rcp(shadowCoord.w);
             // TODO 阴影有瑕疵
             float sunShadow = GetDirectionalShadow(ScreenUV, shadowCoord.xyz, texShadow);
-            colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunColor);
+            //colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunColor);
 
-            ShadeLights(colorAccum.rgb, Surface, DTid, posW);
+            //ShadeLights(colorAccum.rgb, Surface, DTid, posW);
 
             //float3 WorldPos = gBufferD[DTid].xyz;
             //colorAccum.rgb = abs(posW - WorldPos);
@@ -102,6 +102,8 @@ void main(
             colorAccum.rgb += EvaluateIBLSpecular(Surface);
 
             //colorAccum.rgb = sunShadow;
+            //colorAccum.rgb = Surface.c_spec;
+            //colorAccum.rgb = baseColor;
 
             //TODO ssao在球面有严重条纹瑕疵，待修复
 

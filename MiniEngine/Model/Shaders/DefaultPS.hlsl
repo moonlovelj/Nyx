@@ -101,7 +101,7 @@ float4 main(VSOutput vsOutput) : SV_Target0
     Surface.N = normal;
     Surface.V = normalize(ViewerPos - vsOutput.worldPos);
     Surface.NdotV = saturate(dot(Surface.N, Surface.V));
-    Surface.c_diff = baseColor.rgb * (1 - kDielectricSpecular) * (1 - metallicRoughness.x) * occlusion;
+    Surface.c_diff = baseColor.rgb * (1 - metallicRoughness.x) * occlusion;
     Surface.c_spec = lerp(kDielectricSpecular, baseColor.rgb, metallicRoughness.x) * occlusion;
     Surface.roughness = metallicRoughness.y;
     Surface.alpha = metallicRoughness.y * metallicRoughness.y;
