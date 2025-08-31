@@ -123,6 +123,10 @@ bool ConvertToDDS( const std::wstring& filePath, uint32_t Flags )
         WIC_FLAGS wicFlags = WIC_FLAGS_NONE;
         //if (g_pScene->Settings().bIgnoreSRGB)
         //    wicFlags |= WIC_FLAGS_IGNORE_SRGB;
+        if (bInterpretAsSRGB)
+        {
+            wicFlags |= WIC_FLAGS_DEFAULT_SRGB;
+        }
 
         HRESULT hr = LoadFromWICFile( filePath.c_str(), wicFlags, &info, *image );
         if (FAILED(hr))
