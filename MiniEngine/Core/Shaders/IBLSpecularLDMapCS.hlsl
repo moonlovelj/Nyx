@@ -54,11 +54,18 @@ float4 IntegrateCubeLDOnly(in float3 V, in float3 N, in float roughness)
             float NdotH = saturate(dot(N, H));
             float LdotH = saturate(dot(L, H));
 
-            float pdf = Specular_D_GGX(NdotH, roughness * roughness * roughness * roughness) * NdotH / (4 * LdotH);
-            float omegaS = 1.0 / (kSampleCount * pdf);
-            float omegaP = 4.0 * PI / (6.0 * HDRITextureSize * HDRITextureSize);
-            float mipLevel = clamp(0.5 * log2(omegaS / omegaP), 0, HDRIMipCount-1);
-
+            float mipLevel = 0;
+            if (roughness < 1e-6)
+            {
+                // roughness == 0
+                mipLevel = 0;//clamp(2, 0, HDRIMipCount - 1);
+            }
+            else
+            {
+                float pdf = Specular_D_GGX(NdotH, roughness * roughness * roughness * roughness) * NdotH / (4 * LdotH);
+                mipLevel = clamp(ComputeMipLevel(kSampleCount, pdf, HDRITextureSize), 0, HDRIMipCount - 1);
+            }
+            
             float4 Li = IBLHDRITexture.SampleLevel(cubeMapSampler, L, mipLevel);
 
             accBrdf += Li.rgb * NdotL;
@@ -85,7 +92,7 @@ void main(
     if (Pixel.x < SpecularLDMapSize && Pixel.y < SpecularLDMapSize)
     {
         float3 N = ConvertCubePixelToDir(Pixel.x, Pixel.y, Gid.z, SpecularLDMapSize);
-        float4 Acc = IntegrateCubeLDOnly(N, N, max(0.04, Roughness));
+        float4 Acc = IntegrateCubeLDOnly(N, N, Roughness);
         IBLSpecularLDMap[uint3(Pixel, Gid.z)] = Acc;
     }
 }

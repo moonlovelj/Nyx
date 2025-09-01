@@ -229,17 +229,32 @@ float3 getSpecularDominantDir(float3 N, float3 R, float roughness)
     return lerp(N, R, lerpFactor);
 }
 
+float3 GetOffSpecularPeakReflectionDir(float3 Normal, float3 ReflectionVector, float Roughness)
+{
+    float a = Roughness * Roughness;
+    return lerp(Normal, ReflectionVector, (1 - a) * (sqrt(1 - a) + a));
+}
+
+float ComputeReflectionCaptureMipFromRoughness(float Roughness, float CubemapMaxMip)
+{
+    float LevelFrom1x1 = 1 - 1.2 * log2(max(Roughness, 0.001));
+    return CubemapMaxMip - 1 - LevelFrom1x1;
+}
+
 float3 EvaluateIBLSpecular(SurfaceProperties Surface)
 {
     float3 R = reflect(-Surface.V, Surface.N);
 
     //float3 dominantR = getSpecularDominantDir(Surface.N, R, Surface.roughness);
+    R = GetOffSpecularPeakReflectionDir(Surface.N, R, Surface.roughness);
 
     // Rebuild the function
     // L ， D ， (f0 ， Gv ， (1 - Fc) + Gv ， Fc) ， cosTheta / (4 ， NdotL ， NdotV)
     //float NdotV = max(Surface.NdotV, 0.5f / IBLLutTextureSize);
 
-    float mipLevel = Surface.roughness * (IBLSpecularLDMapMipCount-1.0);
+    //float mipLevel = Surface.roughness * (IBLSpecularLDMapMipCount - 1.0);
+    float mipLevel = ComputeReflectionCaptureMipFromRoughness(Surface.roughness, IBLSpecularLDMapMipCount - 1.0);
+
     float3 preLD = IBLSpecularLDMap.SampleLevel(cubeMapSampler, R, mipLevel).rgb;
 
     // Sample pre-integrated DFG

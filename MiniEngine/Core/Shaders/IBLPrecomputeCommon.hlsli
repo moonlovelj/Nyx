@@ -49,7 +49,7 @@ void ImportanceSampleGGX(float2 Xi, float Roughness, float3 V, float3 N, out flo
 	// Tangent to world space
 	H = normalize(TangentX * H.x + TangentY * H.y + N * H.z);
 
-    L = 2 * dot(V, H) * H - V;
+    L = normalize(2 * dot(V, H) * H - V);
 }
 
 void ImportanceSampleCosDir(
@@ -140,6 +140,14 @@ float3 ConvertCubePixelToDir(uint X, uint Y, uint Z, uint TextureSize)
     dir = normalize(dir);
 
     return dir;
+}
+
+float ComputeMipLevel(float sampleCount, float pdf, float hdriTextureSize)
+{
+    float omegaS = 1.0 / (sampleCount * pdf);
+    float omegaP = 4.0 * PI / (6.0 * hdriTextureSize * hdriTextureSize);
+    float mipLevel = 0.5 * log2(omegaS / omegaP) + 1;
+    return mipLevel;
 }
 
 #endif

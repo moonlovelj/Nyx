@@ -34,9 +34,7 @@ float4 IntegrateDiffuseCube(float3 N)
         ImportanceSampleCosDir(eta, N, L, NdotL, pdf);
         if (NdotL > 0)
         {
-            float omegaS = 1.0 / (kSampleCount * pdf);
-            float omegaP = 4.0 * PI / (6.0 * HDRITextureSize * HDRITextureSize);
-            float mipLevel = clamp(0.5 * log2(omegaS / omegaP), 0, HDRIMipCount-1);
+            float mipLevel = clamp(ComputeMipLevel(kSampleCount, pdf, HDRITextureSize) + 1, 0, HDRIMipCount - 1);            
 	        accBrdf += IBLHDRITexture.SampleLevel(cubeMapSampler, L, mipLevel).rgb;
         }
             
