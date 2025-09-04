@@ -30,6 +30,15 @@
 #include "CompiledShaders/GenerateMipsGammaOddXCS.h"
 #include "CompiledShaders/GenerateMipsGammaOddYCS.h"
 
+#include "CompiledShaders/GenerateMipsArrayLinearCS.h"
+#include "CompiledShaders/GenerateMipsArrayLinearOddCS.h"
+#include "CompiledShaders/GenerateMipsArrayLinearOddXCS.h"
+#include "CompiledShaders/GenerateMipsArrayLinearOddYCS.h"
+#include "CompiledShaders/GenerateMipsArrayGammaCS.h"
+#include "CompiledShaders/GenerateMipsArrayGammaOddCS.h"
+#include "CompiledShaders/GenerateMipsArrayGammaOddXCS.h"
+#include "CompiledShaders/GenerateMipsArrayGammaOddYCS.h"
+
 #include "CompiledShaders/ScreenQuadCommonVS.h"
 #include "CompiledShaders/DownsampleDepthPS.h"
 
@@ -102,6 +111,23 @@ namespace Graphics
         { L"Generate Mips Gamma Odd Y CS" },
         { L"Generate Mips Gamma Odd CS" },
     };
+
+	ComputePSO g_GenerateMipsArrayLinearPSO[4] =
+	{
+		{L"Generate Mips Array Linear CS"},
+		{L"Generate Mips Array Linear Odd X CS"},
+		{L"Generate Mips Array Linear Odd Y CS"},
+		{L"Generate Mips Array Linear Odd CS"},
+	};
+
+	ComputePSO g_GenerateMipsArrayGammaPSO[4] =
+	{
+		{ L"Generate Mips Array Gamma CS" },
+		{ L"Generate Mips Array Gamma Odd X CS" },
+		{ L"Generate Mips Array Gamma Odd Y CS" },
+		{ L"Generate Mips Array Gamma Odd CS" },
+	};
+
 
     GraphicsPSO g_DownsampleDepthPSO(L"DownsampleDepth PSO");
 }
@@ -285,6 +311,15 @@ void Graphics::InitializeCommonState(void)
     CreatePSO(g_GenerateMipsGammaPSO[1], g_pGenerateMipsGammaOddXCS);
     CreatePSO(g_GenerateMipsGammaPSO[2], g_pGenerateMipsGammaOddYCS);
     CreatePSO(g_GenerateMipsGammaPSO[3], g_pGenerateMipsGammaOddCS);
+
+	CreatePSO(g_GenerateMipsArrayLinearPSO[0], g_pGenerateMipsArrayLinearCS);
+	CreatePSO(g_GenerateMipsArrayLinearPSO[1], g_pGenerateMipsArrayLinearOddXCS);
+	CreatePSO(g_GenerateMipsArrayLinearPSO[2], g_pGenerateMipsArrayLinearOddYCS);
+	CreatePSO(g_GenerateMipsArrayLinearPSO[3], g_pGenerateMipsArrayLinearOddCS);
+	CreatePSO(g_GenerateMipsArrayGammaPSO[0], g_pGenerateMipsArrayGammaCS);
+	CreatePSO(g_GenerateMipsArrayGammaPSO[1], g_pGenerateMipsArrayGammaOddXCS);
+	CreatePSO(g_GenerateMipsArrayGammaPSO[2], g_pGenerateMipsArrayGammaOddYCS);
+	CreatePSO(g_GenerateMipsArrayGammaPSO[3], g_pGenerateMipsArrayGammaOddCS);
 
     g_DownsampleDepthPSO.SetRootSignature(g_CommonRS);
     g_DownsampleDepthPSO.SetRasterizerState(RasterizerTwoSided);

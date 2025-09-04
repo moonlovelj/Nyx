@@ -547,7 +547,7 @@ void Renderer::DrawSkybox( GraphicsContext& gfxContext, const Camera& Camera, co
     gfxContext.SetDynamicConstantBufferView(kMeshConstants, sizeof(SkyboxVSCB), &skyVSCB);
     gfxContext.SetDynamicConstantBufferView(kMaterialConstants, sizeof(SkyboxPSCB), &skyPSCB);
     //gfxContext.SetDescriptorTable(kCommonSRVs, m_CommonTextures);
-    gfxContext.SetDynamicDescriptor(kCommonSRVs, 0, IBL::m_IBLHDRI.IsValid() ? IBL::m_IBLHDRI.GetSRV() : GetDefaultTexture(kBlackOpaque2D));
+    gfxContext.SetDynamicDescriptor(kCommonSRVs, 0, IBL::IsValid() ? Graphics::g_IBLCubeMap.GetSRV() : GetDefaultTexture(kBlackOpaque2D));
     gfxContext.Draw(3);
 }
 

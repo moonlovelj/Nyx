@@ -4,8 +4,7 @@
 
 namespace IBL
 {
-    extern TextureRef m_IBLHDRI;
-
+    extern const uint32_t g_IBLCubeMapSize;
     extern const uint32_t g_IBLDiffuseLDMapSize;
     extern const uint32_t g_IBLSpecularLDMapSize;
     extern const uint32_t g_IBLLutSize;

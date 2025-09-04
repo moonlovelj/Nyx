@@ -92,7 +92,7 @@ float4 main(VSOutput vsOutput) : SV_Target0
     float4 baseColor = baseColorFactor * baseColorTexture.Sample(baseColorSampler, UVSET(BASECOLOR));
     float2 metallicRoughness = metallicRoughnessFactor * 
         metallicRoughnessTexture.Sample(metallicRoughnessSampler, UVSET(METALLICROUGHNESS)).bg;
-    metallicRoughness.y = max(0.04, metallicRoughness.y);
+    metallicRoughness.y = max(0.001, metallicRoughness.y);
     float occlusion = occlusionTexture.Sample(occlusionSampler, UVSET(OCCLUSION));
     float3 emissive = emissiveFactor * emissiveTexture.Sample(emissiveSampler, UVSET(EMISSIVE));
     float3 normal = ComputeNormal(vsOutput);

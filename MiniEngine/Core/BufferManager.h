@@ -27,6 +27,7 @@ namespace Graphics
     extern ColorBuffer g_GBufferB;          // R16G16B16A16_FLOAT
     extern ColorBuffer g_GBufferC;          // R16G16B16A16_FLOAT
     extern ColorBuffer g_GBufferD;          // R16G16B16A16_FLOAT
+    extern ColorBuffer g_IBLCubeMap;        // R16G16B16A16_FLOAT
     extern ColorBuffer g_IBLDiffuseLDMap;   // R16G16B16A16_FLOAT
     extern ColorBuffer g_IBLSpecularLDMap;  // R16G16B16A16_FLOAT
     extern ColorBuffer g_IBLLut;            // R16G16B16A16_FLOAT

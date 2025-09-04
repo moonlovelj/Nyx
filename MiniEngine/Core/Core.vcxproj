@@ -296,6 +296,14 @@
     <FxCompile Include="Shaders\GenerateHistogramCS.hlsl" />
     <FxCompile Include="Shaders\FXAAPass2HCS.hlsl" />
     <FxCompile Include="Shaders\FXAAPass2VCS.hlsl" />
+    <FxCompile Include="Shaders\GenerateMipsArrayGammaCS.hlsl" />
+    <FxCompile Include="Shaders\GenerateMipsArrayGammaOddCS.hlsl" />
+    <FxCompile Include="Shaders\GenerateMipsArrayGammaOddXCS.hlsl" />
+    <FxCompile Include="Shaders\GenerateMipsArrayGammaOddYCS.hlsl" />
+    <FxCompile Include="Shaders\GenerateMipsArrayLinearCS.hlsl" />
+    <FxCompile Include="Shaders\GenerateMipsArrayLinearOddCS.hlsl" />
+    <FxCompile Include="Shaders\GenerateMipsArrayLinearOddXCS.hlsl" />
+    <FxCompile Include="Shaders\GenerateMipsArrayLinearOddYCS.hlsl" />
     <FxCompile Include="Shaders\GenerateMipsGammaCS.hlsl" />
     <FxCompile Include="Shaders\GenerateMipsGammaOddCS.hlsl" />
     <FxCompile Include="Shaders\GenerateMipsGammaOddXCS.hlsl" />
@@ -305,6 +313,7 @@
     <FxCompile Include="Shaders\GenerateMipsLinearOddXCS.hlsl" />
     <FxCompile Include="Shaders\GenerateMipsLinearOddYCS.hlsl" />
     <FxCompile Include="Shaders\IBLDiffuseLDMapCS.hlsl" />
+    <FxCompile Include="Shaders\IBLGenerateCubeMapCS.hlsl" />
     <FxCompile Include="Shaders\IBLLutCS.hlsl" />
     <FxCompile Include="Shaders\IBLSpecularLDMapCS.hlsl" />
     <FxCompile Include="Shaders\LanczosCS.hlsl" />

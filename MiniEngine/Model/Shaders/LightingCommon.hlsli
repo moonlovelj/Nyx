@@ -237,8 +237,9 @@ float3 GetOffSpecularPeakReflectionDir(float3 Normal, float3 ReflectionVector, f
 
 float ComputeReflectionCaptureMipFromRoughness(float Roughness, float CubemapMaxMip)
 {
-    float LevelFrom1x1 = 1 - 1.2 * log2(max(Roughness, 0.001));
-    return CubemapMaxMip - 1 - LevelFrom1x1;
+    //float LevelFrom1x1 = 1 - 1.2 * log2(max(Roughness, 0.001));
+    //return CubemapMaxMip - 1 - LevelFrom1x1;
+    return sqrt(Roughness) * CubemapMaxMip;
 }
 
 float3 EvaluateIBLSpecular(SurfaceProperties Surface)

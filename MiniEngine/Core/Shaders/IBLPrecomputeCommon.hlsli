@@ -100,43 +100,40 @@ float Specular_D_GGX(float NdotH, float alphaSqr)
 //     
 // }
 
-float3 ConvertCubePixelToDir(uint X, uint Y, uint Z, uint TextureSize)
+float3 ConvertCubePixelToDir(uint x, uint y, uint face, uint TextureSize)
 {
     // 输入: x, y 像素坐标，width, height 每个面尺寸， d 面索引[0..5]
     // 输出: 方向向量 dir (float3)
 
-    float u = ((float) (X + 0.5) / TextureSize) * 2.0f - 1.0f; // [-1,1]
-    float v = ((float) (Y + 0.5) / TextureSize) * 2.0f - 1.0f; // [-1,1]
-    // 注意根据你的纹理坐标系统，v可能需要反转 v = -v;
+    float u = ((float)x + 0.5) / TextureSize; // 0~1
+    float v = ((float)y + 0.5) / TextureSize; // 0~1
+
+    // 转到 [-1,1] 坐标，中心对齐
+    float fx = 2.0 * u - 1.0;
+    float fy = 2.0 * v - 1.0;
 
     float3 dir;
-
-    switch (Z)
+    switch (face)
     {
-        case 0:
-            dir = float3(1, -v, -u);
-            break; // +X
-        case 1:
-            dir = float3(-1, -v, u);
-            break; // -X
-        case 2:
-            dir = float3(u, 1, v);
-            break; // +Y
-        case 3:
-            dir = float3(u, -1, -v);
-            break; // -Y
-        case 4:
-            dir = float3(u, -v, 1);
-            break; // +Z
-        case 5:
-            dir = float3(-u, -v, -1);
-            break; // -Z
-        default:
-            dir = float3(0, 0, 0);
-            break;
+    case 0:
+        dir = float3(1, -fy, -fx);
+        break; // +X
+    case 1:
+        dir = float3(-1, -fy, fx);
+        break; // -X
+    case 2:
+        dir = float3(fx, 1, fy);
+        break; // +Y
+    case 3:
+        dir = float3(fx, -1, -fy);
+        break; // -Y
+    case 4:
+        dir = float3(fx, -fy, 1);
+        break; // +Z
+    case 5:
+        dir = float3(-fx, -fy, -1);
+        break; // -Z
     }
-
-    //dir.z = -dir.z; // 转换成右手系
     dir = normalize(dir);
 
     return dir;

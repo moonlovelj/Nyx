@@ -196,6 +196,8 @@ void Display::Resize(uint32_t width, uint32_t height)
 {
     g_CommandManager.IdleGPU();
 
+	width = std::max(width, 1u);
+    height = std::max(height, 1u);
     g_DisplayWidth = width;
     g_DisplayHeight = height;
 

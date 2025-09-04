@@ -87,5 +87,7 @@ namespace Graphics
     extern RootSignature g_CommonRS;
     extern ComputePSO g_GenerateMipsLinearPSO[4];
     extern ComputePSO g_GenerateMipsGammaPSO[4];
+	extern ComputePSO g_GenerateMipsArrayLinearPSO[4];
+	extern ComputePSO g_GenerateMipsArrayGammaPSO[4];
     extern GraphicsPSO g_DownsampleDepthPSO;
 }

@@ -17,11 +17,20 @@
 #define NON_POWER_OF_TWO 0
 #endif
 
+#ifdef TEXTURE_ARRAY
+RWTexture2DArray<float4> OutMip1 : register(u0);
+RWTexture2DArray<float4> OutMip2 : register(u1);
+RWTexture2DArray<float4> OutMip3 : register(u2);
+RWTexture2DArray<float4> OutMip4 : register(u3);
+Texture2DArray<float4> SrcMip : register(t0);
+#else
 RWTexture2D<float4> OutMip1 : register(u0);
 RWTexture2D<float4> OutMip2 : register(u1);
 RWTexture2D<float4> OutMip3 : register(u2);
 RWTexture2D<float4> OutMip4 : register(u3);
 Texture2D<float4> SrcMip : register(t0);
+#endif
+
 SamplerState BilinearClamp : register(s0);
 
 cbuffer CB0 : register(b0)
@@ -30,6 +39,13 @@ cbuffer CB0 : register(b0)
     uint NumMipLevels;	// Number of OutMips to write: [1, 4]
     float2 TexelSize;	// 1.0 / OutMip1.Dimensions
 }
+
+#ifdef TEXTURE_ARRAY
+cbuffer CB1 : register(b1)
+{
+    uint SliceIndex;
+}
+#endif
 
 // The reason for separating channels is to reduce bank conflicts in the
 // local data memory controller.  A large stride will cause more threads
@@ -81,39 +97,65 @@ void main( uint GI : SV_GroupIndex, uint3 DTid : SV_DispatchThreadID )
     // will force this shader to be slower and more complicated as it will
     // have to take more source texture samples.
 #if NON_POWER_OF_TWO == 0
+#ifdef TEXTURE_ARRAY
+    float3 UV = float3(TexelSize * (DTid.xy + 0.5), SliceIndex);
+#else
     float2 UV = TexelSize * (DTid.xy + 0.5);
+#endif
     float4 Src1 = SrcMip.SampleLevel(BilinearClamp, UV, SrcMipLevel);
 #elif NON_POWER_OF_TWO == 1
     // > 2:1 in X dimension
     // Use 2 bilinear samples to guarantee we don't undersample when downsizing by more than 2x
     // horizontally.
+#ifdef TEXTURE_ARRAY
+    float3 UV1 = float3(TexelSize * (DTid.xy + float2(0.25, 0.5)), SliceIndex);
+    float3 Off = float3(TexelSize * float2(0.5, 0.0), 0.0);
+#else
     float2 UV1 = TexelSize * (DTid.xy + float2(0.25, 0.5));
     float2 Off = TexelSize * float2(0.5, 0.0);
+#endif
     float4 Src1 = 0.5 * (SrcMip.SampleLevel(BilinearClamp, UV1, SrcMipLevel) +
         SrcMip.SampleLevel(BilinearClamp, UV1 + Off, SrcMipLevel));
 #elif NON_POWER_OF_TWO == 2
     // > 2:1 in Y dimension
     // Use 2 bilinear samples to guarantee we don't undersample when downsizing by more than 2x
     // vertically.
+#ifdef TEXTURE_ARRAY
+    float3 UV1 = float3(TexelSize * (DTid.xy + float2(0.5, 0.25)), SliceIndex);
+    float3 Off = float3(TexelSize * float2(0.0, 0.5), 0.0);
+#else
     float2 UV1 = TexelSize * (DTid.xy + float2(0.5, 0.25));
     float2 Off = TexelSize * float2(0.0, 0.5);
+#endif
     float4 Src1 = 0.5 * (SrcMip.SampleLevel(BilinearClamp, UV1, SrcMipLevel) +
         SrcMip.SampleLevel(BilinearClamp, UV1 + Off, SrcMipLevel));
 #elif NON_POWER_OF_TWO == 3
     // > 2:1 in in both dimensions
     // Use 4 bilinear samples to guarantee we don't undersample when downsizing by more than 2x
     // in both directions.
+#ifdef TEXTURE_ARRAY
+    float3 UV1 = float3(TexelSize * (DTid.xy + float2(0.25, 0.25)), SliceIndex);
+    float3 O = float3(TexelSize * 0.5, 0);
+    float4 Src1 = SrcMip.SampleLevel(BilinearClamp, UV1, SrcMipLevel);
+    Src1 += SrcMip.SampleLevel(BilinearClamp, UV1 + float3(O.x, 0.0, 0.0), SrcMipLevel);
+    Src1 += SrcMip.SampleLevel(BilinearClamp, UV1 + float3(0.0, O.y, 0.0), SrcMipLevel);
+    Src1 += SrcMip.SampleLevel(BilinearClamp, UV1 + float3(O.x, O.y, 0.0), SrcMipLevel);
+#else
     float2 UV1 = TexelSize * (DTid.xy + float2(0.25, 0.25));
     float2 O = TexelSize * 0.5;
     float4 Src1 = SrcMip.SampleLevel(BilinearClamp, UV1, SrcMipLevel);
     Src1 += SrcMip.SampleLevel(BilinearClamp, UV1 + float2(O.x, 0.0), SrcMipLevel);
     Src1 += SrcMip.SampleLevel(BilinearClamp, UV1 + float2(0.0, O.y), SrcMipLevel);
     Src1 += SrcMip.SampleLevel(BilinearClamp, UV1 + float2(O.x, O.y), SrcMipLevel);
+#endif
     Src1 *= 0.25;
 #endif
 
+#ifdef TEXTURE_ARRAY
+    OutMip1[uint3(DTid.xy, SliceIndex)] = PackColor(Src1);
+#else
     OutMip1[DTid.xy] = PackColor(Src1);
-
+#endif
     // A scalar (constant) branch can exit all threads coherently.
     if (NumMipLevels == 1)
         return;
@@ -135,8 +177,11 @@ void main( uint GI : SV_GroupIndex, uint3 DTid : SV_DispatchThreadID )
         float4 Src3 = LoadColor(GI + 0x08);
         float4 Src4 = LoadColor(GI + 0x09);
         Src1 = 0.25 * (Src1 + Src2 + Src3 + Src4);
-
+#ifdef TEXTURE_ARRAY
+        OutMip2[uint3(DTid.xy / 2, SliceIndex)] = PackColor(Src1);
+#else
         OutMip2[DTid.xy / 2] = PackColor(Src1);
+#endif
         StoreColor(GI, Src1);
     }
 
@@ -152,8 +197,11 @@ void main( uint GI : SV_GroupIndex, uint3 DTid : SV_DispatchThreadID )
         float4 Src3 = LoadColor(GI + 0x10);
         float4 Src4 = LoadColor(GI + 0x12);
         Src1 = 0.25 * (Src1 + Src2 + Src3 + Src4);
-
+#ifdef TEXTURE_ARRAY
+        OutMip3[uint3(DTid.xy / 4, SliceIndex)] = PackColor(Src1);
+#else
         OutMip3[DTid.xy / 4] = PackColor(Src1);
+#endif
         StoreColor(GI, Src1);
     }
 
@@ -170,7 +218,10 @@ void main( uint GI : SV_GroupIndex, uint3 DTid : SV_DispatchThreadID )
         float4 Src3 = LoadColor(GI + 0x20);
         float4 Src4 = LoadColor(GI + 0x24);
         Src1 = 0.25 * (Src1 + Src2 + Src3 + Src4);
-
+#ifdef TEXTURE_ARRAY
+        OutMip4[uint3(DTid.xy / 8, SliceIndex)] = PackColor(Src1);
+#else
         OutMip4[DTid.xy / 8] = PackColor(Src1);
+#endif
     }
 }

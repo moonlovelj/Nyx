@@ -27,6 +27,7 @@ public:
     {
         m_RTVHandle.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
         m_SRVHandle.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
+        m_ArraySRVHandle.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
         for (int i = 0; i < _countof(m_UAVHandle); ++i)
             m_UAVHandle[i].ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
     }
@@ -110,7 +111,8 @@ protected:
     void CreateDerivedViews(ID3D12Device* Device, DXGI_FORMAT Format, uint32_t ArraySize, uint32_t NumMips = 1, bool isCubeMap = false);
 
     Color m_ClearColor;
-    D3D12_CPU_DESCRIPTOR_HANDLE m_SRVHandle;
+	D3D12_CPU_DESCRIPTOR_HANDLE m_SRVHandle;
+	D3D12_CPU_DESCRIPTOR_HANDLE m_ArraySRVHandle;
     D3D12_CPU_DESCRIPTOR_HANDLE m_RTVHandle;
     D3D12_CPU_DESCRIPTOR_HANDLE m_UAVHandle[12];
     uint32_t m_NumMipMaps; // number of texture sublevels

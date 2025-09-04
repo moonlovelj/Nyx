@@ -22,6 +22,7 @@
 #include "LightManager.h"
 #include "SponzaRenderer.h"
 #include "IBL.h"
+#include "TextureConvert.h"
 
 using namespace GameCore;
 using namespace Math;
@@ -161,7 +162,7 @@ void LoadIBLHDRITextures()
     g_IBLSet.AddEnum(L"None");
 
     WIN32_FIND_DATA ffd;
-    HANDLE hFind = FindFirstFile(L"Textures/HDRIs/*_bc6h.dds", &ffd);
+    HANDLE hFind = FindFirstFile(L"Textures/HDRIs/*.hdr", &ffd);
 
     if (hFind != INVALID_HANDLE_VALUE) do
     {
@@ -169,14 +170,25 @@ void LoadIBLHDRITextures()
             continue;
 
         std::wstring baseFile = ffd.cFileName;
-        TextureRef hdriTex = TextureManager::LoadDDSFromFile(L"Textures/HDRIs/" + baseFile);
-        if (hdriTex.IsValid())
-        {
-            g_IBLHDRITextures.push_back(hdriTex);
-            g_IBLSet.AddEnum(baseFile);
-        }
+		CompileTextureOnDemand(L"Textures/HDRIs/" + baseFile, TexConversionFlags::kQualityBC);
     }
     while (FindNextFile(hFind, &ffd) != 0);
+
+
+    hFind = FindFirstFile(L"Textures/HDRIs/*.dds", &ffd);
+	if (hFind != INVALID_HANDLE_VALUE) do
+	{
+		if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+			continue;
+
+		std::wstring baseFile = ffd.cFileName;
+        TextureRef hdriTex = TextureManager::LoadDDSFromFile(L"Textures/HDRIs/" + baseFile);
+		if (hdriTex.IsValid())
+		{
+			g_IBLHDRITextures.push_back(hdriTex);
+			g_IBLSet.AddEnum(baseFile);
+		}
+	} while (FindNextFile(hFind, &ffd) != 0);
 
     FindClose(hFind);
 
@@ -191,12 +203,12 @@ void SceneViewer::Startup( void )
     // Setup your data
 
     // MotionBlur::Enable = true;
-    TemporalEffects::EnableTAA = false;
-	FXAA::Enable = false;
+    //TemporalEffects::EnableTAA = false;
+	//FXAA::Enable = false;
 	//PostEffects::EnableHDR = false;
     SSAO::Enable = false;
     PostEffects::BloomEnable = false;
-    PostEffects::EnableAdaptation = false;
+    //PostEffects::EnableAdaptation = false;
     
     Renderer::Initialize();
 
@@ -225,8 +237,8 @@ void SceneViewer::Startup( void )
     if (CommandLineArgs::GetString(L"model", gltfFileName) == false)
     {
         //m_ModelInst = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
-        //m_ModelInst = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
-        m_ModelInst = Renderer::LoadModel(L"Assets/WaterBottle/glTF/WaterBottle.gltf", forceRebuild);
+        m_ModelInst = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
+        //m_ModelInst = Renderer::LoadModel(L"Assets/WaterBottle/glTF/WaterBottle.gltf", forceRebuild);
         m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
         OrientedBox obb = m_ModelInst.GetBoundingBox();
         float modelRadius = Length(obb.GetDimensions()) * 0.5f;
