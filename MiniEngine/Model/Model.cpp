@@ -90,6 +90,7 @@ ModelInstance::ModelInstance( std::shared_ptr<const Model> sourceModel )
         m_AnimGraph = nullptr;
         m_AnimState.clear();
         m_Skeleton = nullptr;
+        m_Cameras.clear();
     }
     else
     {
@@ -110,6 +111,22 @@ ModelInstance::ModelInstance( std::shared_ptr<const Model> sourceModel )
             m_AnimGraph = nullptr;
             m_AnimState.clear();
         }
+
+		m_Cameras.clear();
+		for (size_t i = 0; i < sourceModel->m_NumCameras; i++)
+		{
+			const CameraData& cameraData = sourceModel->m_Cameras[i];
+			if (cameraData.type == CameraData::kPerspective)
+			{
+				Camera* camera = new Camera();
+				camera->SetPerspectiveMatrix(cameraData.yfov, cameraData.aspectRatio, cameraData.znear, cameraData.zfar);
+				m_Cameras.emplace(cameraData.matrixIdx, camera);
+			}
+			else
+			{
+				ASSERT(false, "Not support load orthographic camera");
+			}
+		}
     }
 }
 
@@ -130,6 +147,7 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
         m_AnimGraph = nullptr;
         m_AnimState.clear();
         m_Skeleton = nullptr;
+        m_Cameras.clear();
     }
     else
     {
@@ -149,6 +167,22 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
         {
             m_AnimGraph = nullptr;
             m_AnimState.clear();
+        }
+
+        m_Cameras.clear();
+        for (size_t i = 0; i < sourceModel->m_NumCameras; i++)
+        {
+            const CameraData& cameraData = sourceModel->m_Cameras[i];
+            if (cameraData.type == CameraData::kPerspective)
+            {
+                Camera* camera = new Camera();
+                camera->SetPerspectiveMatrix(cameraData.yfov, cameraData.aspectRatio, cameraData.znear, cameraData.zfar);
+                m_Cameras.emplace(cameraData.matrixIdx, camera);
+            }
+            else
+            {
+                ASSERT(false, "Not support load orthographic camera");
+            }
         }
     }
     return *this;
@@ -230,6 +264,12 @@ void ModelInstance::Update(GraphicsContext& gfxContext, float deltaTime)
             ParentMatrix = matrixStack[--stackIdx];
         }
     }
+
+    // Update cameras
+	for (auto it = m_Cameras.begin(); it != m_Cameras.end(); ++it) 
+    {
+        it->second->SetTransform(m_BoundingSphereTransforms[it->first]);
+	}
 
     // Update skeletal joints
     for (uint32_t i = 0; i < m_Model->m_NumJoints; ++i)

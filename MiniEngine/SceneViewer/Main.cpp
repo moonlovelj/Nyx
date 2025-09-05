@@ -62,6 +62,7 @@ NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0
 NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f);
 NumVar g_SunLightSize("Viewer/Lighting/Sun Light Size", 0.5f, 0.0f, 2.0f, 0.1f);
 NumVar g_SunShadowBias("Viewer/Lighting/Sun Shadow Bias", 4.f, 1.0f, 20.0f, 1.f );
+BoolVar g_UseglTFCamera("Viewer/Camera/Use glTF Camera", true);
 
 void ChangeIBLSet(EngineVar::ActionType);
 void ChangeIBLBias(EngineVar::ActionType);
@@ -204,7 +205,7 @@ void SceneViewer::Startup( void )
 
     // MotionBlur::Enable = true;
     //TemporalEffects::EnableTAA = false;
-	//FXAA::Enable = false;
+	FXAA::Enable = true;
 	//PostEffects::EnableHDR = false;
     SSAO::Enable = false;
     PostEffects::BloomEnable = false;
@@ -239,7 +240,7 @@ void SceneViewer::Startup( void )
         //m_ModelInst = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
         m_ModelInst = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
         //m_ModelInst = Renderer::LoadModel(L"Assets/WaterBottle/glTF/WaterBottle.gltf", forceRebuild);
-        m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
+        //m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
         OrientedBox obb = m_ModelInst.GetBoundingBox();
         float modelRadius = Length(obb.GetDimensions()) * 0.5f;
         const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 0.5f, 0.0f, 0.0f);
@@ -249,15 +250,15 @@ void SceneViewer::Startup( void )
     {
         m_ModelInst = Renderer::LoadModel(gltfFileName, forceRebuild);
         m_ModelInst.LoopAllAnimations();
-        m_ModelInst.Resize(10.0f);
+        //m_ModelInst.Resize(10.0f);
 
         MotionBlur::Enable = false;
     }
 
     m_Camera.SetZRange(1.0f, 10000.0f);
-    if (gltfFileName.size() == 0)
-        m_CameraController.reset(new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector)));
-    else
+	if (gltfFileName.size() == 0)
+		m_CameraController.reset(new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector)));
+	else
         m_CameraController.reset(new OrbitCamera(m_Camera, m_ModelInst.GetBoundingSphere(), Vector3(kYUnitVector)));
 
     const Vector3 BoxCenter = m_ModelInst.GetBoundingBox().GetCenter();
@@ -293,13 +294,28 @@ void SceneViewer::Update( float deltaT )
     else if (GameInput::IsFirstPressed(GameInput::kRShoulder))
         DebugZoom.Increment();
 
-    m_CameraController->Update(deltaT);
+    const uint32_t NumCameras = m_ModelInst.GetNumCameras();
+    const bool bUseglTFCamera = NumCameras > 0 && g_UseglTFCamera;
+
+    if (!bUseglTFCamera)
+        m_CameraController->Update(deltaT);
 
     GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Update");
 
     m_ModelInst.Update(gfxContext, deltaT);
 
     gfxContext.Finish();
+    
+    //m_Camera.SetAspectRatio((float)g_DisplayHeight / g_DisplayWidth);
+	if (bUseglTFCamera)
+	{
+		std::shared_ptr<Math::Camera> Camera = m_ModelInst.GetCameras()[0];
+		m_Camera.SetFOV(Camera->GetFOV());
+		m_Camera.SetZRange(Camera->GetNearClip(), Camera->GetFarClip());
+		m_Camera.SetPosition(Camera->GetPosition());
+		m_Camera.SetLookDirection(Camera->GetForwardVec(), Camera->GetUpVec());
+		m_Camera.Update();
+	}
 
     // We use viewport offsets to jitter sample positions from frame to frame (for TAA.)
     // D3D has a design quirk with fractional offsets such that the implicit scissor
@@ -490,7 +506,7 @@ void SceneViewer::RenderScene( void )
     // is necessary for all temporal effects (and motion blur).
     MotionBlur::GenerateCameraVelocityBuffer(gfxContext, m_Camera, true);
 
-    TemporalEffects::ResolveImage(gfxContext);
+    //TemporalEffects::ResolveImage(gfxContext);
 
     ParticleEffectManager::Render(gfxContext, m_Camera, g_SceneColorBuffer, g_SceneDepthBuffer,  g_LinearDepth[FrameIndex]);
 

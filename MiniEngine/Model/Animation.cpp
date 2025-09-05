@@ -188,3 +188,14 @@ void ModelInstance::LoopAllAnimations(void)
         anim.time = 0.0f;
     }
 }
+
+std::vector<std::shared_ptr<Math::Camera>> ModelInstance::GetCameras() const
+{
+	std::vector<std::shared_ptr<Math::Camera>> cameras;
+    cameras.reserve(m_Cameras.size());
+	for (auto& kv : m_Cameras) {
+        cameras.push_back(kv.second);
+	}
+
+    return cameras;
+}

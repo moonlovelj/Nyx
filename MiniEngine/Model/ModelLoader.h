@@ -65,6 +65,7 @@ namespace Renderer
         std::vector<GraphNode> m_SceneGraph;
         std::vector<std::string> m_TextureNames;
         std::vector<uint8_t> m_TextureOptions;
+        std::vector<CameraData> m_Cameras;
     };
 
     struct FileHeader
@@ -82,6 +83,7 @@ namespace Renderer
         uint32_t numAnimationCurves;
         uint32_t numAnimations;
         uint32_t numJoints;     // All joints for all skins
+        uint32_t numCameras;
         float    boundingSphere[4];
         float    minPos[3];
         float    maxPos[3];

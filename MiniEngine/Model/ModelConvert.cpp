@@ -174,6 +174,7 @@ static uint32_t WalkGraph(
     AxisAlignedBox& modelBBox,
     std::vector<Mesh*>& meshList,
     std::vector<byte>& bufferMemory,
+    std::vector<CameraData>& cameraData,
     const std::vector<glTF::Node*>& siblings,
     uint32_t curPos,
     const Matrix4& xform
@@ -218,13 +219,24 @@ static uint32_t WalkGraph(
             modelBSphere = modelBSphere.Union(sphereOS);
             modelBBox.AddBoundingBox(boxOS);
         }
+        else if (curNode->pointsToCamera && curNode->camera != nullptr)
+        {
+            CameraData camera;
+			camera.aspectRatio = curNode->camera->aspectRatio;
+			camera.yfov = curNode->camera->yfov;
+			camera.znear = curNode->camera->znear;
+			camera.zfar = curNode->camera->zfar;
+            camera.matrixIdx = curPos;
+            camera.type = curNode->camera->type == glTF::Camera::kPerspective ? CameraData::kPerspective : CameraData::kOrthographic;
+            cameraData.emplace_back(camera);
+        }
 
         uint32_t nextPos = curPos + 1;
 
         if (curNode->children.size() > 0)
         {
             thisGraphNode.hasChildren = 1;
-            nextPos = WalkGraph(sceneGraph, modelBSphere, modelBBox, meshList, bufferMemory, curNode->children, nextPos, LocalXform);
+            nextPos = WalkGraph(sceneGraph, modelBSphere, modelBBox, meshList, bufferMemory, cameraData, curNode->children, nextPos, LocalXform);
         }
 
         // Are there more siblings?
@@ -456,7 +468,7 @@ bool Renderer::BuildModel(ModelData& model, const glTF::Asset& asset, int sceneI
 
     model.m_BoundingSphere = BoundingSphere(kZero);
     model.m_BoundingBox = AxisAlignedBox(kZero);
-    uint32_t numNodes = WalkGraph(model.m_SceneGraph, model.m_BoundingSphere, model.m_BoundingBox, model.m_Meshes, bufferMemory, scene->nodes, 0, Matrix4(kIdentity));
+    uint32_t numNodes = WalkGraph(model.m_SceneGraph, model.m_BoundingSphere, model.m_BoundingBox, model.m_Meshes, bufferMemory, model.m_Cameras, scene->nodes, 0, Matrix4(kIdentity));
     model.m_SceneGraph.resize(numNodes);
 
     BuildAnimations(model, asset);
@@ -489,6 +501,7 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data)
     header.numAnimationCurves = (uint32_t)data.m_AnimationCurves.size();
     header.numAnimations = (uint32_t)data.m_Animations.size();
     header.numJoints = (uint32_t)data.m_JointIndices.size();
+    header.numCameras = (uint32_t)data.m_Cameras.size();
     header.boundingSphere[0] = data.m_BoundingSphere.GetCenter().GetX();
     header.boundingSphere[1] = data.m_BoundingSphere.GetCenter().GetY();
     header.boundingSphere[2] = data.m_BoundingSphere.GetCenter().GetZ();
@@ -528,6 +541,11 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data)
         ASSERT(header.numJoints == (uint32_t)data.m_JointIBMs.size());
         outFile.write((char*)data.m_JointIndices.data(), header.numJoints * sizeof(uint16_t));
         outFile.write((char*)data.m_JointIBMs.data(), header.numJoints * sizeof(Matrix4));
+    }
+
+    if (header.numCameras)
+    {
+        outFile.write((char*)data.m_Cameras.data(), header.numCameras * sizeof(CameraData));
     }
 
     return true;

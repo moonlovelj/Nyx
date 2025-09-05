@@ -23,6 +23,8 @@
 #include "../Core/Math/BoundingBox.h"
 #include "../Core/Math/BoundingSphere.h"
 #include <cstdint>
+#include <map>
+
 
 namespace Renderer
 {
@@ -98,6 +100,28 @@ struct Joint
     Math::Matrix3 nrmXform;
 };
 
+// Camera info
+struct CameraData
+{
+	union
+	{
+		struct
+		{
+			float aspectRatio;
+			float yfov;
+		};
+		struct
+		{
+			float xmag;
+			float ymag;
+		};
+	};
+	float znear;
+	float zfar;
+	uint32_t matrixIdx : 28;
+	enum eType { kPerspective, kOrthographic } type : 4;
+};
+
 class Model
 {
 public:
@@ -116,7 +140,8 @@ public:
     uint32_t m_NumNodes;
     uint32_t m_NumMeshes;
     uint32_t m_NumAnimations;
-    uint32_t m_NumJoints;
+	uint32_t m_NumJoints;
+	uint32_t m_NumCameras;
     std::unique_ptr<uint8_t[]> m_MeshData;
     std::unique_ptr<GraphNode[]> m_SceneGraph;
     std::vector<TextureRef> textures;
@@ -124,7 +149,8 @@ public:
     std::unique_ptr<AnimationCurve[]> m_CurveData;
     std::unique_ptr<AnimationSet[]> m_Animations;
     std::unique_ptr<uint16_t[]> m_JointIndices;
-    std::unique_ptr<Math::Matrix4[]> m_JointIBMs;
+	std::unique_ptr<Math::Matrix4[]> m_JointIBMs;
+	std::unique_ptr<CameraData[]> m_Cameras;
 
 protected:
     void Destroy();
@@ -162,6 +188,9 @@ public:
     void UpdateAnimations(float deltaTime);
     void LoopAllAnimations(void);
 
+    size_t GetNumCameras() const { return m_Cameras.size(); }
+    std::vector<std::shared_ptr<Math::Camera>> GetCameras() const;
+
 private:
     std::shared_ptr<const Model> m_Model;
     UploadBuffer m_MeshConstantsCPU;
@@ -172,4 +201,6 @@ private:
     std::unique_ptr<GraphNode[]> m_AnimGraph;   // A copy of the scene graph when instancing animation
     std::vector<AnimationState> m_AnimState;    // Per-animation (not per-curve)
     std::unique_ptr<Joint[]> m_Skeleton;
+
+    std::map<uint32_t, std::shared_ptr<Math::Camera>> m_Cameras;
 };

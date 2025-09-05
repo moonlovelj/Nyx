@@ -297,5 +297,12 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
         inFile.read((char*)model->m_JointIBMs.get(), header.numJoints * sizeof(Matrix4));
     }
 
+    model->m_NumCameras = header.numCameras;
+    if (header.numCameras > 0)
+    {
+        model->m_Cameras.reset(new CameraData[header.numCameras]);
+        inFile.read((char*)model->m_Cameras.get(), header.numCameras * sizeof(CameraData));
+    }
+
     return model;
 }
