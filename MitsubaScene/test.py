@@ -2,7 +2,7 @@ import mitsuba as mi
 # print(mi.variants())
 mi.set_variant("cuda_ad_rgb")
 scene = mi.load_file("env/env.xml")
-image = mi.render(scene, spp=256)
+image = mi.render(scene)
 import matplotlib.pyplot as plt
 
 plt.axis("off")
