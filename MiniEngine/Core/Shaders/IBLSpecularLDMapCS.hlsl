@@ -8,10 +8,9 @@ cbuffer CSConstants : register(b0)
 {
     uint HDRITextureSize;
     uint HDRIMipCount;
-    uint SpecularLDMapSize;
-    float Roughness;
+    uint SpecularLDNumMips;
+    uint SpecularLDMipLevel;
 };
-
 
 TextureCube<float4> IBLHDRITexture          : register(t0);
 
@@ -19,7 +18,13 @@ RWTexture2DArray<float4> IBLSpecularLDMap : register(u0);
 
 SamplerState cubeMapSampler : register(s0);
 
-static const uint kSampleCount = 1024;
+static const uint kSampleCount = 64;
+
+float ComputeRoughnessFromMip(float Mip, float CubemapMaxMip)
+{
+    float LevelFrom1x1 = CubemapMaxMip - 1.0f - Mip;
+    return exp2((1.0f - LevelFrom1x1) / 1.2f);
+}
 
 float4 IntegrateCubeLDOnly(in float3 V, in float3 N, in float roughness)
 {
@@ -37,33 +42,23 @@ float4 IntegrateCubeLDOnly(in float3 V, in float3 N, in float roughness)
         float NdotL = saturate(dot(N, L));
         if (NdotL > 0)
         {
-            // Use pre-filtered importance sampling 
-            // (lower mipmap level for low-probability samples to reduce variance)
-            // Reference: GPU Gems 3
-
-            // Since we pre-integrate for normal direction: N == V, so NdotH == LdotH.
-            // The BRDF pdf can be simplified from:
-            //   pdf = D_GGX_Divide_Pi(NdotH, roughness) * NdotH / (4 * LdotH);
-            // to:
-            //   pdf = D_GGX_Divide_Pi(NdotH, roughness) / 4;
-
-            // Mipmap level is clamped to avoid cubemap filtering issues.
-
             // OmegaS : solid angle of a sample
             // OmegaP : solid angle of a cubemap pixel
             float NdotH = saturate(dot(N, H));
             float LdotH = saturate(dot(L, H));
 
             float mipLevel = 0;
-            if (roughness < 1e-6)
+            //if (roughness < 1e-6)
+            //{
+            //    // roughness == 0
+            //    mipLevel = 0;//clamp(2, 0, HDRIMipCount - 1);
+            //}
+            //else
             {
-                // roughness == 0
-                mipLevel = 0;//clamp(2, 0, HDRIMipCount - 1);
-            }
-            else
-            {
-                float pdf = Specular_D_GGX(NdotH, roughness * roughness * roughness * roughness) * NdotH / (4 * LdotH);
-                mipLevel = clamp(ComputeMipLevel(kSampleCount, pdf, HDRITextureSize), 0, HDRIMipCount - 1);
+                // pdf = Specular_D_GGX(NdotH, roughness * roughness * roughness * roughness) * NdotH / (4 * LdotH)
+                // but since V = N => VoH == NoH
+                float pdf = Specular_D_GGX(NdotH, Pow4(roughness)) * 0.25f;
+                mipLevel = clamp(ComputeMipLevel(kSampleCount, pdf, HDRITextureSize) + 1, 0, HDRIMipCount - 1);
             }
             
             float4 Li = IBLHDRITexture.SampleLevel(cubeMapSampler, L, mipLevel);
@@ -75,7 +70,7 @@ float4 IntegrateCubeLDOnly(in float3 V, in float3 N, in float roughness)
 
     if (accBrdfWeight > 0.0)
     {
-        accBrdf = accBrdf / max(1e-6, accBrdfWeight);
+        accBrdf = accBrdf / (accBrdfWeight);
     }
 
     return float4(accBrdf, 1.0);
@@ -89,9 +84,11 @@ void main(
     uint GI : SV_GroupIndex)
 {
     uint2 Pixel = Gid.xy * uint2(8, 8) + GTid;
+    uint SpecularLDMapSize = 1 << (SpecularLDNumMips - SpecularLDMipLevel - 1);
     if (Pixel.x < SpecularLDMapSize && Pixel.y < SpecularLDMapSize)
     {
         float3 N = ConvertCubePixelToDir(Pixel.x, Pixel.y, Gid.z, SpecularLDMapSize);
+        float Roughness = ComputeRoughnessFromMip(SpecularLDMipLevel, SpecularLDNumMips - 1);
         float4 Acc = IntegrateCubeLDOnly(N, N, Roughness);
         IBLSpecularLDMap[uint3(Pixel, Gid.z)] = Acc;
     }

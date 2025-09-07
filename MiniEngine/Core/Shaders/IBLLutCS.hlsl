@@ -18,9 +18,9 @@ float G_SmithGGXCorrelated(float Roughness, float NdotL, float NdotV)
     float alphaSqr = Roughness * Roughness * Roughness * Roughness;
     float NdotL2 = NdotL * NdotL;
     float NdotV2 = NdotV * NdotV;
-    float lambda_l = (-1 + sqrt(alphaSqr * (1 - NdotL2) / max(1e-6, NdotL2) + 1)) * 0.5f;
-    float lambda_v = (-1 + sqrt(alphaSqr * (1 - NdotV2) / max(1e-6, NdotV2) + 1)) * 0.5f;
-    return  1.0 / max(1.0 + lambda_v + lambda_l, 1e-6);
+    float lambda_l = (-1 + sqrt(alphaSqr * (1 - NdotL2) / max(0, NdotL2) + 1)) * 0.5f;
+    float lambda_v = (-1 + sqrt(alphaSqr * (1 - NdotV2) / max(0, NdotV2) + 1)) * 0.5f;
+    return  1.0 / max(1.0 + lambda_v + lambda_l, 0);
 }
 
 float4 IntegrateDFGOnly(in float3 V, in float3 N, in float roughness)

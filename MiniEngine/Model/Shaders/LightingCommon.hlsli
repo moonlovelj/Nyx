@@ -1,4 +1,4 @@
-#ifndef __LIGHTING_COMMON_HLSLI__
+ï»¿#ifndef __LIGHTING_COMMON_HLSLI__
 #define __LIGHTING_COMMON_HLSLI__
 
 #include "Common.hlsli"
@@ -183,22 +183,22 @@ float3 ShadeDirectionalLight(SurfaceProperties Surface, float3 L, float3 c_light
 // diffuse retro-reflection Disney lobe
 float3 getDiffuseDominantDir(float3 N, float3 V, float NdotV, float roughness)
 {
-    // ¼ÆËãÁ½¸öÏµÊı a ºÍ b¡£
-    // ÕâÁ½¸ö¿´ÆğÀ´ºÜËæÒâµÄ¡°Ä§·¨Êı×Ö¡±£¨1.02341, -1.51174, ...£©
-    // ±íÃ÷ÕâÊÇÒ»¸ö¾­Ñé¹«Ê½¡£ËüÃÇºÜ¿ÉÄÜÊÇÍ¨¹ıÀëÏßÄâºÏÒ»¸ö¸ü¾«È·µÄÎïÀíÄ£ĞÍ
-    // £¨±ÈÈçOren-Nayar£©µÄ½á¹û¶øµÃµ½µÄ¡£
-    // Ä¿±êÊÇÓÃ×î¼òµ¥µÄÏßĞÔº¯ÊıÀ´½üËÆÒ»¸ö¸´ÔÓµÄÎïÀíĞĞÎª¡£
+    // è®¡ç®—ä¸¤ä¸ªç³»æ•° a å’Œ bã€‚
+    // è¿™ä¸¤ä¸ªçœ‹èµ·æ¥å¾ˆéšæ„çš„â€œé­”æ³•æ•°å­—â€ï¼ˆ1.02341, -1.51174, ...ï¼‰
+    // è¡¨æ˜è¿™æ˜¯ä¸€ä¸ªç»éªŒå…¬å¼ã€‚å®ƒä»¬å¾ˆå¯èƒ½æ˜¯é€šè¿‡ç¦»çº¿æ‹Ÿåˆä¸€ä¸ªæ›´ç²¾ç¡®çš„ç‰©ç†æ¨¡å‹
+    // ï¼ˆæ¯”å¦‚Oren-Nayarï¼‰çš„ç»“æœè€Œå¾—åˆ°çš„ã€‚
+    // ç›®æ ‡æ˜¯ç”¨æœ€ç®€å•çš„çº¿æ€§å‡½æ•°æ¥è¿‘ä¼¼ä¸€ä¸ªå¤æ‚çš„ç‰©ç†è¡Œä¸ºã€‚
     float a = 1.02341f * roughness - 1.51174f;
     float b = -0.511705f * roughness + 0.755868f;
 
-    // ¼ÆËãºËĞÄµÄ²åÖµÒò×Ó lerpFactor
-    // - (NdotV * a + b): ÕâÊÇÒ»¸öÒÀÀµÓÚÊÓ½ÇºÍ´Ö²Ú¶ÈµÄ»ù´¡Òò×Ó¡£
-    // - * roughness: ÔÙ´Î³ËÒÔ´Ö²Ú¶È£¬È·±£µ± roughness Îª 0 Ê±£¬Õû¸ö lerpFactor Îª 0¡£
-    // - saturate(...): ±£Ö¤Òò×ÓÔÚ [0, 1] ·¶Î§ÄÚ£¬ÕâÊÇlerpº¯ÊıËù±ØĞèµÄ¡£
+    // è®¡ç®—æ ¸å¿ƒçš„æ’å€¼å› å­ lerpFactor
+    // - (NdotV * a + b): è¿™æ˜¯ä¸€ä¸ªä¾èµ–äºè§†è§’å’Œç²—ç³™åº¦çš„åŸºç¡€å› å­ã€‚
+    // - * roughness: å†æ¬¡ä¹˜ä»¥ç²—ç³™åº¦ï¼Œç¡®ä¿å½“ roughness ä¸º 0 æ—¶ï¼Œæ•´ä¸ª lerpFactor ä¸º 0ã€‚
+    // - saturate(...): ä¿è¯å› å­åœ¨ [0, 1] èŒƒå›´å†…ï¼Œè¿™æ˜¯lerpå‡½æ•°æ‰€å¿…éœ€çš„ã€‚
     float lerpFactor = saturate((NdotV * a + b) * roughness);
 
-    //¡¾¹Ø¼ü²½Öè¡¿·µ»Ø N ºÍ V Ö®¼äµÄÏßĞÔ²åÖµ½á¹û¡£
-    // Õâ¸ö½á¹û¾ÍÊÇÎÒÃÇ×îÖÕÓÃÀ´²ÉÑù·øÕÕ¶ÈÍ¼µÄ¡°Ö÷µ¼Âş·´Éä·½Ïò¡±¡£
+    //ã€å…³é”®æ­¥éª¤ã€‘è¿”å› N å’Œ V ä¹‹é—´çš„çº¿æ€§æ’å€¼ç»“æœã€‚
+    // è¿™ä¸ªç»“æœå°±æ˜¯æˆ‘ä»¬æœ€ç»ˆç”¨æ¥é‡‡æ ·è¾ç…§åº¦å›¾çš„â€œä¸»å¯¼æ¼«åå°„æ–¹å‘â€ã€‚
     return lerp(N, V, lerpFactor);
 }
 
@@ -211,7 +211,7 @@ float3 EvaluateIBLDiffuse(SurfaceProperties Surface)
     //return Surface.c_diff * diffuseLighting * diffF;
 
     float3 diffuseLighting = IBLDiffuseLDMap.SampleLevel(cubeMapSampler, Surface.N, 0);
-    return Surface.c_diff * diffuseLighting; // PIºÍcosÖØÒªĞÔ²ÉÑùµÖÏûÁË
+    return Surface.c_diff * diffuseLighting; // PIå’Œcosé‡è¦æ€§é‡‡æ ·æŠµæ¶ˆäº†
     //return Surface.c_diff * INV_PI * diffuseLighting;
 }
 
@@ -237,9 +237,10 @@ float3 GetOffSpecularPeakReflectionDir(float3 Normal, float3 ReflectionVector, f
 
 float ComputeReflectionCaptureMipFromRoughness(float Roughness, float CubemapMaxMip)
 {
-    //float LevelFrom1x1 = 1 - 1.2 * log2(max(Roughness, 0.001));
-    //return CubemapMaxMip - 1 - LevelFrom1x1;
-    return sqrt(Roughness) * CubemapMaxMip;
+    float LevelFrom1x1 = 1 - 1.2 * log2(max(Roughness, 0.001));
+    return CubemapMaxMip - 1 - LevelFrom1x1;
+    
+    //return sqrt(Roughness) * CubemapMaxMip;
 }
 
 float3 EvaluateIBLSpecular(SurfaceProperties Surface)
@@ -250,7 +251,7 @@ float3 EvaluateIBLSpecular(SurfaceProperties Surface)
     R = GetOffSpecularPeakReflectionDir(Surface.N, R, Surface.roughness);
 
     // Rebuild the function
-    // L ¡¤ D ¡¤ (f0 ¡¤ Gv ¡¤ (1 - Fc) + Gv ¡¤ Fc) ¡¤ cosTheta / (4 ¡¤ NdotL ¡¤ NdotV)
+    // L Â· D Â· (f0 Â· Gv Â· (1 - Fc) + Gv Â· Fc) Â· cosTheta / (4 Â· NdotL Â· NdotV)
     //float NdotV = max(Surface.NdotV, 0.5f / IBLLutTextureSize);
 
     //float mipLevel = Surface.roughness * (IBLSpecularLDMapMipCount - 1.0);
@@ -259,13 +260,13 @@ float3 EvaluateIBLSpecular(SurfaceProperties Surface)
     float3 preLD = IBLSpecularLDMap.SampleLevel(cubeMapSampler, R, mipLevel).rgb;
 
     // Sample pre-integrated DFG
-    // Fc = (1 - H ¡¤ L)^5
-    // PreIntegratedDFG.r = Gv ¡¤ (1 - Fc)
-    // PreIntegratedDFG.g = Gv ¡¤ Fc
+    // Fc = (1 - H Â· L)^5
+    // PreIntegratedDFG.r = Gv Â· (1 - Fc)
+    // PreIntegratedDFG.g = Gv Â· Fc
     float2 preDFG = IBLLut.SampleLevel(linearSampler, float2(Surface.NdotV, Surface.roughness), 0).xy;
 
     //return preLD;
-    // LD ¡¤ (f0 ¡¤ Gv ¡¤ (1 - Fc) + Gv ¡¤ Fc ¡¤ f90)
+    // LD Â· (f0 Â· Gv Â· (1 - Fc) + Gv Â· Fc Â· f90)
     return preLD * (Surface.c_spec * preDFG.x + preDFG.y);
 }
 

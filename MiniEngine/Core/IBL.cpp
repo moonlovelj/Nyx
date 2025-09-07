@@ -10,7 +10,7 @@ namespace IBL
 {
     const uint32_t g_IBLCubeMapSize = 1024;
     const uint32_t g_IBLDiffuseLDMapSize = 256;
-    const uint32_t g_IBLSpecularLDMapSize = 512;
+    const uint32_t g_IBLSpecularLDMapSize = 256;
     const uint32_t g_IBLLutSize = 512;
 
     ComputePSO m_IBLGenerateCubeMapPSO(L"IBL Generate Cube Map CS");
@@ -73,7 +73,7 @@ void IBL::Precompute(GraphicsContext& gfxContext)
         return;
     }
 
-    m_bIsPrecomputed = true;
+    //m_bIsPrecomputed = true;
 
     {
         ScopedTimer _prof(L"IBL Generate Cube Map", gfxContext);
@@ -137,7 +137,8 @@ void IBL::Precompute(GraphicsContext& gfxContext)
             uint32_t SpecularLDMapMipSize = g_IBLSpecularLDMapSize / BaseDivisor;
             float Roughness = (float)i / (SpecularLDMapMipLevel - 1);
             Roughness *= Roughness;
-            Context.SetConstants(0, HDRITextureSize, HDRIMipCount, SpecularLDMapMipSize, Roughness);
+            //Context.SetConstants(0, HDRITextureSize, HDRIMipCount, SpecularLDMapMipSize, Roughness);
+            Context.SetConstants(0, HDRITextureSize, HDRIMipCount, SpecularLDMapMipLevel, i);
             Context.SetDynamicDescriptor(1, 0, Graphics::g_IBLCubeMap.GetSRV());
             Context.SetDynamicDescriptor(2, 0, Graphics::g_IBLSpecularLDMap.GetUAV(i));
 

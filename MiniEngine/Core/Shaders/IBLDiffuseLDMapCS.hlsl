@@ -19,7 +19,7 @@ RWTexture2DArray<float4> IBLDiffuseLDMapTexture : register(u0);
 
 SamplerState cubeMapSampler : register(s0);
 
-static const uint kSampleCount = 1024;
+static const uint kSampleCount = 64;
 
 float4 IntegrateDiffuseCube(float3 N)
 {

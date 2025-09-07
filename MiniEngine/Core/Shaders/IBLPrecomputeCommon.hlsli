@@ -1,4 +1,4 @@
-// #pragma once
+ï»¿// #pragma once
 #ifndef __IBLPRECOMPUTECOMMON_HLSLI__
 #define __IBLPRECOMPUTECOMMON_HLSLI__
 
@@ -6,14 +6,14 @@
 #define INV_PI          0.31830988618f
 #define TWOPI			6.283185307f
 
-// iÊÇÑù±¾Ë÷Òı (0, 1, 2, ...), NÊÇ×ÜÑù±¾Êı
-// ·µ»ØÒ»¸öÔÚ[0,1]^2¿Õ¼äÖĞ¾ùÔÈ·Ö²¼µÄµã
+// iæ˜¯æ ·æœ¬ç´¢å¼• (0, 1, 2, ...), Næ˜¯æ€»æ ·æœ¬æ•°
+// è¿”å›ä¸€ä¸ªåœ¨[0,1]^2ç©ºé—´ä¸­å‡åŒ€åˆ†å¸ƒçš„ç‚¹
 float2 Hammersley(uint i, uint N)
 {
-    // µÚÒ»Î¬ÊÇ¾ùÔÈ·Ö²¼
+    // ç¬¬ä¸€ç»´æ˜¯å‡åŒ€åˆ†å¸ƒ
     float dim1 = float(i) / float(N);
     
-    // µÚ¶şÎ¬ÊÇRadical Inverse, base 2
+    // ç¬¬äºŒç»´æ˜¯Radical Inverse, base 2
     uint bits = i;
     bits = (bits << 16u) | (bits >> 16u);
     bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
@@ -31,23 +31,54 @@ float Pow5(float x)
     return xSq * xSq * x;
 }
 
+float Pow4(float x)
+{
+    return x * x * x * x;
+}
+
+float Pow2(float x)
+{
+    return x * x;
+}
+
+// [ Duff et al. 2017, "Building an Orthonormal Basis, Revisited" ]
+// Discontinuity at TangentZ.z == 0
+float3x3 GetTangentBasis(float3 TangentZ)
+{
+    const float Sign = TangentZ.z >= 0 ? 1 : -1;
+    const float a = -rcp(Sign + TangentZ.z);
+    const float b = TangentZ.x * TangentZ.y * a;
+
+    float3 TangentX = { 1 + Sign * a * Pow2(TangentZ.x), Sign * b, -Sign * TangentZ.x };
+    float3 TangentY = { b, Sign + a * Pow2(TangentZ.y), -TangentZ.y };
+
+    return float3x3(TangentX, TangentY, TangentZ);
+}
+
+float3 TangentToWorld(float3 Vec, float3 TangentZ)
+{
+    return mul(Vec, GetTangentBasis(TangentZ));
+}
+
 void ImportanceSampleGGX(float2 Xi, float Roughness, float3 V, float3 N, out float3 H, out float3 L)
 {
 	float a = Roughness * Roughness;
 	float Phi = 2 * PI * Xi.x;
-	float CosTheta = saturate(sqrt( (1 - Xi.y) / max(1e-6, 1 + (a*a - 1) * Xi.y ) ));
-	float SinTheta = saturate(sqrt( 1 - CosTheta * CosTheta ));
+	float CosTheta = saturate(sqrt((1 - Xi.y) / (1 + (a*a - 1) * Xi.y )));
+	float SinTheta = saturate(sqrt(1 - CosTheta * CosTheta ));
 
 	H.x = SinTheta * cos( Phi );
 	H.y = SinTheta * sin( Phi );
 	H.z = CosTheta;
 
-	float3 UpVector = abs(N.z) < 0.999 ? float3(0,0,1) : float3(1,0,0);
-	float3 TangentX = normalize( cross( UpVector, N ) );
-	float3 TangentY = cross( N, TangentX );
+	//float3 UpVector = abs(N.z) < 0.999 ? float3(0,0,1) : float3(1,0,0);
+	//float3 TangentX = normalize( cross( UpVector, N ) );
+	//float3 TangentY = cross( N, TangentX );
 
-	// Tangent to world space
-	H = normalize(TangentX * H.x + TangentY * H.y + N * H.z);
+	//// Tangent to world space
+	//H = normalize(TangentX * H.x + TangentY * H.y + N * H.z);
+    
+    H = normalize(TangentToWorld(H, N));
 
     L = normalize(2 * dot(V, H) * H - V);
 }
@@ -92,7 +123,7 @@ float Diffuse_Burley(float roughness, float NdotL, float NdotV, float LdotH)
 float Specular_D_GGX(float NdotH, float alphaSqr)
 {
     float lower = lerp(1, alphaSqr, NdotH * NdotH);
-    return alphaSqr / max(1e-6, PI * lower * lower);
+    return alphaSqr / (PI * lower * lower);
 }
 
 // float IntegrateDiffuseDFG(float3 V, float roughness)
@@ -102,13 +133,13 @@ float Specular_D_GGX(float NdotH, float alphaSqr)
 
 float3 ConvertCubePixelToDir(uint x, uint y, uint face, uint TextureSize)
 {
-    // ÊäÈë: x, y ÏñËØ×ø±ê£¬width, height Ã¿¸öÃæ³ß´ç£¬ d ÃæË÷Òı[0..5]
-    // Êä³ö: ·½ÏòÏòÁ¿ dir (float3)
+    // è¾“å…¥: x, y åƒç´ åæ ‡ï¼Œwidth, height æ¯ä¸ªé¢å°ºå¯¸ï¼Œ d é¢ç´¢å¼•[0..5]
+    // è¾“å‡º: æ–¹å‘å‘é‡ dir (float3)
 
     float u = ((float)x + 0.5) / TextureSize; // 0~1
     float v = ((float)y + 0.5) / TextureSize; // 0~1
 
-    // ×ªµ½ [-1,1] ×ø±ê£¬ÖĞĞÄ¶ÔÆë
+    // è½¬åˆ° [-1,1] åæ ‡ï¼Œä¸­å¿ƒå¯¹é½
     float fx = 2.0 * u - 1.0;
     float fy = 2.0 * v - 1.0;
 
@@ -143,7 +174,7 @@ float ComputeMipLevel(float sampleCount, float pdf, float hdriTextureSize)
 {
     float omegaS = 1.0 / (sampleCount * pdf);
     float omegaP = 4.0 * PI / (6.0 * hdriTextureSize * hdriTextureSize);
-    float mipLevel = 0.5 * log2(omegaS / omegaP) + 1;
+    float mipLevel = 0.5 * log2(omegaS / omegaP);
     return mipLevel;
 }
 
