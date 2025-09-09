@@ -1,4 +1,4 @@
-﻿#ifndef __LIGHTING_COMMON_HLSLI__
+#ifndef __LIGHTING_COMMON_HLSLI__
 #define __LIGHTING_COMMON_HLSLI__
 
 #include "Common.hlsli"

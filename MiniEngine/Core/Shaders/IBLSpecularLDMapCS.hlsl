@@ -18,7 +18,7 @@ RWTexture2DArray<float4> IBLSpecularLDMap : register(u0);
 
 SamplerState cubeMapSampler : register(s0);
 
-static const uint kSampleCount = 64;
+static const uint kSampleCount = 1024;
 
 float ComputeRoughnessFromMip(float Mip, float CubemapMaxMip)
 {
@@ -28,43 +28,59 @@ float ComputeRoughnessFromMip(float Mip, float CubemapMaxMip)
 
 float4 IntegrateCubeLDOnly(in float3 V, in float3 N, in float roughness)
 {
+    if (roughness < 0.01)
+    {
+        return float4(IBLHDRITexture.SampleLevel(cubeMapSampler, N, 0).rgb, 1.0f);
+    }
+    
     float3 accBrdf = 0;
     float  accBrdfWeight = 0;
-
-    for (uint i = 0; i < kSampleCount; ++i)
+    
+    if (roughness > 0.99)
     {
-        float2 eta = Hammersley(i, kSampleCount);
-        float3 L;
-        float3 H;
-
-        ImportanceSampleGGX(eta, roughness, V, N, H, L);
-
-        float NdotL = saturate(dot(N, L));
-        if (NdotL > 0)
+        // Roughness=1, GGX is constant. Use cosine distribution instead
+        for (uint i = 0; i < kSampleCount; ++i)
         {
-            // OmegaS : solid angle of a sample
-            // OmegaP : solid angle of a cubemap pixel
-            float NdotH = saturate(dot(N, H));
-            float LdotH = saturate(dot(L, H));
-
-            float mipLevel = 0;
-            //if (roughness < 1e-6)
-            //{
-            //    // roughness == 0
-            //    mipLevel = 0;//clamp(2, 0, HDRIMipCount - 1);
-            //}
-            //else
+            float2 eta = Hammersley(i, kSampleCount);
+            float3 L;
+            float NdotL;
+            float pdf;
+            // see reference code in appendix 11
+            ImportanceSampleCosDir(eta, N, L, NdotL, pdf);
+            if (NdotL > 0)
             {
+                float mipLevel = clamp(ComputeMipLevel(kSampleCount, pdf, HDRITextureSize) + 1, 0, HDRIMipCount - 1);
+                accBrdf += IBLHDRITexture.SampleLevel(cubeMapSampler, L, mipLevel).rgb;
+                accBrdfWeight += 1.0f;
+            }
+        }
+    }
+    else
+    {
+        for (uint i = 0; i < kSampleCount; ++i)
+        {
+            float2 eta = Hammersley(i, kSampleCount);
+            //eta.y *= 0.995;
+            float3 L;
+            float3 H;
+            ImportanceSampleGGX(eta, roughness, V, N, H, L);
+
+            float NdotL = saturate(dot(N, L));
+            if (NdotL > 0)
+            {
+                // OmegaS : solid angle of a sample
+                // OmegaP : solid angle of a cubemap pixel
+                float NdotH = saturate(dot(N, H));
+                float LdotH = saturate(dot(L, H));
+
                 // pdf = Specular_D_GGX(NdotH, roughness * roughness * roughness * roughness) * NdotH / (4 * LdotH)
                 // but since V = N => VoH == NoH
                 float pdf = Specular_D_GGX(NdotH, Pow4(roughness)) * 0.25f;
-                mipLevel = clamp(ComputeMipLevel(kSampleCount, pdf, HDRITextureSize) + 1, 0, HDRIMipCount - 1);
+                float mipLevel = clamp(ComputeMipLevel(kSampleCount, pdf, HDRITextureSize) + 1, 0, HDRIMipCount - 1);
+                float4 Li = IBLHDRITexture.SampleLevel(cubeMapSampler, L, mipLevel);
+                accBrdf += Li.rgb * NdotL;
+                accBrdfWeight += NdotL;
             }
-            
-            float4 Li = IBLHDRITexture.SampleLevel(cubeMapSampler, L, mipLevel);
-
-            accBrdf += Li.rgb * NdotL;
-            accBrdfWeight += NdotL;
         }
     }
 
@@ -84,7 +100,7 @@ void main(
     uint GI : SV_GroupIndex)
 {
     uint2 Pixel = Gid.xy * uint2(8, 8) + GTid;
-    uint SpecularLDMapSize = 1 << (SpecularLDNumMips - SpecularLDMipLevel - 1);
+    uint SpecularLDMapSize = 1u << (SpecularLDNumMips - SpecularLDMipLevel - 1u);
     if (Pixel.x < SpecularLDMapSize && Pixel.y < SpecularLDMapSize)
     {
         float3 N = ConvertCubePixelToDir(Pixel.x, Pixel.y, Gid.z, SpecularLDMapSize);

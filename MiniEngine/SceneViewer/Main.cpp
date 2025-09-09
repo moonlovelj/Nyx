@@ -62,7 +62,7 @@ NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0
 NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f);
 NumVar g_SunLightSize("Viewer/Lighting/Sun Light Size", 0.5f, 0.0f, 2.0f, 0.1f);
 NumVar g_SunShadowBias("Viewer/Lighting/Sun Shadow Bias", 4.f, 1.0f, 20.0f, 1.f );
-BoolVar g_UseglTFCamera("Viewer/Camera/Use glTF Camera", true);
+BoolVar g_UseglTFCamera("Viewer/Camera/Use glTF Camera", false);
 
 void ChangeIBLSet(EngineVar::ActionType);
 void ChangeIBLBias(EngineVar::ActionType);
@@ -219,11 +219,11 @@ void SceneViewer::Startup( void )
 
     if (g_IBLHDRITextures.size() > 0)
     {
-        IBL::InitializeResources(g_IBLHDRITextures[0], Renderer::s_TextureHeap);
+        IBL::InitializeResources(g_IBLHDRITextures[0]);
     }
     else
     {
-        IBL::InitializeResources(nullptr, Renderer::s_TextureHeap);
+        IBL::InitializeResources(nullptr);
     }
 
     Renderer::SetIBLTextures();
@@ -244,7 +244,7 @@ void SceneViewer::Startup( void )
         OrientedBox obb = m_ModelInst.GetBoundingBox();
         float modelRadius = Length(obb.GetDimensions()) * 0.5f;
         const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 0.5f, 0.0f, 0.0f);
-        m_Camera.SetEyeAtUp( eye, Vector3(kZero), Vector3(kYUnitVector) );
+        m_Camera.SetEyeAtUp( eye, obb.GetCenter(), Vector3(kYUnitVector) );
     }
     else
     {
@@ -255,7 +255,7 @@ void SceneViewer::Startup( void )
         MotionBlur::Enable = false;
     }
 
-    m_Camera.SetZRange(1.0f, 10000.0f);
+    m_Camera.SetZRange(0.01f, 1000.0f);
 	if (gltfFileName.size() == 0)
 		m_CameraController.reset(new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector)));
 	else
@@ -294,7 +294,7 @@ void SceneViewer::Update( float deltaT )
     else if (GameInput::IsFirstPressed(GameInput::kRShoulder))
         DebugZoom.Increment();
 
-    const uint32_t NumCameras = m_ModelInst.GetNumCameras();
+    const size_t NumCameras = m_ModelInst.GetNumCameras();
     const bool bUseglTFCamera = NumCameras > 0 && g_UseglTFCamera;
 
     if (!bUseglTFCamera)

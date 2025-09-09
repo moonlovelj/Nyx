@@ -84,11 +84,11 @@ void main(
 
             float4 shadowCoord = mul(SunShadowMatrix, float4(posW, 1.0));
             shadowCoord.xyz *= rcp(shadowCoord.w);
-            // TODO “ı”∞”–Ë¶¥√
+            // TODO Èò¥ÂΩ±ÊúâÁëïÁñµ
             float sunShadow = GetDirectionalShadow(ScreenUV, shadowCoord.xyz, texShadow);
-            //colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunColor);
+            colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunColor);
 
-            //ShadeLights(colorAccum.rgb, Surface, DTid, posW);
+            ShadeLights(colorAccum.rgb, Surface, DTid, posW);
 
             //float3 WorldPos = gBufferD[DTid].xyz;
             //colorAccum.rgb = abs(posW - WorldPos);
@@ -100,13 +100,18 @@ void main(
 
             //colorAccum.rgb += Specular_IBL(Surface) * ssao;
             colorAccum.rgb += EvaluateIBLSpecular(Surface);
+            
+            //colorAccum.rgb = abs(posW.z);
 
             //colorAccum.rgb = sunShadow;
             //colorAccum.rgb = Surface.c_spec;
             //colorAccum.rgb = baseColor;
+            //colorAccum.rgb = saturate(dot(Surface.N, SunDirection));
 
-            //TODO ssao‘⁄«Ú√Ê”–—œ÷ÿÃıŒ∆Ë¶¥√£¨¥˝–ﬁ∏¥
+            //TODO ssaoÂú®ÁêÉÈù¢Êúâ‰∏•ÈáçÊù°Á∫πÁëïÁñµÔºåÂæÖ‰øÆÂ§ç
 
+            //colorAccum = abs(Surface.N.z);
+            
             sceneColor[DTid] = colorAccum;
         }
     }

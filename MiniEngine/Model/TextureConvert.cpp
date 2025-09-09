@@ -54,6 +54,7 @@ bool ConvertToDDS( const std::wstring& filePath, uint32_t Flags )
     bool bBlockCompress =	GetFlag(kDefaultBC);
     bool bUseBestBC =		GetFlag(kQualityBC);
     bool bFlipImage =       GetFlag(kFlipVertical);
+    bool bFloat32HDR = GetFlag(kFloat32HDR);
 
     // Can't be both
     ASSERT(!bInterpretAsSRGB || !bContainsNormals);
@@ -165,7 +166,7 @@ bool ConvertToDDS( const std::wstring& filePath, uint32_t Flags )
 
     if (isHDR)
     {
-        tformat = DXGI_FORMAT_R9G9B9E5_SHAREDEXP;
+        tformat = bFloat32HDR ? DXGI_FORMAT_R32G32B32A32_FLOAT : DXGI_FORMAT_R9G9B9E5_SHAREDEXP;
         cformat = bBlockCompress ? DXGI_FORMAT_BC6H_UF16 : DXGI_FORMAT_R9G9B9E5_SHAREDEXP;
     }
     else if (bBlockCompress)

@@ -18,9 +18,9 @@ float G_SmithGGXCorrelated(float Roughness, float NdotL, float NdotV)
     float alphaSqr = Roughness * Roughness * Roughness * Roughness;
     float NdotL2 = NdotL * NdotL;
     float NdotV2 = NdotV * NdotV;
-    float lambda_l = (-1 + sqrt(alphaSqr * (1 - NdotL2) / max(0, NdotL2) + 1)) * 0.5f;
-    float lambda_v = (-1 + sqrt(alphaSqr * (1 - NdotV2) / max(0, NdotV2) + 1)) * 0.5f;
-    return  1.0 / max(1.0 + lambda_v + lambda_l, 0);
+    float lambda_l = (-1 + sqrt(alphaSqr * (1 - NdotL2) / NdotL2 + 1)) * 0.5f;
+    float lambda_v = (-1 + sqrt(alphaSqr * (1 - NdotV2) / NdotV2 + 1)) * 0.5f;
+    return  1.0 / (1.0 + lambda_v + lambda_l);
 }
 
 float4 IntegrateDFGOnly(in float3 V, in float3 N, in float roughness)
@@ -50,8 +50,8 @@ float4 IntegrateDFGOnly(in float3 V, in float3 N, in float roughness)
         
         if (NdotL > 0 && G > 0.0)
         {
-            float GVis = G * LdotH / max(1e-6, NdotH * NdotV);
-            float Fc = pow(1 - LdotH, 5.0f);
+            float GVis = G * LdotH / (NdotH * NdotV);
+            float Fc = Pow5(1 - LdotH);
             acc.x += (1 - Fc) * GVis;
             acc.y += Fc * GVis;
         }
@@ -60,7 +60,7 @@ float4 IntegrateDFGOnly(in float3 V, in float3 N, in float roughness)
         //u = frac(u + 0.5);
         //float pdf;
         //// The pdf is not used because it cancels with other terms
-        //// (The 1/PI from diffuse BRDF and the NdotL from Lambert¡¯s law).
+        //// (The 1/PI from diffuse BRDF and the NdotL from Lambertâ€™s law).
         //ImportanceSampleCosDir(u, N, L, NdotL, pdf);
         //if (NdotL > 0)
         //{

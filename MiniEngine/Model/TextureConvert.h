@@ -25,6 +25,7 @@ enum TexConversionFlags
     kDefaultBC = 16,    // Apply standard block compression (BC1-5)
     kQualityBC = 32,    // Apply quality block compression (BC6H/7)
     kFlipVertical = 64,
+    kFloat32HDR = 128,
 };
 
 inline uint8_t TextureOptions(bool sRGB, bool hasAlpha=false, bool invertY=false)

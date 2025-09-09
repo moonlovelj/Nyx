@@ -1,4 +1,3 @@
-﻿// #pragma once
 #ifndef __IBLPRECOMPUTECOMMON_HLSLI__
 #define __IBLPRECOMPUTECOMMON_HLSLI__
 
@@ -71,15 +70,7 @@ void ImportanceSampleGGX(float2 Xi, float Roughness, float3 V, float3 N, out flo
 	H.y = SinTheta * sin( Phi );
 	H.z = CosTheta;
 
-	//float3 UpVector = abs(N.z) < 0.999 ? float3(0,0,1) : float3(1,0,0);
-	//float3 TangentX = normalize( cross( UpVector, N ) );
-	//float3 TangentY = cross( N, TangentX );
-
-	//// Tangent to world space
-	//H = normalize(TangentX * H.x + TangentY * H.y + N * H.z);
-    
     H = normalize(TangentToWorld(H, N));
-
     L = normalize(2 * dot(V, H) * H - V);
 }
 
@@ -90,11 +81,6 @@ void ImportanceSampleCosDir(
     out float NdotL,
     out float pdf)
 {
-    // Local referencial
-    float3 upVector = abs(N.z) < 0.999 ? float3(0, 0, 1) : float3(1, 0, 0);
-    float3 tangentX = normalize(cross(upVector, N));
-    float3 tangentY = cross(N, tangentX);
-
     float u1 = u.x;
     float u2 = u.y;
 
@@ -102,7 +88,7 @@ void ImportanceSampleCosDir(
     float phi = u2 * PI * 2;
 
     L = float3(r * cos(phi), r * sin(phi), sqrt(max(0.0, 1.0f - u1)));
-    L = normalize(tangentX * L.x + tangentY * L.y + N * L.z);
+    L = normalize(TangentToWorld(L, N));
 
     NdotL = dot(L, N);
     pdf = NdotL * INV_PI;
@@ -125,11 +111,6 @@ float Specular_D_GGX(float NdotH, float alphaSqr)
     float lower = lerp(1, alphaSqr, NdotH * NdotH);
     return alphaSqr / (PI * lower * lower);
 }
-
-// float IntegrateDiffuseDFG(float3 V, float roughness)
-// {
-//     
-// }
 
 float3 ConvertCubePixelToDir(uint x, uint y, uint face, uint TextureSize)
 {
