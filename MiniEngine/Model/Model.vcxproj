@@ -99,7 +99,9 @@
     <None Include="Shaders\LightGrid.hlsli" />
     <None Include="Shaders\Lighting.hlsli" />
     <None Include="Shaders\LightingCommon.hlsli" />
+    <None Include="Shaders\MaterialCommon.hlsli" />
     <None Include="Shaders\PCSS.hlsli" />
+    <None Include="Shaders\VSToPSCommon.hlsli" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Shaders\CutoutDepthPS.hlsl">

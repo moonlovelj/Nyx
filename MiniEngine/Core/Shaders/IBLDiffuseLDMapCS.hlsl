@@ -1,6 +1,7 @@
 
 #include "CommonRS.hlsli"
-#include "IBLPrecomputeCommon.hlsli"
+#include "IBL.hlsli"
+#include "MonteCarlo.hlsli"
 
 // outdated warning about for-loop variable scope
 #pragma warning (disable: 3078)

@@ -118,6 +118,12 @@
     <None Include="Shaders\PCSS.hlsli">
       <Filter>Shaders</Filter>
     </None>
+    <None Include="Shaders\MaterialCommon.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="Shaders\VSToPSCommon.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Shaders\DefaultVS.hlsl">

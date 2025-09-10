@@ -2,17 +2,14 @@
 #define __LIGHTING_COMMON_HLSLI__
 
 #include "Common.hlsli"
+#include "../../Core/Shaders/Math.hlsli"
+#include "../../Core/Shaders/BSDF.hlsli"
+#include "../../Core/Shaders/IBL.hlsli"
 #include "LightGrid.hlsli"
 #include "PCSS.hlsli"
 
 #define PCSS_SHADOW     1
 
-#define FLT_MIN         1.175494351e-38F        // min positive value
-#define FLT_MAX         3.402823466e+38F        // max value
-#define INV_PI          0.31830988618f
-#define TWOPI			6.283185307f
-
-// Numeric constants
 static const float3 kDielectricSpecular = float3(0.04, 0.04, 0.04);
 
 cbuffer GlobalConstants : register(b1)
@@ -75,89 +72,6 @@ struct LightProperties
 // Shader Math
 //
 
-float Pow5(float x)
-{
-    float xSq = x * x;
-    return xSq * xSq * x;
-}
-
-// Shlick's approximation of Fresnel
-float3 Fresnel_Shlick(float3 F0, float3 F90, float cosine)
-{
-    return lerp(F0, F90, Pow5(1.0 - cosine));
-}
-
-float Fresnel_Shlick(float F0, float F90, float cosine)
-{
-    return lerp(F0, F90, Pow5(1.0 - cosine));
-}
-
-// Burley's diffuse BRDF
-float3 Diffuse_Burley(SurfaceProperties Surface, LightProperties Light)
-{
-    float fd90 = 0.5 + 2.0 * Surface.roughness * Light.LdotH * Light.LdotH;
-    return Surface.c_diff * INV_PI * Fresnel_Shlick(1, fd90, Light.NdotL).x * Fresnel_Shlick(1, fd90, Surface.NdotV).x;
-}
-
-// GGX specular D (normal distribution)
-float Specular_D_GGX(SurfaceProperties Surface, LightProperties Light)
-{
-    float lower = lerp(1, Surface.alphaSqr, Light.NdotH * Light.NdotH);
-    return Surface.alphaSqr / max(1e-6, PI * lower * lower);
-}
-
-// Schlick-Smith specular geometric visibility function
-float G_Schlick_Smith(SurfaceProperties Surface, LightProperties Light)
-{
-    return 1.0 / max(1e-6, lerp(Surface.NdotV, 1, Surface.alpha * 0.5) * lerp(Light.NdotL, 1, Surface.alpha * 0.5));
-}
-
-// Schlick-Smith specular visibility with Hable's LdotH approximation
-float G_Shlick_Smith_Hable(SurfaceProperties Surface, LightProperties Light)
-{
-    return 1.0 / lerp(Light.LdotH * Light.LdotH, 1, Surface.alphaSqr * 0.25);
-}
-
-float G_SmithGGXCorrelated(SurfaceProperties Surface, LightProperties Light)
-{
-    float NdotL2 = Light.NdotL * Light.NdotL;
-    float NdotV2 = Surface.NdotV * Surface.NdotV;
-    float lambda_l = (-1 + sqrt(Surface.alphaSqr * (1 - NdotL2) / max(1e-6, NdotL2) + 1)) * 0.5f;
-    float lambda_v = ( -1 + sqrt (Surface.alphaSqr * (1 - NdotV2 ) / max(1e-6, NdotV2) + 1) ) * 0.5f;
-	return  1.0 / max(1.0 + lambda_v + lambda_l, 1e-6);
-}
-
-float V_SmithGGXCorrelated(SurfaceProperties Surface, LightProperties Light)
-{
-    float GGXV = Light.NdotL * sqrt(Surface.NdotV * Surface.NdotV * (1.0 - Surface.alphaSqr) + Surface.alphaSqr);
-    float GGXL = Surface.NdotV * sqrt(Light.NdotL * Light.NdotL * (1.0 - Surface.alphaSqr) + Surface.alphaSqr);
-    return 0.5 / max(1e-6, (GGXV + GGXL));
-}
-
-
-// A microfacet based BRDF.
-// alpha:    This is roughness squared as in the Disney PBR model by Burley et al.
-// c_spec:   The F0 reflectance value - 0.04 for non-metals, or RGB for metals.  This is the specular albedo.
-// NdotV, NdotL, LdotH, NdotH:  vector dot products
-//  N - surface normal
-//  V - normalized view vector
-//  L - normalized direction to light
-//  H - normalized half vector (L+V)/2 -- halfway between L and V
-float3 Specular_BRDF(SurfaceProperties Surface, LightProperties Light)
-{
-    // Normal Distribution term
-    float ND = Specular_D_GGX(Surface, Light);
-
-    // Geometric Visibility term
-    //float GV = G_Schlick_Smith(Surface, Light);
-    // float GV = G_Shlick_Smith_Hable(Surface, Light);
-    float GV = V_SmithGGXCorrelated(Surface, Light);
-
-    // Fresnel term
-    float3 F = Fresnel_Shlick(Surface.c_spec, 1.0, Light.LdotH);
-
-    return ND * GV * F;
-}
 
 float3 ShadeDirectionalLight(SurfaceProperties Surface, float3 L, float3 c_light)
 {
@@ -173,8 +87,8 @@ float3 ShadeDirectionalLight(SurfaceProperties Surface, float3 L, float3 c_light
     Light.NdotH = saturate(dot(Surface.N, H));
 
     // Diffuse & specular factors
-    float3 diffuse = Diffuse_Burley(Surface, Light);
-    float3 specular = Specular_BRDF(Surface, Light);
+    float3 diffuse = Diffuse_Burley(Surface.c_diff, Surface.roughness, Surface.NdotV, Light.NdotL, Light.LdotH);
+    float3 specular = Specular_BRDF(Surface.c_spec, Surface.alphaSqr, Surface.NdotV, Light.NdotL, Light.NdotH, Light.LdotH);
 
     // Directional light
     return Light.NdotL * c_light * (diffuse + specular);
@@ -229,45 +143,24 @@ float3 getSpecularDominantDir(float3 N, float3 R, float roughness)
     return lerp(N, R, lerpFactor);
 }
 
-float3 GetOffSpecularPeakReflectionDir(float3 Normal, float3 ReflectionVector, float Roughness)
-{
-    float a = Roughness * Roughness;
-    return lerp(Normal, ReflectionVector, (1 - a) * (sqrt(1 - a) + a));
-}
-
-float ComputeReflectionCaptureMipFromRoughness(float Roughness, float CubemapMaxMip)
-{
-    float LevelFrom1x1 = 1 - 1.2 * log2(max(Roughness, 0.001));
-    return CubemapMaxMip - 1 - LevelFrom1x1;
-    
-    //return sqrt(Roughness) * CubemapMaxMip;
-}
-
 float3 EvaluateIBLSpecular(SurfaceProperties Surface)
 {
     float3 R = reflect(-Surface.V, Surface.N);
-
-    //float3 dominantR = getSpecularDominantDir(Surface.N, R, Surface.roughness);
     R = GetOffSpecularPeakReflectionDir(Surface.N, R, Surface.roughness);
 
     // Rebuild the function
     // L · D · (f0 · Gv · (1 - Fc) + Gv · Fc) · cosTheta / (4 · NdotL · NdotV)
-    //float NdotV = max(Surface.NdotV, 0.5f / IBLLutTextureSize);
-
-    //float mipLevel = Surface.roughness * (IBLSpecularLDMapMipCount - 1.0);
-    float mipLevel = ComputeReflectionCaptureMipFromRoughness(Surface.roughness, IBLSpecularLDMapMipCount - 1.0);
-
-    float3 preLD = IBLSpecularLDMap.SampleLevel(cubeMapSampler, R, mipLevel).rgb;
+    float MipLevel = ComputeIBLMipFromRoughness(Surface.roughness, IBLSpecularLDMapMipCount - 1.0);
+    float3 PreLD = IBLSpecularLDMap.SampleLevel(cubeMapSampler, R, MipLevel).rgb;
 
     // Sample pre-integrated DFG
     // Fc = (1 - H · L)^5
     // PreIntegratedDFG.r = Gv · (1 - Fc)
     // PreIntegratedDFG.g = Gv · Fc
-    float2 preDFG = IBLLut.SampleLevel(linearSampler, float2(Surface.NdotV, Surface.roughness), 0).xy;
+    float2 PreDFG = IBLLut.SampleLevel(linearSampler, float2(Surface.NdotV, Surface.roughness), 0).xy;
 
-    //return preLD;
     // LD · (f0 · Gv · (1 - Fc) + Gv · Fc · f90)
-    return preLD * (Surface.c_spec * preDFG.x + preDFG.y);
+    return PreLD * (Surface.c_spec * PreDFG.x + PreDFG.y);
 }
 
 float GetDirectionalShadow(float2 ScreenUV, float3 ShadowCoord, Texture2D<float> texShadow )
@@ -324,8 +217,8 @@ float3 ApplyLightCommon(
     Light.NdotH = saturate(dot(Surface.N, H));
 
     // Diffuse & specular factors
-    float3 diffuse = Diffuse_Burley(Surface, Light);
-    float3 specular = Specular_BRDF(Surface, Light);
+    float3 diffuse = Diffuse_Burley(Surface.c_diff, Surface.roughness, Surface.NdotV, Light.NdotL, Light.LdotH);
+    float3 specular = Specular_BRDF(Surface.c_spec, Surface.alphaSqr, Surface.NdotV, Light.NdotL, Light.NdotH, Light.LdotH);
 
     return Light.NdotL * c_light * (diffuse + specular);
 }

@@ -428,7 +428,6 @@
     <None Include="Shaders\FXAAPass2CS.hlsli" />
     <None Include="Shaders\FXAARootSignature.hlsli" />
     <None Include="Shaders\GenerateMipsCS.hlsli" />
-    <None Include="Shaders\IBLPrecomputeCommon.hlsli" />
     <None Include="Shaders\LanczosFunctions.hlsli" />
     <None Include="Shaders\MotionBlurRS.hlsli" />
     <None Include="Shaders\ParticleRS.hlsli" />
@@ -447,6 +446,10 @@
     <None Include="Shaders\PixelPacking.hlsli" />
     <None Include="Shaders\SSAORS.hlsli" />
     <None Include="Shaders\TextRS.hlsli" />
+    <None Include="Shaders\BSDF.hlsli" />
+    <None Include="Shaders\IBL.hlsli" />
+    <None Include="Shaders\Math.hlsli" />
+    <None Include="Shaders\MonteCarlo.hlsli" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="GBufferPass\" />

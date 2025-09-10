@@ -1,5 +1,7 @@
 #include "CommonRS.hlsli"
-#include "IBLPrecomputeCommon.hlsli"
+#include "IBL.hlsli"
+#include "BSDF.hlsli"
+#include "MonteCarlo.hlsli"
 
 // outdated warning about for-loop variable scope
 #pragma warning (disable: 3078)
@@ -13,21 +15,11 @@ RWTexture2D<float4> IBLLutTexture : register(u0);
 
 static const uint kSampleCount = 1024;
 
-float G_SmithGGXCorrelated(float Roughness, float NdotL, float NdotV)
-{
-    float alphaSqr = Roughness * Roughness * Roughness * Roughness;
-    float NdotL2 = NdotL * NdotL;
-    float NdotV2 = NdotV * NdotV;
-    float lambda_l = (-1 + sqrt(alphaSqr * (1 - NdotL2) / NdotL2 + 1)) * 0.5f;
-    float lambda_v = (-1 + sqrt(alphaSqr * (1 - NdotV2) / NdotV2 + 1)) * 0.5f;
-    return  1.0 / (1.0 + lambda_v + lambda_l);
-}
-
-float4 IntegrateDFGOnly(in float3 V, in float3 N, in float roughness)
+float4 IntegrateDFGOnly(in float3 V, in float3 N, in float Roughness)
 {
     float NdotV = saturate(dot(N, V));
-    float4 acc = 0;
-    float accWeight = 0;
+    float4 Acc = 0;
+    float AccWeight = 0;
 
     // Compute pre-integration
     //Referential referential = createReferential(N);
@@ -38,13 +30,11 @@ float4 IntegrateDFGOnly(in float3 V, in float3 N, in float roughness)
         float3 H = 0;
 
         // See [Karis13] for implementation
-        //importanceSampleGGX_G(u, V, N, referential, roughness, NdotH, LdotH, L, G);
-
-        ImportanceSampleGGX(u, roughness, V, N, H, L);
+        ImportanceSampleGGX(u, Roughness, V, N, H, L);
         float NdotH = dot(N, H);
         float  LdotH = dot(H, L);
         float NdotL = saturate(dot(N, L));
-        float G = G_SmithGGXCorrelated(roughness, NdotL, NdotV);
+        float G = G_SmithGGXCorrelated(Pow4(Roughness), NdotV, NdotL);
 
         // Specular GGX DFG preIntegration
         
@@ -52,8 +42,8 @@ float4 IntegrateDFGOnly(in float3 V, in float3 N, in float roughness)
         {
             float GVis = G * LdotH / (NdotH * NdotV);
             float Fc = Pow5(1 - LdotH);
-            acc.x += (1 - Fc) * GVis;
-            acc.y += Fc * GVis;
+            Acc.x += (1 - Fc) * GVis;
+            Acc.y += Fc * GVis;
         }
 
         //// Diffuse Disney preIntegration
@@ -73,7 +63,7 @@ float4 IntegrateDFGOnly(in float3 V, in float3 N, in float roughness)
         //accWeight += 1.0;
     }
 
-    return acc * (1.0f / kSampleCount);
+    return Acc * (1.0f / kSampleCount);
 }
 
 [RootSignature(Common_RootSig)]
@@ -86,11 +76,11 @@ void main(
     uint2 Pixel = Gid.xy * uint2(8, 8) + GTid;
     if (Pixel.x < LutSize && Pixel.y < LutSize)
     {
-        float NdotV = (Pixel.x + 0.5) / (float)LutSize;
-        float Roughness = (Pixel.y + 0.5) / (float)LutSize;
+        float NdotV = (Pixel.x + 0.5f) / (float)LutSize;
+        float Roughness = (Pixel.y + 0.5f) / (float)LutSize;
 
         float3 N = float3(0, 0, 1);
-        float3 V = float3(sqrt(1.0 - NdotV * NdotV), 0.0, NdotV);
+        float3 V = float3(sqrt(1.0f - NdotV * NdotV), 0.0f, NdotV);
         float4 Acc = IntegrateDFGOnly(V, N, Roughness);
         IBLLutTexture[Pixel] = Acc;
     }

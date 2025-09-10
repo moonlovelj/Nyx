@@ -9,9 +9,9 @@
 namespace IBL
 {
     const uint32_t g_IBLCubeMapSize = 1024;
-    const uint32_t g_IBLDiffuseLDMapSize = 256;
+    const uint32_t g_IBLDiffuseLDMapSize = 128;
     const uint32_t g_IBLSpecularLDMapSize = 512;
-    const uint32_t g_IBLLutSize = 512;
+    const uint32_t g_IBLLutSize = 1024;
 
     ComputePSO m_IBLGenerateCubeMapPSO(L"IBL Generate Cube Map CS");
     ComputePSO m_IBLDiffuseLDMapPSO(L"IBL Diffuse LD Map CS");

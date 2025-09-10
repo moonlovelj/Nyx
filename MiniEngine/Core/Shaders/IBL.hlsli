@@ -1,0 +1,79 @@
+#ifndef __IBL_HLSLI__
+#define __IBL_HLSLI__
+
+#include "Math.hlsli"
+
+float3 ConvertCubePixelToDir(uint X, uint Y, uint Face, uint TextureSize)
+{
+    // 输入: x, y 像素坐标，width, height 每个面尺寸， d 面索引[0..5]
+    // 输出: 方向向量 dir (float3)
+
+    float U = ((float)X + 0.5) / TextureSize; // 0~1
+    float V = ((float)Y + 0.5) / TextureSize; // 0~1
+
+    // 转到 [-1,1] 坐标，中心对齐
+    float FX = 2.0 * U - 1.0;
+    float FY = 2.0 * V - 1.0;
+
+    float3 Dir;
+    switch (Face)
+    {
+    case 0:
+        Dir = float3(1, -FY, -FX);
+        break; // +X
+    case 1:
+        Dir = float3(-1, -FY, FX);
+        break; // -X
+    case 2:
+        Dir = float3(FX, 1, FY);
+        break; // +Y
+    case 3:
+        Dir = float3(FX, -1, -FY);
+        break; // -Y
+    case 4:
+        Dir = float3(FX, -FY, 1);
+        break; // +Z
+    case 5:
+        Dir = float3(-FX, -FY, -1);
+        break; // -Z
+    }
+
+    Dir = normalize(Dir);
+
+    return Dir;
+}
+
+float ComputeMipLevel(float SampleCount, float PDF, float TextureSize)
+{
+    //float omegaS = 1.0 / (SampleCount * PDF);
+    //float omegaP = 4.0 * PI / (6.0 * TextureSize * TextureSize);
+    //float mipLevel = 0.5 * log2(omegaS / omegaP);
+    float mipLevel = 0.5 * log2((6.0 * TextureSize * TextureSize) / (SampleCount * PDF * 4.0 * PI));
+    return mipLevel;
+}
+
+float3 GetOffSpecularPeakReflectionDir(float3 Normal, float3 ReflectionVector, float Roughness)
+{
+    float a = Roughness * Roughness;
+    return lerp(Normal, ReflectionVector, (1 - a) * (sqrt(1 - a) + a));
+}
+
+/**
+ * Compute absolute mip for a reflection capture cubemap given a roughness. Come from UE5
+ */
+float ComputeIBLMipFromRoughness(float Roughness, float CubemapMaxMip)
+{
+    // Heuristic that maps roughness to mip level
+    // This is done in a way such that a certain mip level will always have the same roughness, regardless of how many mips are in the texture
+    // Using more mips in the cubemap just allows sharper reflections to be supported
+    float LevelFrom1x1 = 1.0f - 1.2f * log2(max(Roughness, 0.001));
+    return CubemapMaxMip - 1 - LevelFrom1x1;
+}
+
+float ComputeIBLRoughnessFromMip(float Mip, float CubemapMaxMip)
+{
+    float LevelFrom1x1 = CubemapMaxMip - 1 - Mip;
+    return exp2((1.0f - LevelFrom1x1) / 1.2f);
+}
+
+#endif

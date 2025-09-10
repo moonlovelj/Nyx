@@ -706,7 +706,16 @@
     <None Include="Shaders\PresentRS.hlsli">
       <Filter>Shaders</Filter>
     </None>
-    <None Include="Shaders\IBLPrecomputeCommon.hlsli">
+    <None Include="Shaders\BSDF.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="Shaders\IBL.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="Shaders\Math.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="Shaders\MonteCarlo.hlsli">
       <Filter>Shaders</Filter>
     </None>
   </ItemGroup>

@@ -1,13 +1,11 @@
-﻿
+﻿preSolution
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 16
-VisualStudioVersion = 16
+# Visual Studio Version 17
+VisualStudioVersion = 17
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SceneViewer", "SceneViewer.vcxproj", "{2C6297F9-023F-4718-8F49-40DFA45AE522}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Core", "..\Core\Core.vcxproj", "{86A58508-0D6A-4786-A32F-01A301FDC6F3}"
-EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DeferredRenderer", "..\DeferredRenderer\DeferredRenderer.vcxproj", "{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Model", "..\Model\Model.vcxproj", "{5D3AEEFB-8789-48E5-9BD9-09C667052D09}"
 EndProject
@@ -30,12 +28,6 @@ Global
 		{86A58508-0D6A-4786-A32F-01A301FDC6F3}.Profile|Windows.Build.0 = Profile|x64
 		{86A58508-0D6A-4786-A32F-01A301FDC6F3}.Release|Windows.ActiveCfg = Release|x64
 		{86A58508-0D6A-4786-A32F-01A301FDC6F3}.Release|Windows.Build.0 = Release|x64
-		{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}.Debug|Windows.ActiveCfg = Debug|x64
-		{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}.Debug|Windows.Build.0 = Debug|x64
-		{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}.Profile|Windows.ActiveCfg = Profile|x64
-		{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}.Profile|Windows.Build.0 = Profile|x64
-		{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}.Release|Windows.ActiveCfg = Release|x64
-		{E31714D6-AE2B-4331-AE9F-F32B7F2BD864}.Release|Windows.Build.0 = Release|x64
 		{5D3AEEFB-8789-48E5-9BD9-09C667052D09}.Debug|Windows.ActiveCfg = Debug|x64
 		{5D3AEEFB-8789-48E5-9BD9-09C667052D09}.Debug|Windows.Build.0 = Debug|x64
 		{5D3AEEFB-8789-48E5-9BD9-09C667052D09}.Profile|Windows.ActiveCfg = Profile|x64

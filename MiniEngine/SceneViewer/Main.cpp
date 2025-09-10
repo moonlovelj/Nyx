@@ -209,7 +209,7 @@ void SceneViewer::Startup( void )
 	//PostEffects::EnableHDR = false;
     SSAO::Enable = false;
     PostEffects::BloomEnable = false;
-    //PostEffects::EnableAdaptation = false;
+    PostEffects::EnableAdaptation = false;
     
     Renderer::Initialize();
 
