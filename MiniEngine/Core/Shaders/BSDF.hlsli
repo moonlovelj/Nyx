@@ -21,6 +21,12 @@ float3 Diffuse_Burley(float3 DiffuseColor, float Roughness, float NdotV, float N
     return DiffuseColor * INV_PI * Fresnel_Shlick(1.0f, FD90, NdotL).x * Fresnel_Shlick(1.0f, FD90, NdotV).x;
 }
 
+float Diffuse_Burley(float Roughness, float NdotV, float NdotL, float LdotH)
+{
+    float FD90 = 0.5 + 2.0 * Roughness * LdotH * LdotH;
+    return INV_PI * Fresnel_Shlick(1.0f, FD90, NdotL).x * Fresnel_Shlick(1.0f, FD90, NdotV).x;
+}
+
 // GGX specular D (normal distribution)
 float Specular_D_GGX(float AlphaSqr, float NdotH)
 {

@@ -19,7 +19,6 @@ float4 IntegrateDFGOnly(in float3 V, in float3 N, in float Roughness)
 {
     float NdotV = saturate(dot(N, V));
     float4 Acc = 0;
-    float AccWeight = 0;
 
     // Compute pre-integration
     //Referential referential = createReferential(N);
@@ -46,21 +45,19 @@ float4 IntegrateDFGOnly(in float3 V, in float3 N, in float Roughness)
             Acc.y += Fc * GVis;
         }
 
-        //// Diffuse Disney preIntegration
-        //u = frac(u + 0.5);
-        //float pdf;
-        //// The pdf is not used because it cancels with other terms
-        //// (The 1/PI from diffuse BRDF and the NdotL from Lambert’s law).
-        //ImportanceSampleCosDir(u, N, L, NdotL, pdf);
-        //if (NdotL > 0)
-        //{
-        //    float LdotH = saturate(dot(L, normalize(V + L)));
-        //    float NdotV = saturate(dot(N, V));
+        // Diffuse Disney preIntegration
+        u = frac(u + 0.5);
+        float PDF;
+        // The pdf is not used because it cancels with other terms
+        // (The 1/PI from diffuse BRDF and the NdotL from Lambert’s law).
+        ImportanceSampleCosDir(u, N, L, NdotL, PDF);
+        if (NdotL > 0)
+        {
+            float LdotH = saturate(dot(L, normalize(V + L)));
+            float NdotV = saturate(dot(N, V));
             
-        //    acc.z += Diffuse_Burley(roughness, NdotL, NdotV, LdotH);
-        //}
-
-        //accWeight += 1.0;
+            Acc.z += PI * Diffuse_Burley(Roughness, NdotV, NdotL, LdotH);
+        }
     }
 
     return Acc * (1.0f / kSampleCount);

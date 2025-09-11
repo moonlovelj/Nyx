@@ -20,7 +20,7 @@ RWTexture2DArray<float4> IBLDiffuseLDMapTexture : register(u0);
 
 SamplerState cubeMapSampler : register(s0);
 
-static const uint kSampleCount = 64;
+static const uint kSampleCount = 2048;
 
 float4 IntegrateDiffuseCube(float3 N)
 {
@@ -35,7 +35,7 @@ float4 IntegrateDiffuseCube(float3 N)
         ImportanceSampleCosDir(eta, N, L, NdotL, pdf);
         if (NdotL > 0)
         {
-            float mipLevel = clamp(ComputeMipLevel(kSampleCount, pdf, HDRITextureSize) + 1, 0, HDRIMipCount - 1);            
+            float mipLevel = clamp(ComputeMipLevel(kSampleCount, pdf, HDRITextureSize) + 2, 0, HDRIMipCount - 1);            
 	        accBrdf += IBLHDRITexture.SampleLevel(cubeMapSampler, L, mipLevel).rgb;
         }
             
@@ -46,33 +46,9 @@ float4 IntegrateDiffuseCube(float3 N)
 float4 IntegrateIrradiance(float3 N)
 {
     float3 irradiance = 0;
-
-   /* float deltaOmega = 4.0 * PI / (6.0 * HDRITextureSize * HDRITextureSize);
-    for (int x = 0; x < HDRITextureSize; ++x)
-    {
-        for (int y = 0; y < HDRITextureSize; ++y)
-	    {
-            for (int z = 0; z < 6; ++z)
-		    {
-                float3 L = ConvertCubePixelToDir(x, y, z, HDRITextureSize);
-                float NdotL = dot(N, L);
-                if (NdotL > 0.0)
-                {
-                    irradiance += IBLHDRITexture.SampleLevel(cubeMapSampler, L, 0).rgb * NdotL * deltaOmega;
-                }
-            }
-	    }
-    }*/
-
-    //float3 upVector = abs(N.z) < 0.999 ? float3(0, 0, 1) : float3(1, 0, 0);
-    //float3 tangentX = normalize(cross(upVector, N));
-    //float3 tangentY = cross(N, tangentX);
-
     float3 upVector = abs(N.y) < 0.999 ? float3(0, 1, 0) : float3(1, 0, 0);
     float3 tangentX = normalize(cross(upVector, N));
     float3 tangentY = cross(N, tangentX);
-
-
     float sampleDelta = 0.005;
     float nrSamples = 0.0;
     for (float phi = 0.0; phi < 2.0 * PI; phi += sampleDelta)
