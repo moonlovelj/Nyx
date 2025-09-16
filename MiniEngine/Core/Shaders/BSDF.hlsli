@@ -31,7 +31,7 @@ float Diffuse_Burley(float Roughness, float NdotV, float NdotL, float LdotH)
 float Specular_D_GGX(float AlphaSqr, float NdotH)
 {
     float Lower = lerp(1, AlphaSqr, NdotH * NdotH);
-    return AlphaSqr / (PI * Lower * Lower);
+    return AlphaSqr / max(FLT_MIN, PI * Lower * Lower);
 }
 
 float G_SmithGGXCorrelated(float AlphaSqr, float NdotV, float NdotL)

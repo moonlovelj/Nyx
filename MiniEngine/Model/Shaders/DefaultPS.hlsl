@@ -36,14 +36,11 @@ float4 main(VSOutput vsOutput) : SV_Target0
     float3 colorAccum = MatProps.Emissive;
 
     uint2 pixelPos = uint2(vsOutput.position.xy);
-    float ssao = texSSAO[pixelPos];
-
-    Surface.c_diff *= ssao;
-    Surface.c_spec *= ssao;
-
-    // Add IBL
-    //colorAccum += Diffuse_IBL(Surface);
-    //colorAccum += Specular_IBL(Surface);
+    
+    //TODO ssao在球面有严重条纹瑕疵，待修复
+    //float ssao = texSSAO[pixelPos];
+    //Surface.c_diff *= ssao;
+    //Surface.c_spec *= ssao;
 
     float2 ScreenUV = (float2(0.5, 0.5) + pixelPos) / float2(ViewportWidth, ViewportHeight);
     float4 shadowCoord = mul(SunShadowMatrix, float4(vsOutput.worldPos, 1.0));
@@ -54,11 +51,8 @@ float4 main(VSOutput vsOutput) : SV_Target0
     ShadeLights(colorAccum.rgb, Surface, pixelPos, vsOutput.worldPos);
 
     // Add IBL
-    //colorAccum.rgb += Diffuse_IBL(Surface) * ssao;
-    colorAccum.rgb += EvaluateIBLDiffuse(Surface) * ssao;
-
-    //colorAccum.rgb += Specular_IBL(Surface) * ssao;
-    colorAccum.rgb += EvaluateIBLSpecular(Surface) * ssao;
+    colorAccum.rgb += EvaluateIBLDiffuse(Surface);
+    colorAccum.rgb += EvaluateIBLSpecular(Surface);
 
     return float4(colorAccum, MatProps.BaseColor.a);
 }

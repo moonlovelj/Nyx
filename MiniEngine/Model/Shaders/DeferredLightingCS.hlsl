@@ -86,32 +86,18 @@ void main(
             shadowCoord.xyz *= rcp(shadowCoord.w);
             // TODO 阴影有瑕疵
             float sunShadow = GetDirectionalShadow(ScreenUV, shadowCoord.xyz, texShadow);
+            // TODO 高光有锯齿，尤其是粗糙度接近0时
             colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunColor);
 
             ShadeLights(colorAccum.rgb, Surface, DTid, posW);
 
-            //float3 WorldPos = gBufferD[DTid].xyz;
-            //colorAccum.rgb = abs(posW - WorldPos);
-
-            float ssao = texSSAO[DTid];
-            // Add IBL
-            //colorAccum.rgb += Diffuse_IBL(Surface) * ssao;
-            colorAccum.rgb += EvaluateIBLDiffuse(Surface);
-
-            //colorAccum.rgb += Specular_IBL(Surface) * ssao;
-            colorAccum.rgb += EvaluateIBLSpecular(Surface);
-            
-            //colorAccum.rgb = abs(posW.z);
-
-            //colorAccum.rgb = sunShadow;
-            //colorAccum.rgb = Surface.c_spec;
-            //colorAccum.rgb = baseColor;
-            //colorAccum.rgb = saturate(dot(Surface.N, SunDirection));
-
             //TODO ssao在球面有严重条纹瑕疵，待修复
-
-            //colorAccum = abs(Surface.N.z);
+            //float ssao = texSSAO[DTid];
             
+            // Add IBL
+            colorAccum.rgb += EvaluateIBLDiffuse(Surface);
+            colorAccum.rgb += EvaluateIBLSpecular(Surface);
+
             sceneColor[DTid] = colorAccum;
         }
     }
