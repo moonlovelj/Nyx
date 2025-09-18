@@ -141,18 +141,24 @@ void Renderer::CompileMesh(
         mesh->numDraws = (uint16_t)numDraws;
 
         uint32_t drawIdx = 0;
+        uint32_t curVertByteOffset = 0;
         uint32_t curVertOffset = 0;
+        uint32_t curIndexByteOffset = 0;
         uint32_t curIndexOffset = 0;
+        uint32_t curDepthVertByteOffset = 0;
         for (auto& draw : iter.second)
         {
             Mesh::Draw& d = mesh->draw[drawIdx++];
             d.primCount = draw->primCount;
             d.baseVertex = curVertOffset;
             d.startIndex = curIndexOffset;
-            std::memcpy(uploadMem + curVBOffset + curVertOffset, draw->VB->data(), draw->VB->size());
+            std::memcpy(uploadMem + curVBOffset + curVertByteOffset, draw->VB->data(), draw->VB->size());
+            curVertByteOffset += (uint32_t)draw->VB->size();
             curVertOffset += (uint32_t)draw->VB->size() / draw->vertexStride;
-            std::memcpy(uploadMem + curDepthVBOffset, draw->DepthVB->data(), draw->DepthVB->size());
-            std::memcpy(uploadMem + curIBOffset + curIndexOffset, draw->IB->data(), draw->IB->size());
+            std::memcpy(uploadMem + curDepthVBOffset + curDepthVertByteOffset, draw->DepthVB->data(), draw->DepthVB->size());
+            curDepthVertByteOffset += (uint32_t)draw->DepthVB->size();
+            std::memcpy(uploadMem + curIBOffset + curIndexByteOffset, draw->IB->data(), draw->IB->size());
+            curIndexByteOffset += (uint32_t)draw->IB->size();
             curIndexOffset += (uint32_t)draw->IB->size() >> (draw->index32 + 1);
         }
 
