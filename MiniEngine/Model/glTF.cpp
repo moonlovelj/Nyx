@@ -716,7 +716,7 @@ void glTF::Asset::Parse(const std::wstring& filepath)
             Utility::Printf("Error: Expected chunk0 to contain JSON\n");
             return;
         }
-        gltfFile = make_shared<vector<byte>>( chunk0Length + 1 );
+        gltfFile = make_shared<vector<unsigned char>>( chunk0Length + 1 );
         glbFile.read((char*)gltfFile->data(), chunk0Length);
         (*gltfFile)[chunk0Length] = '\0';
 
@@ -730,7 +730,7 @@ void glTF::Asset::Parse(const std::wstring& filepath)
             return;
        }
 
-        chunk1Bin = make_shared<vector<byte>>(chunk1Length);
+        chunk1Bin = make_shared<vector<unsigned char>>(chunk1Length);
         glbFile.read((char*)chunk1Bin->data(), chunk1Length);
     }
     else 
@@ -743,7 +743,7 @@ void glTF::Asset::Parse(const std::wstring& filepath)
             return;
 
         gltfFile->push_back('\0');
-        chunk1Bin = make_shared<vector<byte>>(0);
+        chunk1Bin = make_shared<vector<unsigned char>>(0);
     }
 
     json root = json::parse((const char*)gltfFile->data());

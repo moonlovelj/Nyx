@@ -23,6 +23,8 @@
 #include "../Core/BufferManager.h"
 #include "../Core/ShadowCamera.h"
 
+#include "GPUDriven/ExecuteIndirect.h"
+
 #include "CompiledShaders/DefaultVS.h"
 #include "CompiledShaders/DefaultSkinVS.h"
 #include "CompiledShaders/DefaultPS.h"
@@ -259,6 +261,11 @@ void Renderer::Initialize(void)
     g_SSAOFullScreenID = g_SSAOFullScreen.GetVersionID();
     g_ShadowBufferID = g_ShadowBuffer.GetVersionID();
 
+    if (GPUDriven::Enable)
+    {
+        GPUDriven::Initialize(&m_RootSig);
+    }
+
     s_Initialized = true;
 }
 
@@ -351,6 +358,11 @@ void Renderer::Shutdown(void)
     TextureManager::Shutdown();
     s_TextureHeap.Destroy();
     s_SamplerHeap.Destroy();
+
+	if (GPUDriven::Enable)
+	{
+        GPUDriven::Shutdown();
+	}
 }
 
 uint8_t Renderer::GetPSO(uint16_t psoFlags)
@@ -555,6 +567,7 @@ void MeshSorter::AddMesh( const Mesh& mesh, float distance,
     D3D12_GPU_VIRTUAL_ADDRESS meshCBV,
     D3D12_GPU_VIRTUAL_ADDRESS materialCBV,
     D3D12_GPU_VIRTUAL_ADDRESS bufferPtr,
+    const GPUDriven::IndirectArgsBufferWarp& indirectArgs,
     const Joint* skeleton)
 {
     SortKey key;
@@ -632,7 +645,7 @@ void MeshSorter::AddMesh( const Mesh& mesh, float distance,
         }
     }
 
-    SortObject object = { &mesh, skeleton, meshCBV, materialCBV, bufferPtr };
+    SortObject object = { &mesh, skeleton, meshCBV, materialCBV, bufferPtr, indirectArgs };
     m_SortObjects.push_back(object);
 }
 
@@ -821,8 +834,15 @@ void MeshSorter::RenderMeshes(
 
             context.SetIndexBuffer({object.bufferPtr + mesh.ibOffset, mesh.ibSize, (DXGI_FORMAT)mesh.ibFormat});
 
-            for (uint32_t i = 0; i < mesh.numDraws; ++i)
-                context.DrawIndexed(mesh.draw[i].primCount, mesh.draw[i].startIndex, mesh.draw[i].baseVertex);
+            if (GPUDriven::Enable)
+            {
+                GPUDriven::DrawIndirect(context, object.indirectArgs);
+            }
+            else
+            {
+                for (uint32_t i = 0; i < mesh.numDraws; ++i)
+                    context.DrawIndexed(mesh.draw[i].primCount, mesh.draw[i].startIndex, mesh.draw[i].baseVertex);
+            }
 
             ++m_CurrentDraw;
         }

@@ -57,12 +57,22 @@
     <Manifest>
       <EnableDPIAwareness>true</EnableDPIAwareness>
     </Manifest>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">stdcpp20</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">stdcpp20</LanguageStandard>
+    </ClCompile>
+    <ClCompile>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Release|x64'">stdcpp20</LanguageStandard>
+    </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Animation.h" />
     <ClInclude Include="ConstantBuffers.h" />
     <ClInclude Include="DeferredRenderer.h" />
     <ClInclude Include="glTF.h" />
+    <ClInclude Include="GPUDriven\ExecuteIndirect.h" />
     <ClInclude Include="IndexOptimizePostTransform.h" />
     <ClInclude Include="json.hpp" />
     <ClInclude Include="LightManager.h" />
@@ -80,6 +90,7 @@
     <ClCompile Include="BuildH3D.cpp" />
     <ClCompile Include="DeferredRenderer.cpp" />
     <ClCompile Include="glTF.cpp" />
+    <ClCompile Include="GPUDriven\ExecuteIndirect.cpp" />
     <ClCompile Include="IndexOptimizePostTransform.cpp" />
     <ClCompile Include="LightManager.cpp" />
     <ClCompile Include="MeshConvert.cpp" />

@@ -19,6 +19,7 @@
 #include "../Core/CommandContext.h"
 #include "../Core/UploadBuffer.h"
 #include "../Core/TextureManager.h"
+#include "GPUDriven/ExecuteIndirect.h"
 #include <cstdint>
 #include <vector>
 
@@ -109,6 +110,7 @@ namespace Renderer
             D3D12_GPU_VIRTUAL_ADDRESS meshCBV,
             D3D12_GPU_VIRTUAL_ADDRESS materialCBV,
             D3D12_GPU_VIRTUAL_ADDRESS bufferPtr,
+			const GPUDriven::IndirectArgsBufferWarp& indirectArgs,
             const Joint* skeleton = nullptr);
 
         void Sort();
@@ -139,6 +141,7 @@ namespace Renderer
             D3D12_GPU_VIRTUAL_ADDRESS meshCBV;
             D3D12_GPU_VIRTUAL_ADDRESS materialCBV;
             D3D12_GPU_VIRTUAL_ADDRESS bufferPtr;
+            GPUDriven::IndirectArgsBufferWarp indirectArgs;
         };
 
         std::vector<SortObject> m_SortObjects;

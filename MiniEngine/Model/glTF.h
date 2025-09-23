@@ -65,7 +65,7 @@ namespace glTF
 
         //BufferView* bufferView;
         //uint32_t byteOffset; // offset from start of buffer view
-        byte* dataPtr;
+        unsigned char* dataPtr;
         uint32_t stride;
         uint32_t count; // number of elements
         uint16_t componentType;

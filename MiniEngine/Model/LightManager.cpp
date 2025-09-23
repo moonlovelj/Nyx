@@ -234,7 +234,7 @@ void Lighting::CreateRandomLights( const Vector3 minBound, const Vector3 maxBoun
     for (uint32_t n = 0; n < MaxLights; n++)
     {
         Vector3 pos = randVecUniform() * posScale + posBias;
-        float lightRadius = randFloat() * 800.0f + 200.0f;
+        float lightRadius = randFloat() * 8.0f + 2.0f;
 
         Vector3 color = randVecUniform();
         float colorScale = randFloat() * .3f + .3f;
@@ -443,7 +443,6 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
 
 void Lighting::RenderLightShadows(GraphicsContext& gfxContext, const ModelInstance& modelInstance, const GlobalConstants& globals)
 {
-    // TODO Local Light Shadow CPU消耗很大（DC很多）
     using namespace Renderer;
     ScopedTimer _prof(L"RenderLightShadows", gfxContext);
 
@@ -466,6 +465,4 @@ void Lighting::RenderLightShadows(GraphicsContext& gfxContext, const ModelInstan
             gfxContext.CopySubresource(m_LightShadowArray, LightIndex, m_LightShadowTempBuffer, 0);
         }
     }
-
-    // gfxContext.TransitionResource(m_LightShadowArray, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 }

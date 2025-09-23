@@ -22,6 +22,7 @@
 #include "../Core/TextureManager.h"
 #include "../Core/Math/BoundingBox.h"
 #include "../Core/Math/BoundingSphere.h"
+#include "GPUDriven/ExecuteIndirect.h"
 #include <cstdint>
 #include <map>
 
@@ -131,6 +132,7 @@ public:
     void Render(Renderer::MeshSorter& sorter,
         const GpuBuffer& meshConstants,
         const Math::AffineTransform sphereTransforms[],
+        const std::vector<GPUDriven::IndirectArgsBufferWarp>& indirectArgsBuffers,
         const Joint* skeleton) const;
 
     Math::BoundingSphere m_BoundingSphere; // Object-space bounding sphere
@@ -163,6 +165,7 @@ public:
     ~ModelInstance() {
         m_MeshConstantsCPU.Destroy();
         m_MeshConstantsGPU.Destroy();
+        DestroyMeshIndirectCommands();
     }
     ModelInstance( std::shared_ptr<const Model> sourceModel );
     ModelInstance( const ModelInstance& modelInstance );
@@ -192,6 +195,9 @@ public:
     std::vector<std::shared_ptr<Math::Camera>> GetCameras() const;
 
 private:
+    void CreateMeshIndirectCommands();
+    void DestroyMeshIndirectCommands();
+
     std::shared_ptr<const Model> m_Model;
     UploadBuffer m_MeshConstantsCPU;
     ByteAddressBuffer m_MeshConstantsGPU;
@@ -203,4 +209,5 @@ private:
     std::unique_ptr<Joint[]> m_Skeleton;
 
     std::map<uint32_t, std::shared_ptr<Math::Camera>> m_Cameras;
+    std::vector<GPUDriven::IndirectArgsBufferWarp> m_MeshIndirectArgsBuffers;
 };

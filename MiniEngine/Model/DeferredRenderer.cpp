@@ -269,7 +269,7 @@ void Deferred::RenderScene(
 	psConstants.FrameIndexMod2 = FrameIndex;
 
     // Set the default state for command lists
-    auto& pfnSetupGraphicsState = [&](void)
+    auto pfnSetupGraphicsState = [&](void)
     {
         gfxContext.SetRootSignature(Renderer::m_RootSig);
         gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Renderer::s_TextureHeap.GetHeapPointer());

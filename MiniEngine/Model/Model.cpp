@@ -14,6 +14,11 @@
 #include "Model.h"
 #include "Renderer.h"
 #include "ConstantBuffers.h"
+#include "GPUDriven/ExecuteIndirect.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <new>
 
 using namespace Math;
 using namespace Renderer;
@@ -33,6 +38,7 @@ void Model::Render(
     MeshSorter& sorter,
     const GpuBuffer& meshConstants,
     const AffineTransform sphereTransforms[],
+    const std::vector<GPUDriven::IndirectArgsBufferWarp>& indirectArgsBuffers,
     const Joint* skeleton ) const
 {
     // Pointer to current mesh
@@ -61,7 +67,7 @@ void Model::Render(
             sorter.AddMesh(mesh, distance,
                 meshConstants.GetGpuVirtualAddress() + sizeof(MeshConstants) * mesh.meshCBV,
                 m_MaterialConstants.GetGpuVirtualAddress() + sizeof(MaterialConstants) * mesh.materialCBV,
-                m_DataBuffer.GetGpuVirtualAddress(), skeleton);
+                m_DataBuffer.GetGpuVirtualAddress(), indirectArgsBuffers[i], skeleton);
         }
 
         pMesh += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
@@ -73,7 +79,7 @@ void ModelInstance::Render(MeshSorter& sorter) const
     if (m_Model != nullptr)
     {
         //const Frustum& frustum = sorter.GetWorldFrustum();
-        m_Model->Render(sorter, m_MeshConstantsGPU, m_BoundingSphereTransforms.get(),
+        m_Model->Render(sorter, m_MeshConstantsGPU, m_BoundingSphereTransforms.get(), m_MeshIndirectArgsBuffers,
             m_Skeleton.get());
     }
 }
@@ -82,6 +88,9 @@ ModelInstance::ModelInstance( std::shared_ptr<const Model> sourceModel )
     : m_Model(sourceModel), m_Locator(kIdentity)
 {
     static_assert((_alignof(MeshConstants) & 255) == 0, "CBVs need 256 byte alignment");
+
+    DestroyMeshIndirectCommands();
+
     if (sourceModel == nullptr)
     {
         m_MeshConstantsCPU.Destroy();
@@ -127,6 +136,8 @@ ModelInstance::ModelInstance( std::shared_ptr<const Model> sourceModel )
 				ASSERT(false, "Not support load orthographic camera");
 			}
 		}
+
+        CreateMeshIndirectCommands();
     }
 }
 
@@ -139,6 +150,9 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
 {
     m_Model = sourceModel;
     m_Locator = UniformTransform(kIdentity);
+
+    DestroyMeshIndirectCommands();
+
     if (sourceModel == nullptr)
     {
         m_MeshConstantsCPU.Destroy();
@@ -184,6 +198,8 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
                 ASSERT(false, "Not support load orthographic camera");
             }
         }
+
+        CreateMeshIndirectCommands();
     }
     return *this;
 }
@@ -324,4 +340,45 @@ Math::OrientedBox ModelInstance::GetBoundingBox() const
         return AxisAlignedBox(Vector3(kZero), Vector3(kZero));
 
     return m_Locator * m_Model->m_BoundingBox;
+}
+
+void ModelInstance::CreateMeshIndirectCommands()
+{
+    if (m_Model)
+    {
+        m_MeshIndirectArgsBuffers.reserve(m_Model->m_NumMeshes);
+		const uint8_t* pMesh = m_Model->m_MeshData.get();
+        for (uint32_t i = 0; i < m_Model->m_NumMeshes; i++)
+        {
+            const Mesh& mesh = *(const Mesh*)pMesh;
+            void* cmdsMemory = ::operator new(sizeof(GPUDriven::IndirectCommand) * mesh.numDraws, std::align_val_t(16));
+            GPUDriven::IndirectCommand* cmds = static_cast<GPUDriven::IndirectCommand*>(cmdsMemory);
+            for (uint32_t j = 0; j < mesh.numDraws; j++)
+            {
+                GPUDriven::IndirectCommand& cmd = cmds[j];
+                cmd.drawArguments.IndexCountPerInstance = mesh.draw[j].primCount;
+                cmd.drawArguments.InstanceCount = 1;
+                cmd.drawArguments.StartIndexLocation = mesh.draw[j].startIndex;
+				cmd.drawArguments.BaseVertexLocation = mesh.draw[j].baseVertex;
+				cmd.drawArguments.StartInstanceLocation = 0;
+            }
+            std::shared_ptr<IndirectArgsBuffer> argsBuffer = std::make_shared<IndirectArgsBuffer>();
+			std::wstring name = L"Model Mesh ";
+			name += std::to_wstring(i);
+            argsBuffer->Create(name.c_str(), mesh.numDraws, sizeof(GPUDriven::IndirectCommand), cmdsMemory);
+            m_MeshIndirectArgsBuffers.push_back({ argsBuffer, mesh.numDraws});
+            pMesh += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
+            ::operator delete(cmdsMemory, std::align_val_t(16));
+        }
+    }
+}
+
+void ModelInstance::DestroyMeshIndirectCommands()
+{
+    for (size_t i = 0; i < m_MeshIndirectArgsBuffers.size(); i++)
+    {
+        m_MeshIndirectArgsBuffers[i].indirectArgsBuffer->Destroy();
+    }
+
+    m_MeshIndirectArgsBuffers.clear();
 }

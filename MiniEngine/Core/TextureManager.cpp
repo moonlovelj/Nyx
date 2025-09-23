@@ -203,6 +203,17 @@ void TextureRef::operator= (TextureRef& rhs)
         ++m_ref->m_ReferenceCount;
 }
 
+void TextureRef::operator= (TextureRef&& rhs) noexcept
+{
+	if (this == &rhs) return;
+
+	if (m_ref != nullptr)
+		--m_ref->m_ReferenceCount;
+
+	m_ref = rhs.m_ref;
+	rhs.m_ref = nullptr;
+}
+
 bool TextureRef::IsValid() const
 {
     return m_ref && m_ref->IsValid();

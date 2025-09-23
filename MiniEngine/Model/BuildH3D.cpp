@@ -198,8 +198,10 @@ bool ModelH3D::BuildModel(ModelData& model, const std::wstring& basePath) const
         prim.material = &material;
         prim.attribMask = 0xB;
         prim.mode = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-        memcpy(prim.minPos, &mesh.boundingBox.GetMin(), 12);
-        memcpy(prim.maxPos, &mesh.boundingBox.GetMax(), 12);
+        const Vector3 BoxMin = mesh.boundingBox.GetMin();
+        const Vector3 BoxMax = mesh.boundingBox.GetMax();
+        memcpy(prim.minPos, &BoxMin, 12);
+        memcpy(prim.maxPos, &BoxMax, 12);
         prim.minIndex = 0;
         prim.maxIndex = 0;
 

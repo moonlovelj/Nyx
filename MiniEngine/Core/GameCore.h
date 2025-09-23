@@ -48,7 +48,7 @@ namespace GameCore
 
 namespace GameCore
 {
-    int RunApplication( IGameApp& app, const wchar_t* className, HINSTANCE hInst, int nCmdShow );
+    int RunApplication( IGameApp&& app, const wchar_t* className, HINSTANCE hInst, int nCmdShow );
 }
 
 #define CREATE_APPLICATION( app_class ) \

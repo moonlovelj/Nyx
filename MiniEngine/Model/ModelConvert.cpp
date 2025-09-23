@@ -41,7 +41,7 @@ static inline Vector3 SafeNormalize(Vector3 x)
 
 void Renderer::CompileMesh(
     std::vector<Mesh*>& meshList,
-    std::vector<byte>& bufferMemory,
+    std::vector<unsigned char>& bufferMemory,
     glTF::Mesh& srcMesh,
     uint32_t matrixIdx,
     const Matrix4& localToObject,
@@ -85,8 +85,8 @@ void Renderer::CompileMesh(
     uint32_t totalBufferSize = (uint32_t)(totalVertexSize + totalDepthVertexSize + totalIndexSize);
 
     Utility::ByteArray stagingBuffer;
-    stagingBuffer.reset(new std::vector<byte>(totalBufferSize));
-    uint8_t* uploadMem = stagingBuffer->data();
+    stagingBuffer.reset(new std::vector<unsigned char>(totalBufferSize));
+    uint8_t* uploadMem = reinterpret_cast<uint8_t*>(stagingBuffer->data());
 
     uint32_t curVBOffset = 0;
     uint32_t curDepthVBOffset = (uint32_t)totalVertexSize;
@@ -179,7 +179,7 @@ static uint32_t WalkGraph(
     BoundingSphere& modelBSphere,
     AxisAlignedBox& modelBBox,
     std::vector<Mesh*>& meshList,
-    std::vector<byte>& bufferMemory,
+    std::vector<unsigned char>& bufferMemory,
     std::vector<CameraData>& cameraData,
     const std::vector<glTF::Node*>& siblings,
     uint32_t curPos,
@@ -470,7 +470,7 @@ bool Renderer::BuildModel(ModelData& model, const glTF::Asset& asset, int sceneI
         return false;
 
     // Aggregate all of the vertex and index buffers in this unified buffer
-    std::vector<byte>& bufferMemory = model.m_GeometryData;
+    std::vector<unsigned char>& bufferMemory = model.m_GeometryData;
 
     model.m_BoundingSphere = BoundingSphere(kZero);
     model.m_BoundingBox = AxisAlignedBox(kZero);

@@ -21,7 +21,7 @@ using namespace Utility;
 
 namespace Utility
 {
-    ByteArray NullFile = make_shared<vector<byte> > (vector<byte>() );
+    ByteArray NullFile = make_shared<vector<unsigned char> > (vector<unsigned char>() );
 }
 
 //ByteArray DecompressZippedFile( wstring& fileName );
@@ -37,7 +37,7 @@ ByteArray ReadFileHelper(const wstring& fileName)
     if (!file)
         return NullFile;
 
-    Utility::ByteArray byteArray = make_shared<vector<byte> >( fileStat.st_size );
+    Utility::ByteArray byteArray = make_shared<vector<unsigned char> >( fileStat.st_size );
     file.read( (char*)byteArray->data(), byteArray->size() );
     file.close();
 

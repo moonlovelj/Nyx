@@ -53,8 +53,8 @@ namespace Renderer
     {
         BoundingSphere m_BoundingSphere;
         AxisAlignedBox m_BoundingBox;
-        std::vector<byte> m_GeometryData;
-        std::vector<byte> m_AnimationKeyFrameData;
+        std::vector<unsigned char> m_GeometryData;
+        std::vector<unsigned char> m_AnimationKeyFrameData;
         std::vector<AnimationCurve> m_AnimationCurves;
         std::vector<AnimationSet> m_Animations;
         std::vector<uint16_t> m_JointIndices;
@@ -91,7 +91,7 @@ namespace Renderer
 
     void CompileMesh(
         std::vector<Mesh*>& meshList,
-        std::vector<byte>& bufferMemory,
+        std::vector<unsigned char>& bufferMemory,
         glTF::Mesh& srcMesh,
         uint32_t matrixIdx,
         const Matrix4& localToObject,

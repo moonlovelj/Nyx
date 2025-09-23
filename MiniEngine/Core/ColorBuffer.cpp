@@ -190,7 +190,7 @@ void ColorBuffer::CreateCube(const std::wstring& Name, uint32_t Width, uint32_t 
 }
 
 void ColorBuffer::CreateCube(const std::wstring& Name, uint32_t Width, uint32_t Height, uint32_t NumMips,
-    DXGI_FORMAT Format, EsramAllocator& Allocator)
+    DXGI_FORMAT Format, EsramAllocator&)
 {
     CreateCube(Name, Width, Height, NumMips, Format);
 }

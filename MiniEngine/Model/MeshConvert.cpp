@@ -89,7 +89,7 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
         if (indexCount > 0xFFFF)
         {
             b32BitIndices = true;
-            outPrim.IB = std::make_shared<std::vector<byte>>(4 * indexCount);
+            outPrim.IB = std::make_shared<std::vector<unsigned char>>(4 * indexCount);
             indices = outPrim.IB->data();
             uint32_t* tmp = (uint32_t*)indices;
             for (uint32_t i = 0; i < indexCount; ++i)
@@ -98,7 +98,7 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
         else
         {
             b32BitIndices = false;
-            outPrim.IB = std::make_shared<std::vector<byte>>(2 * indexCount);
+            outPrim.IB = std::make_shared<std::vector<unsigned char>>(2 * indexCount);
             indices = outPrim.IB->data();
             uint16_t* tmp = (uint16_t*)indices;
             for (uint16_t i = 0; i < indexCount; ++i)
@@ -143,7 +143,7 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
         }
         b32BitIndices = maxIndex > 0xFFFF;
         uint32_t indexSize = b32BitIndices ? 4 : 2;
-        outPrim.IB = std::make_shared<std::vector<byte>>(indexSize * indexCount);
+        outPrim.IB = std::make_shared<std::vector<unsigned char>>(indexSize * indexCount);
         if (b32BitIndices)
         {
             ASSERT(inPrim.indices->componentType == Accessor::kUnsignedInt);
@@ -378,7 +378,7 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
     ComputeInputLayout(layout, offsets, strides);
     uint32_t stride = strides[0];
 
-    outPrim.VB = std::make_shared<std::vector<byte>>(stride * vertexCount);
+    outPrim.VB = std::make_shared<std::vector<unsigned char>>(stride * vertexCount);
     ASSERT_SUCCEEDED(vbw.AddStream(outPrim.VB->data(), vertexCount, 0, stride));
 
     vbw.Write( position.get(), "POSITION", 0, vertexCount );
@@ -414,7 +414,7 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
     VBWriter dvbw;
     dvbw.Initialize({DepthElements.data(), (uint32_t)DepthElements.size()});
 
-    outPrim.DepthVB = std::make_shared<std::vector<byte>>(depthStride * vertexCount);
+    outPrim.DepthVB = std::make_shared<std::vector<unsigned char>>(depthStride * vertexCount);
     ASSERT_SUCCEEDED(dvbw.AddStream(outPrim.DepthVB->data(), vertexCount, 0, depthStride));
 
     dvbw.Write( position.get(), "POSITION", 0, vertexCount );
