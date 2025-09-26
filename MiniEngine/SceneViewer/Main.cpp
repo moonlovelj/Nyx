@@ -24,6 +24,11 @@
 #include "IBL.h"
 #include "TextureConvert.h"
 
+extern "C" {
+	__declspec(dllexport) extern const UINT D3D12SDKVersion = 616; // 对应Agility SDK版本
+	__declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\";
+}
+
 using namespace GameCore;
 using namespace Math;
 using namespace Graphics;
@@ -239,7 +244,7 @@ void SceneViewer::Startup( void )
     {
         m_ModelInst = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
         //m_ModelInst = Renderer::LoadModel(L"Assets/DamagedHelmet/glTF/DamagedHelmet.gltf", forceRebuild);
-        //m_ModelInst = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
+        //m_ModelInst = Renderer::LoadModel(L"Assets/Test/test.gltf", forceRebuild);
         //m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
         OrientedBox obb = m_ModelInst.GetBoundingBox();
         float modelRadius = Length(obb.GetDimensions()) * 0.5f;

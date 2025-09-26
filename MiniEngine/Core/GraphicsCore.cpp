@@ -148,6 +148,18 @@ namespace Graphics
         return GetVendorIdFromDevice(pDevice) == vendorID_Intel;
     }
 
+    bool IsShaderModelSupported(ID3D12Device* pDevice, D3D_SHADER_MODEL ShaderModel)
+    {
+		D3D12_FEATURE_DATA_SHADER_MODEL shaderModel = { ShaderModel };
+        return !FAILED(pDevice->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &shaderModel, sizeof(shaderModel)));
+    }
+
+    bool IsRootSignatureVersionSupported(ID3D12Device* pDevice, D3D_ROOT_SIGNATURE_VERSION Version)
+    {
+		D3D12_FEATURE_DATA_ROOT_SIGNATURE RootSignatureVersion = { Version };
+        return !FAILED(pDevice->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &RootSignatureVersion, sizeof(RootSignatureVersion)));
+    }
+
 	// Check adapter support for DirectX Raytracing.
 	bool IsDirectXRaytracingSupported(ID3D12Device* testDevice)
 	{

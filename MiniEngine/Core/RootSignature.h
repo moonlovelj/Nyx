@@ -55,6 +55,7 @@ public:
         m_RootParam.ShaderVisibility = Visibility;
         m_RootParam.Descriptor.ShaderRegister = Register;
         m_RootParam.Descriptor.RegisterSpace = Space;
+        m_RootParam.Descriptor.Flags = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
     }
 
     void InitAsBufferSRV( UINT Register, D3D12_SHADER_VISIBILITY Visibility = D3D12_SHADER_VISIBILITY_ALL, UINT Space = 0 )
@@ -63,6 +64,7 @@ public:
         m_RootParam.ShaderVisibility = Visibility;
         m_RootParam.Descriptor.ShaderRegister = Register;
         m_RootParam.Descriptor.RegisterSpace = Space;
+        m_RootParam.Descriptor.Flags = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
     }
 
     void InitAsBufferUAV( UINT Register, D3D12_SHADER_VISIBILITY Visibility = D3D12_SHADER_VISIBILITY_ALL, UINT Space = 0 )
@@ -71,6 +73,7 @@ public:
         m_RootParam.ShaderVisibility = Visibility;
         m_RootParam.Descriptor.ShaderRegister = Register;
         m_RootParam.Descriptor.RegisterSpace = Space;
+        m_RootParam.Descriptor.Flags = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
     }
 
     void InitAsDescriptorRange( D3D12_DESCRIPTOR_RANGE_TYPE Type, UINT Register, UINT Count, D3D12_SHADER_VISIBILITY Visibility = D3D12_SHADER_VISIBILITY_ALL, UINT Space = 0 )
@@ -84,25 +87,43 @@ public:
         m_RootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
         m_RootParam.ShaderVisibility = Visibility;
         m_RootParam.DescriptorTable.NumDescriptorRanges = RangeCount;
-        m_RootParam.DescriptorTable.pDescriptorRanges = new D3D12_DESCRIPTOR_RANGE[RangeCount];
+        m_RootParam.DescriptorTable.pDescriptorRanges = new D3D12_DESCRIPTOR_RANGE1[RangeCount];
     }
 
     void SetTableRange( UINT RangeIndex, D3D12_DESCRIPTOR_RANGE_TYPE Type, UINT Register, UINT Count, UINT Space = 0 )
     {
-        D3D12_DESCRIPTOR_RANGE* range = const_cast<D3D12_DESCRIPTOR_RANGE*>(m_RootParam.DescriptorTable.pDescriptorRanges + RangeIndex);
+        D3D12_DESCRIPTOR_RANGE1* range = const_cast<D3D12_DESCRIPTOR_RANGE1*>(m_RootParam.DescriptorTable.pDescriptorRanges + RangeIndex);
         range->RangeType = Type;
         range->NumDescriptors = Count;
         range->BaseShaderRegister = Register;
         range->RegisterSpace = Space;
         range->OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+		D3D12_DESCRIPTOR_RANGE_FLAGS Flags = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
+		switch (Type)
+		{
+		case D3D12_DESCRIPTOR_RANGE_TYPE_CBV:
+		case D3D12_DESCRIPTOR_RANGE_TYPE_SRV:
+            Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+			break;
+		case D3D12_DESCRIPTOR_RANGE_TYPE_UAV:
+            Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE;
+			break;
+		case D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER:
+            Flags = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
+			break;
+		default:
+			break;
+		}
+		range->Flags = Flags;
     }
 
-    const D3D12_ROOT_PARAMETER& operator() ( void ) const { return m_RootParam; }
+    const D3D12_ROOT_PARAMETER1& operator() ( void ) const { return m_RootParam; }
         
 
 protected:
 
-    D3D12_ROOT_PARAMETER m_RootParam;
+    D3D12_ROOT_PARAMETER1 m_RootParam;
 };
 
 // Maximum 64 DWORDS divied up amongst all root parameters.

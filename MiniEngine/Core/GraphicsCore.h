@@ -35,6 +35,8 @@ namespace Graphics
     bool IsDeviceNvidia(ID3D12Device* pDevice);
     bool IsDeviceAMD(ID3D12Device* pDevice);
     bool IsDeviceIntel(ID3D12Device* pDevice);
+	bool IsShaderModelSupported(ID3D12Device* pDevice, D3D_SHADER_MODEL ShaderModel);
+	bool IsRootSignatureVersionSupported(ID3D12Device* pDevice, D3D_ROOT_SIGNATURE_VERSION Version);
 
     extern ID3D12Device* g_Device;
     extern CommandListManager g_CommandManager;

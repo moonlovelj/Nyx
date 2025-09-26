@@ -93,12 +93,11 @@ void RootSignature::Finalize(const std::wstring& name, D3D12_ROOT_SIGNATURE_FLAG
 
     ASSERT(m_NumInitializedStaticSamplers == m_NumSamplers);
 
-    D3D12_ROOT_SIGNATURE_DESC RootDesc;
-    RootDesc.NumParameters = m_NumParameters;
-    RootDesc.pParameters = (const D3D12_ROOT_PARAMETER*)m_ParamArray.get();
-    RootDesc.NumStaticSamplers = m_NumSamplers;
-    RootDesc.pStaticSamplers = (const D3D12_STATIC_SAMPLER_DESC*)m_SamplerArray.get();
-    RootDesc.Flags = Flags;
+    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC RootVersionedDesc;
+    RootVersionedDesc.Init_1_1(m_NumParameters, (const D3D12_ROOT_PARAMETER1*)m_ParamArray.get(),
+        m_NumSamplers, (const D3D12_STATIC_SAMPLER_DESC*)m_SamplerArray.get(), Flags);
+
+    D3D12_ROOT_SIGNATURE_DESC1 RootDesc = RootVersionedDesc.Desc_1_1;
 
     m_DescriptorTableBitMap = 0;
     m_SamplerTableBitMap = 0;
@@ -108,7 +107,7 @@ void RootSignature::Finalize(const std::wstring& name, D3D12_ROOT_SIGNATURE_FLAG
 
     for (UINT Param = 0; Param < m_NumParameters; ++Param)
     {
-        const D3D12_ROOT_PARAMETER& RootParam = RootDesc.pParameters[Param];
+        const D3D12_ROOT_PARAMETER1& RootParam = RootDesc.pParameters[Param];
         m_DescriptorTableSize[Param] = 0;
 
         if (RootParam.ParameterType == D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE)
@@ -152,8 +151,22 @@ void RootSignature::Finalize(const std::wstring& name, D3D12_ROOT_SIGNATURE_FLAG
     {
         ComPtr<ID3DBlob> pOutBlob, pErrorBlob;
 
-        ASSERT_SUCCEEDED( D3D12SerializeRootSignature(&RootDesc, D3D_ROOT_SIGNATURE_VERSION_1,
-            pOutBlob.GetAddressOf(), pErrorBlob.GetAddressOf()));
+        HRESULT hr = D3D12SerializeVersionedRootSignature(&RootVersionedDesc,
+            pOutBlob.GetAddressOf(), pErrorBlob.GetAddressOf());
+
+        if (FAILED(hr))
+        {
+            if (pErrorBlob && pErrorBlob->GetBufferPointer() && pErrorBlob->GetBufferSize() > 0)
+            {
+                const char* ptr = static_cast<const char*>(pErrorBlob->GetBufferPointer());
+                const SIZE_T len = pErrorBlob->GetBufferSize();
+                std::string msg(ptr, ptr + len);
+                if (msg.empty() || msg.back() != '\0') msg.push_back('\0');
+                OutputDebugStringA(msg.c_str());
+            }
+
+            ASSERT_SUCCEEDED(hr);
+        }
 
         ASSERT_SUCCEEDED( g_Device->CreateRootSignature(1, pOutBlob->GetBufferPointer(), pOutBlob->GetBufferSize(),
             MY_IID_PPV_ARGS(&m_Signature)) );
