@@ -429,8 +429,8 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
     Context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
     Context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Renderer::s_TextureHeap.GetHeapPointer());
-    Context.SetDescriptorTable(1, m_DeferredLightingTextures);
-    Context.SetDescriptorTable(2, Renderer::m_CommonTextures);
+    Context.SetDescriptorTable(1, Renderer::m_CommonTextures);
+    Context.SetDescriptorTable(2, m_DeferredLightingTextures);
     Context.SetDescriptorTable(3, m_DeferredLightingUAVs);
 
     Context.SetDynamicConstantBufferView(0, sizeof(GlobalConstants), &globals);

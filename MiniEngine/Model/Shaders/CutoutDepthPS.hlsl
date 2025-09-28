@@ -19,9 +19,6 @@ struct VSOutput
     float2 uv : TexCoord0;
 };
 
-Texture2D<float4> baseColorTexture          : register(t0);
-SamplerState baseColorSampler               : register(s0);
-
 cbuffer MaterialConstants : register(b0)
 {
     float4 baseColorFactor;
@@ -29,12 +26,18 @@ cbuffer MaterialConstants : register(b0)
     float normalTextureScale;
     float2 metallicRoughnessFactor;
     uint flags;
+    uint TextureStartIndex;
+    uint SamplerStartIndex;
 }
 
 [RootSignature(Renderer_RootSig)]
 void main(VSOutput vsOutput)
 {
     float cutoff = f16tof32(flags >> 16);
-    if (baseColorTexture.Sample(baseColorSampler, vsOutput.uv).a < cutoff)
+    
+    Texture2D<float4> BaseColorTexture = ResourceDescriptorHeap[TextureStartIndex];
+    SamplerState BaseColorSampler = SamplerDescriptorHeap[SamplerStartIndex];
+    
+    if (BaseColorTexture.Sample(BaseColorSampler, vsOutput.uv).a < cutoff)
         discard;
 }

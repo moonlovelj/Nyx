@@ -55,6 +55,9 @@ __declspec(align(256)) struct MaterialConstants
             uint32_t alphaRef : 16; // half float
         };
     };
+
+    uint32_t TextureStartIndex;
+    uint32_t SamplerStartIndex;
 };
 
 __declspec(align(256)) struct GlobalConstants

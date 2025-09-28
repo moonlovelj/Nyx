@@ -5,11 +5,11 @@
 // outdated warning about for-loop variable scope
 #pragma warning (disable: 3078)
 
-Texture2D<float4> gBufferA : register(t0);
-Texture2D<float4> gBufferB : register(t1);
-Texture2D<float4> gBufferC : register(t2);
-Texture2D<float4> gBufferD : register(t3);
-Texture2D<float> gSceneDepth : register(t4);
+Texture2D<float4> gBufferA : register(t10);
+Texture2D<float4> gBufferB : register(t11);
+Texture2D<float4> gBufferC : register(t12);
+Texture2D<float4> gBufferD : register(t13);
+Texture2D<float> gSceneDepth : register(t14);
 
 //SamplerState defaultSampler : register(s0);
 //SamplerComparisonState shadowSampler : register(s1);

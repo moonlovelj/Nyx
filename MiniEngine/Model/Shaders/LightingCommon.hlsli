@@ -37,15 +37,15 @@ cbuffer GlobalConstants : register(b1)
 };
 
 // Common textures
-TextureCube<float3> IBLDiffuseLDMap      : register(t10);
-TextureCube<float3> IBLSpecularLDMap    : register(t11);
-Texture2D<float4> IBLLut : register(t12);
-Texture2D<float> texSSAO : register(t13);
-Texture2D<float> texShadow : register(t14);
-StructuredBuffer<LightData> lightBuffer : register(t15);
-Texture2DArray<float> lightShadowArrayTex : register(t16);
-ByteAddressBuffer lightGrid : register(t17);
-ByteAddressBuffer lightGridBitMask : register(t18);
+TextureCube<float3> IBLDiffuseLDMap      : register(t0);
+TextureCube<float3> IBLSpecularLDMap    : register(t1);
+Texture2D<float4> IBLLut : register(t2);
+Texture2D<float> texSSAO : register(t3);
+Texture2D<float> texShadow : register(t4);
+StructuredBuffer<LightData> lightBuffer : register(t5);
+Texture2DArray<float> lightShadowArrayTex : register(t6);
+ByteAddressBuffer lightGrid : register(t7);
+ByteAddressBuffer lightGridBitMask : register(t8);
 
 
 struct SurfaceProperties

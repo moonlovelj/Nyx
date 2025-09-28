@@ -53,8 +53,6 @@ namespace Renderer
     {
         kMeshConstants,
         kMaterialConstants,
-        kMaterialSRVs,
-        kMaterialSamplers,
         kCommonSRVs,
         kCommonCBV,
         kSkinMatrices,

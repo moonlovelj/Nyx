@@ -39,7 +39,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE GetSampler(uint32_t addressModes)
     return samplerDesc.CreateDescriptor();
 }
 
-void LoadMaterials(Model& model,
+std::vector<uint32_t> LoadMaterials(Model& model,
     const std::vector<MaterialTextureData>& materialTextures,
     const std::vector<std::wstring>& textureNames,
     const std::vector<uint8_t>& textureOptions,
@@ -132,6 +132,8 @@ void LoadMaterials(Model& model,
         mesh.pso = Renderer::GetPSO(mesh.psoFlags);
         meshPtr += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
     }
+
+    return tableOffsets;
 }
 
 std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool forceRebuild)
@@ -239,9 +241,9 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
     inFile.read((char*)model->m_SceneGraph.get(), header.numNodes * sizeof(GraphNode));
     inFile.read((char*)model->m_MeshData.get(), header.meshDataSize);
 
+    UploadBuffer materialConstants;
 	if (header.numMaterials > 0)
 	{
-		UploadBuffer materialConstants;
 		materialConstants.Create(L"Material Constant Upload", header.numMaterials * sizeof(MaterialConstants));
 		MaterialConstants* materialCBV = (MaterialConstants*)materialConstants.Map();
 		for (uint32_t i = 0; i < header.numMaterials; ++i)
@@ -250,7 +252,6 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
 			materialCBV++;
 		}
 		materialConstants.Unmap();
-		model->m_MaterialConstants.Create(L"Material Constants", header.numMaterials, sizeof(MaterialConstants), materialConstants);
 	}
 
     // Read material texture and sampler properties so we can load the material
@@ -268,7 +269,20 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
     std::vector<uint8_t> textureOptions(header.numTextures);
     inFile.read((char*)textureOptions.data(), header.numTextures * sizeof(uint8_t));
 
-    LoadMaterials(*model, materialTextures, textureNames, textureOptions, basePath);
+    std::vector<uint32_t> tableOffsets = LoadMaterials(*model, materialTextures, textureNames, textureOptions, basePath);
+    if (header.numMaterials > 0)
+    {
+        MaterialConstants* materialCBV = (MaterialConstants*)materialConstants.Map();
+        for (uint32_t i = 0; i < header.numMaterials; ++i)
+        {
+			const uint32_t offsetPair = tableOffsets[i];
+            materialCBV[i].TextureStartIndex = offsetPair & 0xFFFF;
+            materialCBV[i].SamplerStartIndex = offsetPair >> 16;
+        }
+
+        materialConstants.Unmap();
+        model->m_MaterialConstants.Create(L"Material Constants", header.numMaterials, sizeof(MaterialConstants), materialConstants);
+    }
 
     model->m_BoundingSphere = BoundingSphere(*(XMFLOAT4*)header.boundingSphere);
     model->m_BoundingBox = AxisAlignedBox(Vector3(*(XMFLOAT3*)header.minPos), Vector3(*(XMFLOAT3*)header.maxPos));

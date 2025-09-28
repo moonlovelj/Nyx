@@ -202,7 +202,7 @@ void Sponza::RenderObjects( GraphicsContext& gfxContext, const Matrix4& ViewProj
                 continue;
 
             materialIdx = mesh.materialIndex;
-            gfxContext.SetDescriptorTable(Renderer::kMaterialSRVs, m_Model.GetSRVs(materialIdx));
+            //gfxContext.SetDescriptorTable(Renderer::kMaterialSRVs, m_Model.GetSRVs(materialIdx));
 
             gfxContext.SetDynamicConstantBufferView(Renderer::kCommonCBV, sizeof(uint32_t), &materialIdx);
         }
