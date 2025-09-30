@@ -39,7 +39,7 @@ void Model::Render(
     const GpuBuffer& meshConstants,
     const AffineTransform sphereTransforms[],
     const std::vector<GPUDriven::IndirectArgsBufferWarp>& indirectArgsBuffers,
-    const Joint* skeleton ) const
+    const GpuBuffer& meshJoints) const
 {
     // Pointer to current mesh
     const uint8_t* pMesh = m_MeshData.get();
@@ -67,7 +67,7 @@ void Model::Render(
             sorter.AddMesh(mesh, distance,
                 meshConstants.GetGpuVirtualAddress() + sizeof(MeshConstants) * mesh.meshCBV,
                 m_MaterialConstants.GetGpuVirtualAddress() + sizeof(MaterialConstants) * mesh.materialCBV,
-                m_DataBuffer.GetGpuVirtualAddress(), indirectArgsBuffers[i], skeleton);
+                m_DataBuffer.GetGpuVirtualAddress(), indirectArgsBuffers[i], mesh.numJoints > 0 ? meshJoints.GetGpuVirtualAddress() + sizeof(Joint) * mesh.startJoint : D3D12_GPU_VIRTUAL_ADDRESS_NULL);
         }
 
         pMesh += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
@@ -80,7 +80,7 @@ void ModelInstance::Render(MeshSorter& sorter) const
     {
         //const Frustum& frustum = sorter.GetWorldFrustum();
         m_Model->Render(sorter, m_MeshConstantsGPU, m_BoundingSphereTransforms.get(), m_MeshIndirectArgsBuffers,
-            m_Skeleton.get());
+            m_MeshJointsGPU);
     }
 }
 
@@ -98,8 +98,9 @@ ModelInstance::ModelInstance( std::shared_ptr<const Model> sourceModel )
         m_BoundingSphereTransforms = nullptr;
         m_AnimGraph = nullptr;
         m_AnimState.clear();
-        m_Skeleton = nullptr;
         m_Cameras.clear();
+		m_MeshJointsCPU.Destroy();
+		m_MeshJointsGPU.Destroy();
     }
     else
     {
@@ -107,7 +108,9 @@ ModelInstance::ModelInstance( std::shared_ptr<const Model> sourceModel )
         m_MeshConstantsGPU.Create(L"Mesh Constant GPU Buffer", sourceModel->m_NumNodes, sizeof(MeshConstants));
 
         m_BoundingSphereTransforms.reset(new AffineTransform[sourceModel->m_NumNodes]);
-        m_Skeleton.reset(new Joint[sourceModel->m_NumJoints]);
+
+        m_MeshJointsCPU.Create(L"Mesh Joints Upload Buffer", std::max(sourceModel->m_NumJoints, 1u) * sizeof(Joint));
+        m_MeshJointsGPU.Create(L"Mesh Joints GPU Buffer", std::max(sourceModel->m_NumJoints, 1u), sizeof(Joint));
 
         if (sourceModel->m_NumAnimations > 0)
         {
@@ -160,8 +163,9 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
         m_BoundingSphereTransforms = nullptr;
         m_AnimGraph = nullptr;
         m_AnimState.clear();
-        m_Skeleton = nullptr;
         m_Cameras.clear();
+		m_MeshJointsCPU.Destroy();
+        m_MeshJointsGPU.Destroy();
     }
     else
     {
@@ -169,7 +173,9 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
         m_MeshConstantsGPU.Create(L"Mesh Constant GPU Buffer", sourceModel->m_NumNodes, sizeof(MeshConstants));
 
         m_BoundingSphereTransforms.reset(new AffineTransform[sourceModel->m_NumNodes]);
-        m_Skeleton.reset(new Joint[sourceModel->m_NumJoints]);
+
+		m_MeshJointsCPU.Create(L"Mesh Joints Upload Buffer", std::max(sourceModel->m_NumJoints, 1u) * sizeof(Joint));
+		m_MeshJointsGPU.Create(L"Mesh Joints GPU Buffer", std::max(sourceModel->m_NumJoints, 1u), sizeof(Joint));
 
         if (sourceModel->m_NumAnimations > 0)
         {
@@ -288,18 +294,24 @@ void ModelInstance::Update(GraphicsContext& gfxContext, float deltaTime)
 	}
 
     // Update skeletal joints
+    Joint* jb = (Joint*)m_MeshJointsCPU.Map();
     for (uint32_t i = 0; i < m_Model->m_NumJoints; ++i)
     {
-        Joint& joint = m_Skeleton[i];
+        Joint& joint = jb[i];
         joint.posXform = cb[m_Model->m_JointIndices[i]].World * m_Model->m_JointIBMs[i];
         joint.nrmXform = InverseTranspose(joint.posXform.Get3x3());
     }
+    m_MeshJointsCPU.Unmap();
 
     m_MeshConstantsCPU.Unmap();
 
     gfxContext.TransitionResource(m_MeshConstantsGPU, D3D12_RESOURCE_STATE_COPY_DEST, true);
     gfxContext.GetCommandList()->CopyBufferRegion(m_MeshConstantsGPU.GetResource(), 0, m_MeshConstantsCPU.GetResource(), 0, m_MeshConstantsCPU.GetBufferSize());
     gfxContext.TransitionResource(m_MeshConstantsGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
+
+	gfxContext.TransitionResource(m_MeshJointsGPU, D3D12_RESOURCE_STATE_COPY_DEST, true);
+	gfxContext.GetCommandList()->CopyBufferRegion(m_MeshJointsGPU.GetResource(), 0, m_MeshJointsCPU.GetResource(), 0, m_MeshJointsCPU.GetBufferSize());
+	gfxContext.TransitionResource(m_MeshJointsGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
 }
 
 void ModelInstance::Resize( float newRadius )
@@ -351,21 +363,54 @@ void ModelInstance::CreateMeshIndirectCommands()
         for (uint32_t i = 0; i < m_Model->m_NumMeshes; i++)
         {
             const Mesh& mesh = *(const Mesh*)pMesh;
-            void* cmdsMemory = ::operator new(sizeof(GPUDriven::IndirectCommand) * mesh.numDraws, std::align_val_t(16));
+            void* cmdsMemory = ::operator new(sizeof(GPUDriven::IndirectCommand) * mesh.numDraws * 2, std::align_val_t(16));
             GPUDriven::IndirectCommand* cmds = static_cast<GPUDriven::IndirectCommand*>(cmdsMemory);
+
+            D3D12_GPU_VIRTUAL_ADDRESS MeshCBAddress = m_MeshConstantsGPU.GetGpuVirtualAddress() + sizeof(MeshConstants) * mesh.meshCBV;
+            D3D12_GPU_VIRTUAL_ADDRESS MaterialCBAddress = m_Model->m_MaterialConstants.GetGpuVirtualAddress() + sizeof(MaterialConstants) * mesh.materialCBV;
+
             for (uint32_t j = 0; j < mesh.numDraws; j++)
             {
                 GPUDriven::IndirectCommand& cmd = cmds[j];
+
+                cmd.meshCBAddress = MeshCBAddress;
+                cmd.materialCBAddress = MaterialCBAddress;
+				cmd.vertexBufferView.BufferLocation = m_Model->m_DataBuffer.GetGpuVirtualAddress() + mesh.vbOffset;
+                cmd.vertexBufferView.SizeInBytes = mesh.vbSize;
+				cmd.vertexBufferView.StrideInBytes = mesh.vbStride;
+				cmd.indexBufferView.BufferLocation = m_Model->m_DataBuffer.GetGpuVirtualAddress() + mesh.ibOffset;
+                cmd.indexBufferView.SizeInBytes = mesh.ibSize;
+                cmd.indexBufferView.Format = (DXGI_FORMAT)mesh.ibFormat;
+                if (mesh.numJoints > 0)
+                {
+					cmd.meshJointsAddress = m_MeshJointsGPU.GetGpuVirtualAddress() + sizeof(Joint) * mesh.startJoint;
+                }
+                else
+                {
+					cmd.meshJointsAddress = D3D12_GPU_VIRTUAL_ADDRESS_NULL;
+                }
+
                 cmd.drawArguments.IndexCountPerInstance = mesh.draw[j].primCount;
                 cmd.drawArguments.InstanceCount = 1;
                 cmd.drawArguments.StartIndexLocation = mesh.draw[j].startIndex;
 				cmd.drawArguments.BaseVertexLocation = mesh.draw[j].baseVertex;
 				cmd.drawArguments.StartInstanceLocation = 0;
+
+				bool alphaTest = (mesh.psoFlags & PSOFlags::kAlphaTest) == PSOFlags::kAlphaTest;
+				uint32_t stride = alphaTest ? 16u : 12u;
+				if (mesh.numJoints > 0)
+					stride += 16;
+                GPUDriven::IndirectCommand& cmdZPass = cmds[j+ mesh.numDraws];
+                cmdZPass = cmd;
+                cmdZPass.vertexBufferView.BufferLocation = m_Model->m_DataBuffer.GetGpuVirtualAddress() + mesh.vbDepthOffset;
+                cmdZPass.vertexBufferView.SizeInBytes = mesh.vbDepthSize;
+                cmdZPass.vertexBufferView.StrideInBytes = stride;
+
             }
             std::shared_ptr<IndirectArgsBuffer> argsBuffer = std::make_shared<IndirectArgsBuffer>();
 			std::wstring name = L"Model Mesh ";
 			name += std::to_wstring(i);
-            argsBuffer->Create(name.c_str(), mesh.numDraws, sizeof(GPUDriven::IndirectCommand), cmdsMemory);
+            argsBuffer->Create(name.c_str(), mesh.numDraws * 2, sizeof(GPUDriven::IndirectCommand), cmdsMemory);
             m_MeshIndirectArgsBuffers.push_back({ argsBuffer, mesh.numDraws});
             pMesh += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
             ::operator delete(cmdsMemory, std::align_val_t(16));

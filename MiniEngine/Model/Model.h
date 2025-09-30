@@ -133,7 +133,7 @@ public:
         const GpuBuffer& meshConstants,
         const Math::AffineTransform sphereTransforms[],
         const std::vector<GPUDriven::IndirectArgsBufferWarp>& indirectArgsBuffers,
-        const Joint* skeleton) const;
+        const GpuBuffer& meshJoints) const;
 
     Math::BoundingSphere m_BoundingSphere; // Object-space bounding sphere
     Math::AxisAlignedBox m_BoundingBox;
@@ -165,6 +165,8 @@ public:
     ~ModelInstance() {
         m_MeshConstantsCPU.Destroy();
         m_MeshConstantsGPU.Destroy();
+		m_MeshJointsCPU.Destroy();
+        m_MeshJointsGPU.Destroy();
         DestroyMeshIndirectCommands();
     }
     ModelInstance( std::shared_ptr<const Model> sourceModel );
@@ -206,7 +208,9 @@ private:
 
     std::unique_ptr<GraphNode[]> m_AnimGraph;   // A copy of the scene graph when instancing animation
     std::vector<AnimationState> m_AnimState;    // Per-animation (not per-curve)
-    std::unique_ptr<Joint[]> m_Skeleton;
+
+	UploadBuffer m_MeshJointsCPU;
+	ByteAddressBuffer m_MeshJointsGPU;
 
     std::map<uint32_t, std::shared_ptr<Math::Camera>> m_Cameras;
     std::vector<GPUDriven::IndirectArgsBufferWarp> m_MeshIndirectArgsBuffers;

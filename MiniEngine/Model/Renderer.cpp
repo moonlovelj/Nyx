@@ -570,7 +570,7 @@ void MeshSorter::AddMesh( const Mesh& mesh, float distance,
     D3D12_GPU_VIRTUAL_ADDRESS materialCBV,
     D3D12_GPU_VIRTUAL_ADDRESS bufferPtr,
     const GPUDriven::IndirectArgsBufferWarp& indirectArgs,
-    const Joint* skeleton)
+    D3D12_GPU_VIRTUAL_ADDRESS meshJoints)
 {
     SortKey key;
     key.value = m_SortObjects.size();
@@ -647,7 +647,7 @@ void MeshSorter::AddMesh( const Mesh& mesh, float distance,
         }
     }
 
-    SortObject object = { &mesh, skeleton, meshCBV, materialCBV, bufferPtr, indirectArgs };
+    SortObject object = { &mesh, meshJoints, meshCBV, materialCBV, bufferPtr, indirectArgs };
     m_SortObjects.push_back(object);
 }
 
@@ -812,38 +812,37 @@ void MeshSorter::RenderMeshes(
             const SortObject& object = m_SortObjects[key.objectIdx];
             const Mesh& mesh = *object.mesh;
 
-            context.SetConstantBuffer(kMeshConstants, object.meshCBV);
-            context.SetConstantBuffer(kMaterialConstants, object.materialCBV);
-            //context.SetDescriptorTable(kMaterialSRVs, s_TextureHeap[mesh.srvTable]);
-            //context.SetDescriptorTable(kMaterialSamplers, s_SamplerHeap[mesh.samplerTable]);
-            if (mesh.numJoints > 0)
-            {
-                ASSERT(object.skeleton != nullptr, "Unspecified joint matrix array");
-                context.SetDynamicSRV(kSkinMatrices, sizeof(Joint) * mesh.numJoints, object.skeleton + mesh.startJoint);
-            }
             context.SetPipelineState(sm_PSOs[key.psoIdx]);
-
-            if (pass == kZPass)
-            {
-                bool alphaTest = (mesh.psoFlags & PSOFlags::kAlphaTest) == PSOFlags::kAlphaTest;
-                uint32_t stride = alphaTest ? 16u : 12u;
-                if (mesh.numJoints > 0)
-                    stride += 16;
-                context.SetVertexBuffer(0, {object.bufferPtr + mesh.vbDepthOffset, mesh.vbDepthSize, stride});
-            }
-            else
-            {
-                context.SetVertexBuffer(0, {object.bufferPtr + mesh.vbOffset, mesh.vbSize, mesh.vbStride});
-            }
-
-            context.SetIndexBuffer({object.bufferPtr + mesh.ibOffset, mesh.ibSize, (DXGI_FORMAT)mesh.ibFormat});
 
             if (GPUDriven::Enable)
             {
-                GPUDriven::DrawIndirect(context, object.indirectArgs);
+                context.TransitionResource(*object.indirectArgs.indirectArgsBuffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+                GPUDriven::DrawIndirect(context, object.indirectArgs, pass == kZPass);
             }
             else
             {
+				context.SetConstantBuffer(kMeshConstants, object.meshCBV);
+				context.SetConstantBuffer(kMaterialConstants, object.materialCBV);
+				if (mesh.numJoints > 0)
+				{
+					ASSERT(object.meshJoints != D3D12_GPU_VIRTUAL_ADDRESS_NULL, "Unspecified joint matrix array");
+					context.SetBufferSRV(kSkinMatrices, object.meshJoints);
+				}
+				if (pass == kZPass)
+				{
+					bool alphaTest = (mesh.psoFlags & PSOFlags::kAlphaTest) == PSOFlags::kAlphaTest;
+					uint32_t stride = alphaTest ? 16u : 12u;
+					if (mesh.numJoints > 0)
+						stride += 16;
+					context.SetVertexBuffer(0, { object.bufferPtr + mesh.vbDepthOffset, mesh.vbDepthSize, stride });
+				}
+				else
+				{
+					context.SetVertexBuffer(0, { object.bufferPtr + mesh.vbOffset, mesh.vbSize, mesh.vbStride });
+				}
+
+				context.SetIndexBuffer({ object.bufferPtr + mesh.ibOffset, mesh.ibSize, (DXGI_FORMAT)mesh.ibFormat });
+
                 for (uint32_t i = 0; i < mesh.numDraws; ++i)
                     context.DrawIndexed(mesh.draw[i].primCount, mesh.draw[i].startIndex, mesh.draw[i].baseVertex);
             }

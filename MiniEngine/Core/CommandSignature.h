@@ -124,7 +124,7 @@ public:
         return m_ParamArray.get()[EntryIndex];
     }
 
-    void Finalize( const RootSignature* RootSignature = nullptr );
+    void Finalize( const RootSignature* RootSignature = nullptr, uint32_t InByteStride = 0);
 
     ID3D12CommandSignature* GetSignature() const { return m_Signature.Get(); }
 

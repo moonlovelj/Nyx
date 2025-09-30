@@ -251,6 +251,7 @@ void SceneViewer::Startup( void )
         float modelRadius = Length(obb.GetDimensions()) * 0.5f;
         const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 0.5f, 0.0f, 0.0f);
         m_Camera.SetEyeAtUp( eye, obb.GetCenter(), Vector3(kYUnitVector) );
+        m_ModelInst.LoopAllAnimations();
     }
     else
     {

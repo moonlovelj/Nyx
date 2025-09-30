@@ -109,7 +109,7 @@ namespace Renderer
             D3D12_GPU_VIRTUAL_ADDRESS materialCBV,
             D3D12_GPU_VIRTUAL_ADDRESS bufferPtr,
 			const GPUDriven::IndirectArgsBufferWarp& indirectArgs,
-            const Joint* skeleton = nullptr);
+            D3D12_GPU_VIRTUAL_ADDRESS meshJoints = D3D12_GPU_VIRTUAL_ADDRESS_NULL);
 
         void Sort();
 
@@ -135,7 +135,7 @@ namespace Renderer
         struct SortObject
         {
             const Mesh* mesh;
-            const Joint* skeleton;
+            D3D12_GPU_VIRTUAL_ADDRESS meshJoints;
             D3D12_GPU_VIRTUAL_ADDRESS meshCBV;
             D3D12_GPU_VIRTUAL_ADDRESS materialCBV;
             D3D12_GPU_VIRTUAL_ADDRESS bufferPtr;

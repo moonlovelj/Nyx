@@ -239,6 +239,7 @@ public:
     void SetConstantBuffer( UINT RootIndex, D3D12_GPU_VIRTUAL_ADDRESS CBV );
     void SetDynamicConstantBufferView( UINT RootIndex, size_t BufferSize, const void* BufferData );
     void SetBufferSRV( UINT RootIndex, const GpuBuffer& SRV, UINT64 Offset = 0);
+    void SetBufferSRV(UINT RootIndex, D3D12_GPU_VIRTUAL_ADDRESS SRV);
     void SetBufferUAV( UINT RootIndex, const GpuBuffer& UAV, UINT64 Offset = 0);
     void SetDescriptorTable( UINT RootIndex, D3D12_GPU_DESCRIPTOR_HANDLE FirstHandle );
 
@@ -288,6 +289,7 @@ public:
     void SetDynamicConstantBufferView( UINT RootIndex, size_t BufferSize, const void* BufferData );
     void SetDynamicSRV( UINT RootIndex, size_t BufferSize, const void* BufferData ); 
     void SetBufferSRV( UINT RootIndex, const GpuBuffer& SRV, UINT64 Offset = 0);
+    void SetBufferSRV(UINT RootIndex, D3D12_GPU_VIRTUAL_ADDRESS SRV);
     void SetBufferUAV( UINT RootIndex, const GpuBuffer& UAV, UINT64 Offset = 0);
     void SetDescriptorTable( UINT RootIndex, D3D12_GPU_DESCRIPTOR_HANDLE FirstHandle );
 
@@ -530,10 +532,20 @@ inline void GraphicsContext::SetBufferSRV( UINT RootIndex, const GpuBuffer& SRV,
     m_CommandList->SetGraphicsRootShaderResourceView(RootIndex, SRV.GetGpuVirtualAddress() + Offset);
 }
 
+inline void GraphicsContext::SetBufferSRV(UINT RootIndex, D3D12_GPU_VIRTUAL_ADDRESS SRV)
+{
+    m_CommandList->SetGraphicsRootShaderResourceView(RootIndex, SRV);
+}
+
 inline void ComputeContext::SetBufferSRV( UINT RootIndex, const GpuBuffer& SRV, UINT64 Offset)
 {
     ASSERT((SRV.m_UsageState & D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE) != 0);
     m_CommandList->SetComputeRootShaderResourceView(RootIndex, SRV.GetGpuVirtualAddress() + Offset);
+}
+
+inline void ComputeContext::SetBufferSRV(UINT RootIndex, D3D12_GPU_VIRTUAL_ADDRESS SRV)
+{
+    m_CommandList->SetComputeRootShaderResourceView(RootIndex, SRV);
 }
 
 inline void GraphicsContext::SetBufferUAV( UINT RootIndex, const GpuBuffer& UAV, UINT64 Offset)

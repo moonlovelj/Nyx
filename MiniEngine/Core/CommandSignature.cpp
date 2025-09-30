@@ -18,7 +18,7 @@
 
 using namespace Graphics;
 
-void CommandSignature::Finalize( const RootSignature* RootSignature )
+void CommandSignature::Finalize( const RootSignature* RootSignature, uint32_t InByteStride)
 {
     if (m_Finalized)
         return;
@@ -59,7 +59,7 @@ void CommandSignature::Finalize( const RootSignature* RootSignature )
     }
 
     D3D12_COMMAND_SIGNATURE_DESC CommandSignatureDesc;
-    CommandSignatureDesc.ByteStride = ByteStride;
+    CommandSignatureDesc.ByteStride = InByteStride > 0 ? InByteStride : ByteStride;
     CommandSignatureDesc.NumArgumentDescs = m_NumParameters;
     CommandSignatureDesc.pArgumentDescs = (const D3D12_INDIRECT_ARGUMENT_DESC*)m_ParamArray.get();
     CommandSignatureDesc.NodeMask = 1;
