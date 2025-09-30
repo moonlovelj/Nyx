@@ -38,8 +38,9 @@ void Model::Render(
     MeshSorter& sorter,
     const GpuBuffer& meshConstants,
     const AffineTransform sphereTransforms[],
-    const std::vector<GPUDriven::IndirectArgsBufferWarp>& indirectArgsBuffers,
-    const GpuBuffer& meshJoints) const
+    const GpuBuffer& meshJoints,
+    const IndirectArgsBuffer& indirectArgsBuffer,
+    const IndirectArgsBuffer& indirectArgsBufferZPass) const
 {
     // Pointer to current mesh
     const uint8_t* pMesh = m_MeshData.get();
@@ -47,6 +48,7 @@ void Model::Render(
     const Frustum& frustum = sorter.GetViewFrustum();
     const AffineTransform& viewMat = (const AffineTransform&)sorter.GetViewMatrix();
 
+    uint32_t indirectArgsOffset = 0;
     for (uint32_t i = 0; i < m_NumMeshes; ++i)
     {
         const Mesh& mesh = *(const Mesh*)pMesh;
@@ -67,9 +69,11 @@ void Model::Render(
             sorter.AddMesh(mesh, distance,
                 meshConstants.GetGpuVirtualAddress() + sizeof(MeshConstants) * mesh.meshCBV,
                 m_MaterialConstants.GetGpuVirtualAddress() + sizeof(MaterialConstants) * mesh.materialCBV,
-                m_DataBuffer.GetGpuVirtualAddress(), indirectArgsBuffers[i], mesh.numJoints > 0 ? meshJoints.GetGpuVirtualAddress() + sizeof(Joint) * mesh.startJoint : D3D12_GPU_VIRTUAL_ADDRESS_NULL);
+                m_DataBuffer.GetGpuVirtualAddress(), mesh.numJoints > 0 ? meshJoints.GetGpuVirtualAddress() + sizeof(Joint) * mesh.startJoint : D3D12_GPU_VIRTUAL_ADDRESS_NULL,
+                indirectArgsBuffer, indirectArgsBufferZPass, indirectArgsOffset * sizeof(GPUDriven::IndirectCommand));
         }
 
+        indirectArgsOffset += mesh.numDraws;
         pMesh += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
     }
 }
@@ -79,8 +83,7 @@ void ModelInstance::Render(MeshSorter& sorter) const
     if (m_Model != nullptr)
     {
         //const Frustum& frustum = sorter.GetWorldFrustum();
-        m_Model->Render(sorter, m_MeshConstantsGPU, m_BoundingSphereTransforms.get(), m_MeshIndirectArgsBuffers,
-            m_MeshJointsGPU);
+        m_Model->Render(sorter, m_MeshConstantsGPU, m_BoundingSphereTransforms.get(), m_MeshJointsGPU, *m_IndirectArgsBuffer, *m_IndirectArgsBufferZPass);
     }
 }
 
@@ -354,24 +357,43 @@ Math::OrientedBox ModelInstance::GetBoundingBox() const
     return m_Locator * m_Model->m_BoundingBox;
 }
 
+uint32_t ModelInstance::GetNumTotalDraws() const
+{
+	uint32_t totalDraws = 0;
+    if (m_Model)
+    {
+        const uint8_t* pMesh = m_Model->m_MeshData.get();
+        for (uint32_t i = 0; i < m_Model->m_NumMeshes; i++)
+        {
+            const Mesh& mesh = *(const Mesh*)pMesh;
+            totalDraws += mesh.numDraws;
+        }
+    }
+    return totalDraws;
+}
+
 void ModelInstance::CreateMeshIndirectCommands()
 {
     if (m_Model)
     {
-        m_MeshIndirectArgsBuffers.reserve(m_Model->m_NumMeshes);
+        const uint32_t totalDraws = std::max(1u, GetNumTotalDraws());
+		void* cmdsMemory = ::operator new(sizeof(GPUDriven::IndirectCommand) * totalDraws, std::align_val_t(16));
+		GPUDriven::IndirectCommand* cmds = static_cast<GPUDriven::IndirectCommand*>(cmdsMemory);
+        void* cmdsMemoryZPass = ::operator new(sizeof(GPUDriven::IndirectCommand) * totalDraws, std::align_val_t(16));
+		GPUDriven::IndirectCommand* cmdsZPass = static_cast<GPUDriven::IndirectCommand*>(cmdsMemoryZPass);
+
 		const uint8_t* pMesh = m_Model->m_MeshData.get();
+		uint32_t cmdIdx = 0;
         for (uint32_t i = 0; i < m_Model->m_NumMeshes; i++)
         {
             const Mesh& mesh = *(const Mesh*)pMesh;
-            void* cmdsMemory = ::operator new(sizeof(GPUDriven::IndirectCommand) * mesh.numDraws * 2, std::align_val_t(16));
-            GPUDriven::IndirectCommand* cmds = static_cast<GPUDriven::IndirectCommand*>(cmdsMemory);
 
             D3D12_GPU_VIRTUAL_ADDRESS MeshCBAddress = m_MeshConstantsGPU.GetGpuVirtualAddress() + sizeof(MeshConstants) * mesh.meshCBV;
             D3D12_GPU_VIRTUAL_ADDRESS MaterialCBAddress = m_Model->m_MaterialConstants.GetGpuVirtualAddress() + sizeof(MaterialConstants) * mesh.materialCBV;
 
             for (uint32_t j = 0; j < mesh.numDraws; j++)
             {
-                GPUDriven::IndirectCommand& cmd = cmds[j];
+                GPUDriven::IndirectCommand& cmd = cmds[cmdIdx];
 
                 cmd.meshCBAddress = MeshCBAddress;
                 cmd.materialCBAddress = MaterialCBAddress;
@@ -396,34 +418,42 @@ void ModelInstance::CreateMeshIndirectCommands()
 				cmd.drawArguments.BaseVertexLocation = mesh.draw[j].baseVertex;
 				cmd.drawArguments.StartInstanceLocation = 0;
 
+                // ZPass
 				bool alphaTest = (mesh.psoFlags & PSOFlags::kAlphaTest) == PSOFlags::kAlphaTest;
 				uint32_t stride = alphaTest ? 16u : 12u;
 				if (mesh.numJoints > 0)
 					stride += 16;
-                GPUDriven::IndirectCommand& cmdZPass = cmds[j+ mesh.numDraws];
+                GPUDriven::IndirectCommand& cmdZPass = cmdsZPass[cmdIdx];
                 cmdZPass = cmd;
                 cmdZPass.vertexBufferView.BufferLocation = m_Model->m_DataBuffer.GetGpuVirtualAddress() + mesh.vbDepthOffset;
                 cmdZPass.vertexBufferView.SizeInBytes = mesh.vbDepthSize;
                 cmdZPass.vertexBufferView.StrideInBytes = stride;
 
+                ++cmdIdx;
             }
-            std::shared_ptr<IndirectArgsBuffer> argsBuffer = std::make_shared<IndirectArgsBuffer>();
-			std::wstring name = L"Model Mesh ";
-			name += std::to_wstring(i);
-            argsBuffer->Create(name.c_str(), mesh.numDraws * 2, sizeof(GPUDriven::IndirectCommand), cmdsMemory);
-            m_MeshIndirectArgsBuffers.push_back({ argsBuffer, mesh.numDraws});
             pMesh += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
-            ::operator delete(cmdsMemory, std::align_val_t(16));
         }
+
+		m_IndirectArgsBuffer = std::make_shared<IndirectArgsBuffer>();
+        m_IndirectArgsBuffer->Create(L"Model Indirect Command", totalDraws, sizeof(GPUDriven::IndirectCommand), cmdsMemory);
+		m_IndirectArgsBufferZPass = std::make_shared<IndirectArgsBuffer>();
+        m_IndirectArgsBufferZPass->Create(L"Model ZPass Indirect Command", totalDraws, sizeof(GPUDriven::IndirectCommand), cmdsMemoryZPass);
+		::operator delete(cmdsMemory, std::align_val_t(16));
+		::operator delete(cmdsMemoryZPass, std::align_val_t(16));
     }
 }
 
 void ModelInstance::DestroyMeshIndirectCommands()
 {
-    for (size_t i = 0; i < m_MeshIndirectArgsBuffers.size(); i++)
+    if (m_IndirectArgsBuffer)
     {
-        m_MeshIndirectArgsBuffers[i].indirectArgsBuffer->Destroy();
+        m_IndirectArgsBuffer->Destroy();
+        m_IndirectArgsBuffer.reset();
     }
 
-    m_MeshIndirectArgsBuffers.clear();
+    if (m_IndirectArgsBufferZPass)
+    {
+        m_IndirectArgsBufferZPass->Destroy();
+        m_IndirectArgsBufferZPass.reset();
+    }
 }

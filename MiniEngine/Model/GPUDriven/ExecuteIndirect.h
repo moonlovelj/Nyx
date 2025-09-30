@@ -20,15 +20,9 @@ namespace GPUDriven
         D3D12_DRAW_INDEXED_ARGUMENTS drawArguments;
     };
 
-    struct IndirectArgsBufferWarp
-    {
-        std::shared_ptr<IndirectArgsBuffer> indirectArgsBuffer;
-		uint32_t numCommands;
-    };
-
     extern CommandSignature GPUDrivenDrawIndirectCommandSignature;
 
     void Initialize(const RootSignature* RootSignature);
     void Shutdown();
-    void DrawIndirect(GraphicsContext& context, const IndirectArgsBufferWarp& IndirectArgsBufferWarp, bool bZPass = false);
+    void DrawIndirect(GraphicsContext& context, GpuBuffer& ArgumentBuffer, uint32_t MaxCommands, uint64_t ArgumentStartOffset);
 }

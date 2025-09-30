@@ -108,8 +108,10 @@ namespace Renderer
             D3D12_GPU_VIRTUAL_ADDRESS meshCBV,
             D3D12_GPU_VIRTUAL_ADDRESS materialCBV,
             D3D12_GPU_VIRTUAL_ADDRESS bufferPtr,
-			const GPUDriven::IndirectArgsBufferWarp& indirectArgs,
-            D3D12_GPU_VIRTUAL_ADDRESS meshJoints = D3D12_GPU_VIRTUAL_ADDRESS_NULL);
+            D3D12_GPU_VIRTUAL_ADDRESS meshJoints,
+			const IndirectArgsBuffer& indirectArgsBuffer,
+			const IndirectArgsBuffer& indirectArgsBufferZPass,
+			uint32_t indirectArgsOffset);
 
         void Sort();
 
@@ -139,7 +141,9 @@ namespace Renderer
             D3D12_GPU_VIRTUAL_ADDRESS meshCBV;
             D3D12_GPU_VIRTUAL_ADDRESS materialCBV;
             D3D12_GPU_VIRTUAL_ADDRESS bufferPtr;
-            GPUDriven::IndirectArgsBufferWarp indirectArgs;
+			const IndirectArgsBuffer& indirectArgsBuffer;
+			const IndirectArgsBuffer& indirectArgsBufferZPass;
+			uint32_t indirectArgsOffset;
         };
 
         std::vector<SortObject> m_SortObjects;

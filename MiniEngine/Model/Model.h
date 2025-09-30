@@ -132,8 +132,9 @@ public:
     void Render(Renderer::MeshSorter& sorter,
         const GpuBuffer& meshConstants,
         const Math::AffineTransform sphereTransforms[],
-        const std::vector<GPUDriven::IndirectArgsBufferWarp>& indirectArgsBuffers,
-        const GpuBuffer& meshJoints) const;
+        const GpuBuffer& meshJoints,
+		const IndirectArgsBuffer& indirectArgsBuffer,
+		const IndirectArgsBuffer& indirectArgsBufferZPass) const;
 
     Math::BoundingSphere m_BoundingSphere; // Object-space bounding sphere
     Math::AxisAlignedBox m_BoundingBox;
@@ -195,6 +196,7 @@ public:
 
     size_t GetNumCameras() const { return m_Cameras.size(); }
     std::vector<std::shared_ptr<Math::Camera>> GetCameras() const;
+    uint32_t GetNumTotalDraws() const;
 
 private:
     void CreateMeshIndirectCommands();
@@ -213,5 +215,7 @@ private:
 	ByteAddressBuffer m_MeshJointsGPU;
 
     std::map<uint32_t, std::shared_ptr<Math::Camera>> m_Cameras;
-    std::vector<GPUDriven::IndirectArgsBufferWarp> m_MeshIndirectArgsBuffers;
+
+	std::shared_ptr<IndirectArgsBuffer> m_IndirectArgsBuffer;
+    std::shared_ptr<IndirectArgsBuffer> m_IndirectArgsBufferZPass;
 };

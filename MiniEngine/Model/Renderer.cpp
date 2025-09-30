@@ -569,8 +569,10 @@ void MeshSorter::AddMesh( const Mesh& mesh, float distance,
     D3D12_GPU_VIRTUAL_ADDRESS meshCBV,
     D3D12_GPU_VIRTUAL_ADDRESS materialCBV,
     D3D12_GPU_VIRTUAL_ADDRESS bufferPtr,
-    const GPUDriven::IndirectArgsBufferWarp& indirectArgs,
-    D3D12_GPU_VIRTUAL_ADDRESS meshJoints)
+    D3D12_GPU_VIRTUAL_ADDRESS meshJoints,
+	const IndirectArgsBuffer& indirectArgsBuffer,
+    const IndirectArgsBuffer& indirectArgsBufferZPass,
+    uint32_t indirectArgsOffset)
 {
     SortKey key;
     key.value = m_SortObjects.size();
@@ -647,7 +649,7 @@ void MeshSorter::AddMesh( const Mesh& mesh, float distance,
         }
     }
 
-    SortObject object = { &mesh, meshJoints, meshCBV, materialCBV, bufferPtr, indirectArgs };
+    SortObject object = { &mesh, meshJoints, meshCBV, materialCBV, bufferPtr, indirectArgsBuffer, indirectArgsBufferZPass, indirectArgsOffset};
     m_SortObjects.push_back(object);
 }
 
@@ -816,8 +818,16 @@ void MeshSorter::RenderMeshes(
 
             if (GPUDriven::Enable)
             {
-                context.TransitionResource(*object.indirectArgs.indirectArgsBuffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-                GPUDriven::DrawIndirect(context, object.indirectArgs, pass == kZPass);
+                if (pass == kZPass)
+                {
+					context.TransitionResource(const_cast<IndirectArgsBuffer&>(object.indirectArgsBufferZPass), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+					GPUDriven::DrawIndirect(context, const_cast<IndirectArgsBuffer&>(object.indirectArgsBufferZPass), mesh.numDraws, object.indirectArgsOffset);
+                }
+                else
+                {
+					context.TransitionResource(const_cast<IndirectArgsBuffer&>(object.indirectArgsBuffer), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+					GPUDriven::DrawIndirect(context, const_cast<IndirectArgsBuffer&>(object.indirectArgsBuffer), mesh.numDraws, object.indirectArgsOffset);
+                }
             }
             else
             {

@@ -25,11 +25,11 @@ namespace GPUDriven
 		GPUDrivenDrawIndirectCommandSignature.Destroy();
 	}
 
-	void DrawIndirect(GraphicsContext& context, const IndirectArgsBufferWarp& IndirectArgsBufferWarp, bool bZPass)
+	void DrawIndirect(GraphicsContext& context, GpuBuffer& ArgumentBuffer, uint32_t MaxCommands, uint64_t ArgumentStartOffset)
 	{
 		context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, 
-			*IndirectArgsBufferWarp.indirectArgsBuffer, 
-			bZPass ? IndirectArgsBufferWarp.numCommands * sizeof(IndirectCommand) : 0,
-			IndirectArgsBufferWarp.numCommands);
+			ArgumentBuffer,
+			ArgumentStartOffset,
+			MaxCommands);
 	}
 }
