@@ -814,6 +814,8 @@ void MeshSorter::RenderMeshes(
 
         context.SetViewportAndScissor(m_Viewport, m_Scissor);
         context.FlushResourceBarriers();
+
+        context.SetIndexBuffer(m_IBV);
         
         const uint32_t lastDraw = m_CurrentDraw + passCount;
 

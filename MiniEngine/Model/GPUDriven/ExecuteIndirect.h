@@ -13,7 +13,6 @@ namespace GPUDriven
     struct IndirectCommand
     {
         D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress;
-		D3D12_INDEX_BUFFER_VIEW indexBufferView;
         D3D12_DRAW_INDEXED_ARGUMENTS drawArguments;
     };
 

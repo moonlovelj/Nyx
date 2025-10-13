@@ -95,8 +95,10 @@ namespace Renderer
 			m_JointsBuffer = D3D12_GPU_VIRTUAL_ADDRESS_NULL;
 			m_MeshConstantsBuffer = D3D12_GPU_VIRTUAL_ADDRESS_NULL;
 			m_MaterialConstantsBuffer = D3D12_GPU_VIRTUAL_ADDRESS_NULL;
+			m_IBV = {};
 		}
 
+		void SetIndexBuffer(const D3D12_INDEX_BUFFER_VIEW& ibv) { m_IBV = ibv; }
 		void SetMeshConstantsBuffer(D3D12_GPU_VIRTUAL_ADDRESS mb) { m_MeshConstantsBuffer = mb; }
 		void SetMaterialConstantsBuffer(D3D12_GPU_VIRTUAL_ADDRESS matb) { m_MaterialConstantsBuffer = matb; }
 		void SetVertexBuffer(D3D12_GPU_VIRTUAL_ADDRESS vb) { m_VertexBuffer = vb; }
@@ -174,6 +176,7 @@ namespace Renderer
 		D3D12_GPU_VIRTUAL_ADDRESS m_MaterialConstantsBuffer;
 		D3D12_GPU_VIRTUAL_ADDRESS m_VertexBuffer;
 		D3D12_GPU_VIRTUAL_ADDRESS m_JointsBuffer;
+		D3D12_INDEX_BUFFER_VIEW m_IBV;
 	};
 
 } // namespace Renderer

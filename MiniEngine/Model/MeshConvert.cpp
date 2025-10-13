@@ -77,7 +77,7 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
 
     void* indices = nullptr;
     uint32_t indexCount;
-    bool b32BitIndices;
+    const bool b32BitIndices = true; // Force 32 bit indices
     uint32_t maxIndex = inPrim.maxIndex;
 
     if (inPrim.indices == nullptr)
@@ -88,7 +88,7 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
         maxIndex = indexCount - 1;
         if (indexCount > 0xFFFF)
         {
-            b32BitIndices = true;
+            //b32BitIndices = true;
             outPrim.IB = std::make_shared<std::vector<unsigned char>>(4 * indexCount);
             indices = outPrim.IB->data();
             uint32_t* tmp = (uint32_t*)indices;
@@ -97,7 +97,7 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
         }
         else
         {
-            b32BitIndices = false;
+            //b32BitIndices = false;
             outPrim.IB = std::make_shared<std::vector<unsigned char>>(2 * indexCount);
             indices = outPrim.IB->data();
             uint16_t* tmp = (uint16_t*)indices;
@@ -141,22 +141,32 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
                     maxIndex = std::max<uint32_t>(ib[k], maxIndex);
             }
         }
-        b32BitIndices = maxIndex > 0xFFFF;
+        //b32BitIndices = maxIndex > 0xFFFF;
         uint32_t indexSize = b32BitIndices ? 4 : 2;
         outPrim.IB = std::make_shared<std::vector<unsigned char>>(indexSize * indexCount);
-        if (b32BitIndices)
-        {
+        //if (b32BitIndices)
+        //{
+        //    ASSERT(inPrim.indices->componentType == Accessor::kUnsignedInt);
+        //    OptimizeFaces((uint32_t*)inPrim.indices->dataPtr, inPrim.indices->count, (uint32_t*)outPrim.IB->data(), 64);
+        //}
+        //else if (inPrim.indices->componentType == Accessor::kUnsignedShort)
+        //{
+        //    OptimizeFaces((uint16_t*)inPrim.indices->dataPtr, inPrim.indices->count, (uint16_t*)outPrim.IB->data(), 64);
+        //}
+        //else
+        //{
+        //    OptimizeFaces((uint32_t*)inPrim.indices->dataPtr, inPrim.indices->count, (uint16_t*)outPrim.IB->data(), 64);
+        //}
+
+		if (inPrim.indices->componentType == glTF::Accessor::kUnsignedShort)
+		{
+            OptimizeFaces((uint16_t*)inPrim.indices->dataPtr, inPrim.indices->count, (uint32_t*)outPrim.IB->data(), 64);
+		}
+		else // kUnsignedInt
+		{
             ASSERT(inPrim.indices->componentType == Accessor::kUnsignedInt);
             OptimizeFaces((uint32_t*)inPrim.indices->dataPtr, inPrim.indices->count, (uint32_t*)outPrim.IB->data(), 64);
-        }
-        else if (inPrim.indices->componentType == Accessor::kUnsignedShort)
-        {
-            OptimizeFaces((uint16_t*)inPrim.indices->dataPtr, inPrim.indices->count, (uint16_t*)outPrim.IB->data(), 64);
-        }
-        else
-        {
-            OptimizeFaces((uint32_t*)inPrim.indices->dataPtr, inPrim.indices->count, (uint16_t*)outPrim.IB->data(), 64);
-        }
+		}
         indices = outPrim.IB->data();
     }
 

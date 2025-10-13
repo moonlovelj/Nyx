@@ -46,6 +46,7 @@ void Model::Render(
     sorter.SetMaterialConstantsBuffer(m_MaterialConstants.GetGpuVirtualAddress());
 	sorter.SetVertexBuffer(m_DataBuffer.GetGpuVirtualAddress());
 	sorter.SetJointsBuffer(meshJoints.GetGpuVirtualAddress());
+    sorter.SetIndexBuffer({m_DataBuffer.GetGpuVirtualAddress(), (uint32_t)m_DataBuffer.GetBufferSize(), DXGI_FORMAT_R32_UINT });
 
     // Pointer to current mesh
     const uint8_t* pMesh = m_MeshData.get();
@@ -420,13 +421,11 @@ void ModelInstance::CreateMeshIndirectCommands()
             {
                 GPUDriven::IndirectCommand& cmd = cmds[cmdIdx];
 				cmd.objectCBAddress = m_ObjectConstantsGPU.GetGpuVirtualAddress() + sizeof(ObjectConstants) * cmdIdx;
-				cmd.indexBufferView.BufferLocation = m_Model->m_DataBuffer.GetGpuVirtualAddress() + mesh.ibOffset;
-                cmd.indexBufferView.SizeInBytes = mesh.ibSize;
-                cmd.indexBufferView.Format = (DXGI_FORMAT)mesh.ibFormat;
 
+                ASSERT(mesh.ibOffset%4 == 0, "Index buffer error.");
                 cmd.drawArguments.IndexCountPerInstance = mesh.draw[j].primCount;
                 cmd.drawArguments.InstanceCount = 1;
-                cmd.drawArguments.StartIndexLocation = mesh.draw[j].startIndex;
+                cmd.drawArguments.StartIndexLocation = mesh.ibOffset / 4 + mesh.draw[j].startIndex;
 				cmd.drawArguments.BaseVertexLocation = mesh.draw[j].baseVertex;
 				cmd.drawArguments.StartInstanceLocation = 0;
 
