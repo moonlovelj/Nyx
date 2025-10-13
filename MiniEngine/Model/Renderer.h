@@ -54,9 +54,12 @@ namespace Renderer
         kMeshConstants,
         kMaterialConstants,
         kCommonSRVs,
-        kCommonCBV,
+		kCommonCBV,
+		kObjectConstants,
         kSkinMatrices,
-
+		kVertexBuffer,
+        kMeshConstantsSRV,
+        kMaterialConstantsSRV,
         kNumRootBindings
     };
 
@@ -88,8 +91,16 @@ namespace Renderer
 			std::memset(m_PassCounts, 0, sizeof(m_PassCounts));
 			//m_CurrentPass = kZPass;
 			m_CurrentDraw = 0;
+			m_VertexBuffer = D3D12_GPU_VIRTUAL_ADDRESS_NULL;
+			m_JointsBuffer = D3D12_GPU_VIRTUAL_ADDRESS_NULL;
+			m_MeshConstantsBuffer = D3D12_GPU_VIRTUAL_ADDRESS_NULL;
+			m_MaterialConstantsBuffer = D3D12_GPU_VIRTUAL_ADDRESS_NULL;
 		}
 
+		void SetMeshConstantsBuffer(D3D12_GPU_VIRTUAL_ADDRESS mb) { m_MeshConstantsBuffer = mb; }
+		void SetMaterialConstantsBuffer(D3D12_GPU_VIRTUAL_ADDRESS matb) { m_MaterialConstantsBuffer = matb; }
+		void SetVertexBuffer(D3D12_GPU_VIRTUAL_ADDRESS vb) { m_VertexBuffer = vb; }
+		void SetJointsBuffer(D3D12_GPU_VIRTUAL_ADDRESS jb) { m_JointsBuffer = jb; }
 		void SetCamera( const BaseCamera& camera ) { m_Camera = &camera; }
 		void SetViewport( const D3D12_VIEWPORT& viewport ) { m_Viewport = viewport; }
 		void SetScissor( const D3D12_RECT& scissor ) { m_Scissor = scissor; }
@@ -159,6 +170,10 @@ namespace Renderer
 		uint32_t m_NumRTVs;
 		ColorBuffer* m_RTV[8];
 		DepthBuffer* m_DSV;
+		D3D12_GPU_VIRTUAL_ADDRESS m_MeshConstantsBuffer;
+		D3D12_GPU_VIRTUAL_ADDRESS m_MaterialConstantsBuffer;
+		D3D12_GPU_VIRTUAL_ADDRESS m_VertexBuffer;
+		D3D12_GPU_VIRTUAL_ADDRESS m_JointsBuffer;
 	};
 
 } // namespace Renderer

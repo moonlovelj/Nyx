@@ -17,7 +17,7 @@
 #include "../Core/Math/Matrix4.h"
 #include <cstdint>
 
-__declspec(align(256)) struct MeshConstants
+struct MeshConstants
 {
     Math::Matrix4 World;         // Object to world
     Math::Matrix3 WorldIT;       // Object normal to world normal
@@ -26,7 +26,7 @@ __declspec(align(256)) struct MeshConstants
 // The order of textures for PBR materials
 enum { kBaseColor, kMetallicRoughness, kOcclusion, kEmissive, kNormal, kNumTextures };
 
-__declspec(align(256)) struct MaterialConstants
+struct MaterialConstants
 {
     float baseColorFactor[4]; // default=[1,1,1,1]
     float emissiveFactor[3]; // default=[0,0,0]
@@ -77,4 +77,15 @@ __declspec(align(256)) struct GlobalConstants
     uint32_t FrameIndexMod2;
     uint32_t IBLLutTextureSize;
     uint32_t IBLSpecularLDMapMipCount;
+};
+
+__declspec(align(256)) struct ObjectConstants
+{
+    uint32_t VertexBufferOffset;
+    uint32_t VertexStride;
+	uint32_t VertexBufferDepthOffset;
+	uint32_t VertexDepthStride;
+	uint32_t MeshConstantsIndex;
+	uint32_t MaterialConstantsIndex;
+    uint32_t MeshJointsIndexOffset;
 };

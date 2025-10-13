@@ -3,19 +3,18 @@
 
 #include "VSTOPSCommon.hlsli"
 
-//Texture2D<float4> baseColorTexture          : register(t0);
-//Texture2D<float3> metallicRoughnessTexture  : register(t1);
-//Texture2D<float1> occlusionTexture          : register(t2);
-//Texture2D<float3> emissiveTexture           : register(t3);
-//Texture2D<float3> normalTexture             : register(t4);
-//
-//SamplerState baseColorSampler               : register(s0);
-//SamplerState metallicRoughnessSampler       : register(s1);
-//SamplerState occlusionSampler               : register(s2);
-//SamplerState emissiveSampler                : register(s3);
-//SamplerState normalSampler                  : register(s4);
+cbuffer ObjectConstants : register(b2)
+{
+    uint VertexBufferOffset;
+    uint VertexStride;
+    uint VertexBufferDepthOffset;
+    uint VertexDepthStride;
+    uint MeshConstantsIndex;
+    uint MaterialConstantsIndex;
+    uint MeshJointsIndexOffset;
+}
 
-cbuffer MaterialConstants                   : register(b0)
+struct MaterialConstant
 {
     float4 baseColorFactor;
     float3 emissiveFactor;
@@ -25,7 +24,8 @@ cbuffer MaterialConstants                   : register(b0)
 
     uint TextureStartIndex;
     uint SamplerStartIndex;
-}
+};
+StructuredBuffer<MaterialConstant> MaterialConstants : register(t22);
 
 // Flag helpers
 static const uint BASECOLOR_UV_OFFSET = 0;
@@ -34,13 +34,17 @@ static const uint OCCLUSION_UV_OFFSET = 2;
 static const uint EMISSIVE_UV_OFFSET = 3;
 static const uint NORMAL_UV_OFFSET = 4;
 #ifdef NO_SECOND_UV
-#define UVSET( offset ) vsOutput.uv0
+#define UVSET( offset, flags ) vsOutput.uv0
 #else
-#define UVSET( offset ) lerp(vsOutput.uv0, vsOutput.uv1, (flags >> offset) & 1)
+#define UVSET( offset, flags ) lerp(vsOutput.uv0, vsOutput.uv1, (flags >> offset) & 1)
 #endif
 
 float3 ComputeNormal(VSOutput vsOutput, Texture2D<float3> NormalTexture, SamplerState NormalSampler)
 {
+    MaterialConstant materilConstant = MaterialConstants[MaterialConstantsIndex];
+    float normalTextureScale = materilConstant.normalTextureScale;
+    uint flags = materilConstant.flags;
+
     float3 normal = normalize(vsOutput.normal);
 
 #ifdef NO_TANGENT_FRAME
@@ -52,7 +56,7 @@ float3 ComputeNormal(VSOutput vsOutput, Texture2D<float3> NormalTexture, Sampler
     float3x3 tangentFrame = float3x3(tangent, bitangent, normal);
 
     // Read normal map and convert to SNORM (TODO:  convert all normal maps to R8G8B8A8_SNORM?)
-    normal = NormalTexture.Sample(NormalSampler, UVSET(NORMAL_UV_OFFSET)) * 2.0 - 1.0;
+    normal = NormalTexture.Sample(NormalSampler, UVSET(NORMAL_UV_OFFSET, flags)) * 2.0 - 1.0;
 
     // glTF spec says to normalize N before and after scaling, but that's excessive
     normal = normalize(normal * float3(normalTextureScale, normalTextureScale, 1));
@@ -74,6 +78,16 @@ struct MaterialProperties
 
 MaterialProperties GetMaterialProperties(VSOutput vsOutput)
 {
+    MaterialConstant materilConstant = MaterialConstants[MaterialConstantsIndex];
+	float4 baseColorFactor = materilConstant.baseColorFactor;
+	float3 emissiveFactor = materilConstant.emissiveFactor;
+	float normalTextureScale = materilConstant.normalTextureScale;
+	float2 metallicRoughnessFactor = materilConstant.metallicRoughnessFactor;
+	uint flags = materilConstant.flags;
+	uint TextureStartIndex = materilConstant.TextureStartIndex;
+	uint SamplerStartIndex = materilConstant.SamplerStartIndex;
+
+
     Texture2D<float4> BaseColorTexture = ResourceDescriptorHeap[TextureStartIndex];
     Texture2D<float3> MetallicRoughnessTexture = ResourceDescriptorHeap[TextureStartIndex + 1];
     Texture2D<float1> OcclusionTexture = ResourceDescriptorHeap[TextureStartIndex + 2];
@@ -87,14 +101,14 @@ MaterialProperties GetMaterialProperties(VSOutput vsOutput)
     SamplerState NormalSampler = SamplerDescriptorHeap[SamplerStartIndex + 4];
 
     MaterialProperties MatProps;
-    MatProps.BaseColor = baseColorFactor * BaseColorTexture.Sample(BaseColorSampler, UVSET(BASECOLOR_UV_OFFSET));
+    MatProps.BaseColor = baseColorFactor * BaseColorTexture.Sample(BaseColorSampler, UVSET(BASECOLOR_UV_OFFSET, flags));
     float2 metallicRoughness = metallicRoughnessFactor *
-        MetallicRoughnessTexture.Sample(MetallicRoughnessSampler, UVSET(METALLICROUGHNESS_UV_OFFSET)).bg;
+        MetallicRoughnessTexture.Sample(MetallicRoughnessSampler, UVSET(METALLICROUGHNESS_UV_OFFSET, flags)).bg;
     metallicRoughness.y = max(0.001, metallicRoughness.y);
     MatProps.Metallic = metallicRoughness.x;
     MatProps.Roughness = metallicRoughness.y;
-    MatProps.Occlusion = OcclusionTexture.Sample(OcclusionSampler, UVSET(OCCLUSION_UV_OFFSET));
-    MatProps.Emissive = emissiveFactor * EmissiveTexture.Sample(EmissiveSampler, UVSET(EMISSIVE_UV_OFFSET));
+    MatProps.Occlusion = OcclusionTexture.Sample(OcclusionSampler, UVSET(OCCLUSION_UV_OFFSET, flags));
+    MatProps.Emissive = emissiveFactor * EmissiveTexture.Sample(EmissiveSampler, UVSET(EMISSIVE_UV_OFFSET, flags));
     MatProps.Normal = ComputeNormal(vsOutput, NormalTexture, NormalSampler);
     return MatProps;
 }

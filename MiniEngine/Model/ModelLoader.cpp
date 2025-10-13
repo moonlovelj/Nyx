@@ -45,7 +45,7 @@ std::vector<uint32_t> LoadMaterials(Model& model,
     const std::vector<uint8_t>& textureOptions,
     const std::wstring& basePath)
 {
-    static_assert((_alignof(MaterialConstants) & 255) == 0, "CBVs need 256 byte alignment");
+    //static_assert((_alignof(MaterialConstants) & 255) == 0, "CBVs need 256 byte alignment");
 
     // Load textures
     const uint32_t numTextures = (uint32_t)textureNames.size();

@@ -42,6 +42,11 @@ void Model::Render(
     const IndirectArgsBuffer& indirectArgsBuffer,
     const IndirectArgsBuffer& indirectArgsBufferZPass) const
 {
+    sorter.SetMeshConstantsBuffer(meshConstants.GetGpuVirtualAddress());
+    sorter.SetMaterialConstantsBuffer(m_MaterialConstants.GetGpuVirtualAddress());
+	sorter.SetVertexBuffer(m_DataBuffer.GetGpuVirtualAddress());
+	sorter.SetJointsBuffer(meshJoints.GetGpuVirtualAddress());
+
     // Pointer to current mesh
     const uint8_t* pMesh = m_MeshData.get();
 
@@ -90,7 +95,7 @@ void ModelInstance::Render(MeshSorter& sorter) const
 ModelInstance::ModelInstance( std::shared_ptr<const Model> sourceModel )
     : m_Model(sourceModel), m_Locator(kIdentity)
 {
-    static_assert((_alignof(MeshConstants) & 255) == 0, "CBVs need 256 byte alignment");
+    //static_assert((_alignof(MeshConstants) & 255) == 0, "CBVs need 256 byte alignment");
 
     DestroyMeshIndirectCommands();
 
@@ -104,6 +109,9 @@ ModelInstance::ModelInstance( std::shared_ptr<const Model> sourceModel )
         m_Cameras.clear();
 		m_MeshJointsCPU.Destroy();
 		m_MeshJointsGPU.Destroy();
+		m_ObjectConstantsCPU.Destroy();
+		m_ObjectConstantsGPU.Destroy();
+        m_bObjectConstantsDirty = false;
     }
     else
     {
@@ -114,6 +122,9 @@ ModelInstance::ModelInstance( std::shared_ptr<const Model> sourceModel )
 
         m_MeshJointsCPU.Create(L"Mesh Joints Upload Buffer", std::max(sourceModel->m_NumJoints, 1u) * sizeof(Joint));
         m_MeshJointsGPU.Create(L"Mesh Joints GPU Buffer", std::max(sourceModel->m_NumJoints, 1u), sizeof(Joint));
+
+        m_ObjectConstantsCPU.Create(L"Object Constant Upload Buffer", std::max(GetNumTotalDraws(), 1u) * sizeof(ObjectConstants));
+        m_ObjectConstantsGPU.Create(L"Object Constant GPU Buffer", std::max(GetNumTotalDraws(), 1u), sizeof(ObjectConstants));
 
         if (sourceModel->m_NumAnimations > 0)
         {
@@ -143,6 +154,7 @@ ModelInstance::ModelInstance( std::shared_ptr<const Model> sourceModel )
 			}
 		}
 
+        m_bObjectConstantsDirty = true;
         CreateMeshIndirectCommands();
     }
 }
@@ -169,6 +181,9 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
         m_Cameras.clear();
 		m_MeshJointsCPU.Destroy();
         m_MeshJointsGPU.Destroy();
+		m_ObjectConstantsCPU.Destroy();
+        m_ObjectConstantsGPU.Destroy();
+        m_bObjectConstantsDirty = false;
     }
     else
     {
@@ -179,6 +194,9 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
 
 		m_MeshJointsCPU.Create(L"Mesh Joints Upload Buffer", std::max(sourceModel->m_NumJoints, 1u) * sizeof(Joint));
 		m_MeshJointsGPU.Create(L"Mesh Joints GPU Buffer", std::max(sourceModel->m_NumJoints, 1u), sizeof(Joint));
+
+		m_ObjectConstantsCPU.Create(L"Object Constant Upload Buffer", std::max(GetNumTotalDraws(), 1u) * sizeof(ObjectConstants));
+		m_ObjectConstantsGPU.Create(L"Object Constant GPU Buffer", std::max(GetNumTotalDraws(), 1u), sizeof(ObjectConstants));
 
         if (sourceModel->m_NumAnimations > 0)
         {
@@ -207,7 +225,7 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
                 ASSERT(false, "Not support load orthographic camera");
             }
         }
-
+        m_bObjectConstantsDirty = true;
         CreateMeshIndirectCommands();
     }
     return *this;
@@ -315,6 +333,14 @@ void ModelInstance::Update(GraphicsContext& gfxContext, float deltaTime)
 	gfxContext.TransitionResource(m_MeshJointsGPU, D3D12_RESOURCE_STATE_COPY_DEST, true);
 	gfxContext.GetCommandList()->CopyBufferRegion(m_MeshJointsGPU.GetResource(), 0, m_MeshJointsCPU.GetResource(), 0, m_MeshJointsCPU.GetBufferSize());
 	gfxContext.TransitionResource(m_MeshJointsGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
+
+    if (m_bObjectConstantsDirty)
+    {
+		gfxContext.TransitionResource(m_ObjectConstantsGPU, D3D12_RESOURCE_STATE_COPY_DEST, true);
+		gfxContext.GetCommandList()->CopyBufferRegion(m_ObjectConstantsGPU.GetResource(), 0, m_ObjectConstantsCPU.GetResource(), 0, m_ObjectConstantsCPU.GetBufferSize());
+		gfxContext.TransitionResource(m_ObjectConstantsGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
+        m_bObjectConstantsDirty = false;
+    }
 }
 
 void ModelInstance::Resize( float newRadius )
@@ -376,6 +402,8 @@ void ModelInstance::CreateMeshIndirectCommands()
 {
     if (m_Model)
     {
+        ObjectConstants* pObjectConstants = (ObjectConstants*)m_ObjectConstantsCPU.Map();
+
         const uint32_t totalDraws = std::max(1u, GetNumTotalDraws());
 		void* cmdsMemory = ::operator new(sizeof(GPUDriven::IndirectCommand) * totalDraws, std::align_val_t(16));
 		GPUDriven::IndirectCommand* cmds = static_cast<GPUDriven::IndirectCommand*>(cmdsMemory);
@@ -388,29 +416,13 @@ void ModelInstance::CreateMeshIndirectCommands()
         {
             const Mesh& mesh = *(const Mesh*)pMesh;
 
-            D3D12_GPU_VIRTUAL_ADDRESS MeshCBAddress = m_MeshConstantsGPU.GetGpuVirtualAddress() + sizeof(MeshConstants) * mesh.meshCBV;
-            D3D12_GPU_VIRTUAL_ADDRESS MaterialCBAddress = m_Model->m_MaterialConstants.GetGpuVirtualAddress() + sizeof(MaterialConstants) * mesh.materialCBV;
-
             for (uint32_t j = 0; j < mesh.numDraws; j++)
             {
                 GPUDriven::IndirectCommand& cmd = cmds[cmdIdx];
-
-                cmd.meshCBAddress = MeshCBAddress;
-                cmd.materialCBAddress = MaterialCBAddress;
-				cmd.vertexBufferView.BufferLocation = m_Model->m_DataBuffer.GetGpuVirtualAddress() + mesh.vbOffset;
-                cmd.vertexBufferView.SizeInBytes = mesh.vbSize;
-				cmd.vertexBufferView.StrideInBytes = mesh.vbStride;
+				cmd.objectCBAddress = m_ObjectConstantsGPU.GetGpuVirtualAddress() + sizeof(ObjectConstants) * cmdIdx;
 				cmd.indexBufferView.BufferLocation = m_Model->m_DataBuffer.GetGpuVirtualAddress() + mesh.ibOffset;
                 cmd.indexBufferView.SizeInBytes = mesh.ibSize;
                 cmd.indexBufferView.Format = (DXGI_FORMAT)mesh.ibFormat;
-                if (mesh.numJoints > 0)
-                {
-					cmd.meshJointsAddress = m_MeshJointsGPU.GetGpuVirtualAddress() + sizeof(Joint) * mesh.startJoint;
-                }
-                else
-                {
-					cmd.meshJointsAddress = D3D12_GPU_VIRTUAL_ADDRESS_NULL;
-                }
 
                 cmd.drawArguments.IndexCountPerInstance = mesh.draw[j].primCount;
                 cmd.drawArguments.InstanceCount = 1;
@@ -425,9 +437,15 @@ void ModelInstance::CreateMeshIndirectCommands()
 					stride += 16;
                 GPUDriven::IndirectCommand& cmdZPass = cmdsZPass[cmdIdx];
                 cmdZPass = cmd;
-                cmdZPass.vertexBufferView.BufferLocation = m_Model->m_DataBuffer.GetGpuVirtualAddress() + mesh.vbDepthOffset;
-                cmdZPass.vertexBufferView.SizeInBytes = mesh.vbDepthSize;
-                cmdZPass.vertexBufferView.StrideInBytes = stride;
+
+                ObjectConstants& objectConstants = pObjectConstants[cmdIdx];
+                objectConstants.VertexBufferOffset = mesh.vbOffset;
+                objectConstants.VertexStride = mesh.vbStride;
+				objectConstants.VertexBufferDepthOffset = mesh.vbDepthOffset;
+				objectConstants.VertexDepthStride = stride;
+				objectConstants.MeshJointsIndexOffset = mesh.startJoint;
+				objectConstants.MeshConstantsIndex = mesh.meshCBV;
+				objectConstants.MaterialConstantsIndex = mesh.materialCBV;
 
                 ++cmdIdx;
             }
@@ -440,6 +458,9 @@ void ModelInstance::CreateMeshIndirectCommands()
         m_IndirectArgsBufferZPass->Create(L"Model ZPass Indirect Command", totalDraws, sizeof(GPUDriven::IndirectCommand), cmdsMemoryZPass);
 		::operator delete(cmdsMemory, std::align_val_t(16));
 		::operator delete(cmdsMemoryZPass, std::align_val_t(16));
+
+        m_ObjectConstantsCPU.Unmap();
+        m_bObjectConstantsDirty = true;
     }
 }
 

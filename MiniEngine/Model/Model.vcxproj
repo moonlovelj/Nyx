@@ -115,6 +115,7 @@
   <ItemGroup>
     <None Include="packages.config" />
     <None Include="Shaders\Common.hlsli" />
+    <None Include="Shaders\DataCodec.hlsli" />
     <None Include="Shaders\FillLightGridCS.hlsli" />
     <None Include="Shaders\LightGrid.hlsli" />
     <None Include="Shaders\Lighting.hlsli" />

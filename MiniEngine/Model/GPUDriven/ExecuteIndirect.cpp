@@ -10,13 +10,10 @@ namespace GPUDriven
 
 	void Initialize(const RootSignature* RootSignature)
 	{
-		GPUDrivenDrawIndirectCommandSignature.Reset(6);
-		GPUDrivenDrawIndirectCommandSignature[0].ConstantBufferView(0);
-		GPUDrivenDrawIndirectCommandSignature[1].ConstantBufferView(1);
-		GPUDrivenDrawIndirectCommandSignature[2].ShaderResourceView(4);
-		GPUDrivenDrawIndirectCommandSignature[3].VertexBufferView(0);
-		GPUDrivenDrawIndirectCommandSignature[4].IndexBufferView();
-		GPUDrivenDrawIndirectCommandSignature[5].DrawIndexed();
+		GPUDrivenDrawIndirectCommandSignature.Reset(3);
+		GPUDrivenDrawIndirectCommandSignature[0].ConstantBufferView(4);
+		GPUDrivenDrawIndirectCommandSignature[1].IndexBufferView();
+		GPUDrivenDrawIndirectCommandSignature[2].DrawIndexed();
 		GPUDrivenDrawIndirectCommandSignature.Finalize(RootSignature, sizeof(IndirectCommand));
 	}
 

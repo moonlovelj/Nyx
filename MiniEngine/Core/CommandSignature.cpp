@@ -76,8 +76,23 @@ void CommandSignature::Finalize( const RootSignature* RootSignature, uint32_t In
         pRootSig = nullptr;
     }
 
-    ASSERT_SUCCEEDED( g_Device->CreateCommandSignature(&CommandSignatureDesc, pRootSig,
-        MY_IID_PPV_ARGS(&m_Signature)) );
+    HRESULT hr = g_Device->CreateCommandSignature(&CommandSignatureDesc, pRootSig,
+        MY_IID_PPV_ARGS(&m_Signature));
+
+	if (FAILED(hr))
+	{
+		if (pErrorBlob && pErrorBlob->GetBufferPointer() && pErrorBlob->GetBufferSize() > 0)
+		{
+			const char* ptr = static_cast<const char*>(pErrorBlob->GetBufferPointer());
+			const SIZE_T len = pErrorBlob->GetBufferSize();
+			std::string msg(ptr, ptr + len);
+			if (msg.empty() || msg.back() != '\0') msg.push_back('\0');
+			OutputDebugStringA(msg.c_str());
+		}
+
+		ASSERT_SUCCEEDED(hr);
+	}
+
 
     m_Signature->SetName(L"CommandSignature");
 

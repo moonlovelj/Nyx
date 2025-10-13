@@ -111,8 +111,12 @@ void Renderer::Initialize(void)
     //m_RootSig[kMaterialSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 10, D3D12_SHADER_VISIBILITY_PIXEL);
     //m_RootSig[kMaterialSamplers].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, 0, 10, D3D12_SHADER_VISIBILITY_PIXEL);
     m_RootSig[kCommonSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 20, D3D12_SHADER_VISIBILITY_PIXEL);
-    m_RootSig[kCommonCBV].InitAsConstantBuffer(1);
-    m_RootSig[kSkinMatrices].InitAsBufferSRV(20, D3D12_SHADER_VISIBILITY_VERTEX);
+	m_RootSig[kCommonCBV].InitAsConstantBuffer(1);
+	m_RootSig[kObjectConstants].InitAsConstantBuffer(2);
+	m_RootSig[kSkinMatrices].InitAsBufferSRV(20, D3D12_SHADER_VISIBILITY_VERTEX);
+	m_RootSig[kVertexBuffer].InitAsBufferSRV(21, D3D12_SHADER_VISIBILITY_VERTEX);
+	m_RootSig[kMeshConstantsSRV].InitAsBufferSRV(22, D3D12_SHADER_VISIBILITY_VERTEX);
+	m_RootSig[kMaterialConstantsSRV].InitAsBufferSRV(22, D3D12_SHADER_VISIBILITY_PIXEL);
     m_RootSig.Finalize(L"RootSig", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT 
         | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED
         | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED);
@@ -666,6 +670,8 @@ void MeshSorter::RenderMeshes(
 {
 	ASSERT(m_DSV != nullptr);
 
+    ScopedTimer _prof(L"MeshSorter::RenderMeshes", context);
+
     Renderer::UpdateGlobalDescriptors();
 
     //context.SetRootSignature(m_RootSig);
@@ -684,6 +690,10 @@ void MeshSorter::RenderMeshes(
 	globals.ViewerPos = m_Camera->GetPosition();
 
 	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &globals);
+	context.SetBufferSRV(kMeshConstantsSRV, m_MeshConstantsBuffer);
+	context.SetBufferSRV(kMaterialConstantsSRV, m_MaterialConstantsBuffer);
+	context.SetBufferSRV(kVertexBuffer, m_VertexBuffer);
+	context.SetBufferSRV(kSkinMatrices, m_JointsBuffer);
 
 	if (m_BatchType == kShadows)
 	{

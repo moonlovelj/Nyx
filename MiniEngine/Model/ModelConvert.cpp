@@ -270,7 +270,7 @@ inline void SetTextureOptions(std::map<std::string, uint8_t>& optionsMap, glTF::
 
 void BuildMaterials(ModelData& model, const glTF::Asset& asset)
 {
-    static_assert((_alignof(MaterialConstants) & 255) == 0, "CBVs need 256 byte alignment");
+    //static_assert((_alignof(MaterialConstants) & 255) == 0, "CBVs need 256 byte alignment");
 
     // Replace texture filename extensions with "DDS" in the string table
     model.m_TextureNames.resize(asset.m_images.size());

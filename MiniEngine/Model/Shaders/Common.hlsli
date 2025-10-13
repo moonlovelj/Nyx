@@ -25,7 +25,11 @@
     "CBV(b0, visibility = SHADER_VISIBILITY_PIXEL), " \
     "DescriptorTable(SRV(t0, numDescriptors = 20), visibility = SHADER_VISIBILITY_PIXEL)," \
     "CBV(b1), " \
+    "CBV(b2), " \
     "SRV(t20, visibility = SHADER_VISIBILITY_VERTEX), " \
+    "SRV(t21, visibility = SHADER_VISIBILITY_VERTEX), " \
+    "SRV(t22, visibility = SHADER_VISIBILITY_VERTEX), " \
+    "SRV(t22, visibility = SHADER_VISIBILITY_PIXEL), " \
     "StaticSampler(s10, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_PIXEL)," \
     "StaticSampler(s11, visibility = SHADER_VISIBILITY_PIXEL," \
         "addressU = TEXTURE_ADDRESS_CLAMP," \

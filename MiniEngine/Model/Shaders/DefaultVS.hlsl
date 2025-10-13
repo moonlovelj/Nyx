@@ -12,17 +12,12 @@
 //
 
 #include "Common.hlsli"
+#include "DataCodec.hlsli"
 #include "VSTOPSCommon.hlsli"
 
 #ifdef ENABLE_SKINNING
 //#undef ENABLE_SKINNING
 #endif
-
-cbuffer MeshConstants : register(b0)
-{
-    float4x4 WorldMatrix;   // Object to world
-    float3x3 WorldIT;       // Object normal to world normal
-};
 
 cbuffer GlobalConstants : register(b1)
 {
@@ -34,6 +29,17 @@ cbuffer GlobalConstants : register(b1)
     float3 SunIntensity;
 }
 
+cbuffer ObjectConstants : register(b2)
+{
+    uint VertexBufferOffset;
+    uint VertexStride;
+    uint VertexBufferDepthOffset;
+    uint VertexDepthStride;
+    uint MeshConstantsIndex;
+    uint MaterialConstantsIndex;
+    uint MeshJointsIndexOffset;
+}
+
 #ifdef ENABLE_SKINNING
 struct Joint
 {
@@ -43,6 +49,15 @@ struct Joint
 
 StructuredBuffer<Joint> Joints : register(t20);
 #endif
+
+ByteAddressBuffer VertexBuffer : register(t21);
+
+struct MeshConstant
+{
+    float4x4 WorldMatrix;
+    float4x3 WorldIT; // Inverse-transpose of PosMatrix
+};
+StructuredBuffer<MeshConstant> MeshConstants : register(t22);
 
 struct VSInput
 {
@@ -59,36 +74,64 @@ struct VSInput
     uint4 jointIndices : BLENDINDICES;
     float4 jointWeights : BLENDWEIGHT;
 #endif
+    uint vertexID : SV_VertexID;
 };
 
 [RootSignature(Renderer_RootSig)]
 VSOutput main(VSInput vsInput)
 {
     VSOutput vsOutput;
-
-    float4 position = float4(vsInput.position, 1.0);
-    float3 normal = vsInput.normal * 2 - 1;
+    
+    uint VertexLoadOffset = VertexBufferOffset + vsInput.vertexID * VertexStride;
+    
+    uint3 PackedPos = VertexBuffer.Load3(VertexLoadOffset);
+    float4 position = float4(asfloat(PackedPos), 1.0);
+    VertexLoadOffset += 12;
+    
+    uint PackedNormal = VertexBuffer.Load(VertexLoadOffset);
+    float3 normal = DecodeR10G10B10A2UNORMToFloat4(PackedNormal).xyz * 2 - 1;
+    VertexLoadOffset += 4;
+    
 #ifndef NO_TANGENT_FRAME
-    float4 tangent = vsInput.tangent * 2 - 1;
+    uint PackedTangent = VertexBuffer.Load(VertexLoadOffset);
+    float4 tangent = DecodeR10G10B10A2UNORMToFloat4(PackedTangent) * 2 - 1;
+    VertexLoadOffset += 4;
+#endif
+    
+    uint PackedUV = VertexBuffer.Load(VertexLoadOffset);
+    VertexLoadOffset += 4;
+    
+#ifndef NO_SECOND_UV
+    uint PackedUV1 = VertexBuffer.Load(VertexLoadOffset);
+    VertexLoadOffset += 4;
 #endif
 
 #ifdef ENABLE_SKINNING
+    
+    uint2 PackedJointIndices = VertexBuffer.Load2(VertexLoadOffset);
+    VertexLoadOffset += 8;
+    uint2 PackedWeights = VertexBuffer.Load2(VertexLoadOffset);
+    VertexLoadOffset += 8;
+    
+    uint4 jointIndices = DecodeR16G16B16A16UINTToUint4(PackedJointIndices);
+    float4 jointWeights = DecodeR16G16B16A16UNORMToFloat4(PackedWeights);
+    
     // I don't like this hack.  The weights should be normalized already, but something is fishy.
-    float4 weights = vsInput.jointWeights / dot(vsInput.jointWeights, 1);
+    float4 weights = jointWeights / dot(jointWeights, 1);
 
     float4x4 skinPosMat =
-        Joints[vsInput.jointIndices.x].PosMatrix * weights.x +
-        Joints[vsInput.jointIndices.y].PosMatrix * weights.y +
-        Joints[vsInput.jointIndices.z].PosMatrix * weights.z +
-        Joints[vsInput.jointIndices.w].PosMatrix * weights.w;
+        Joints[MeshJointsIndexOffset + jointIndices.x].PosMatrix * weights.x +
+        Joints[MeshJointsIndexOffset + jointIndices.y].PosMatrix * weights.y +
+        Joints[MeshJointsIndexOffset + jointIndices.z].PosMatrix * weights.z +
+        Joints[MeshJointsIndexOffset + jointIndices.w].PosMatrix * weights.w;
 
     position = mul(skinPosMat, position);
 
     float4x3 skinNrmMat =
-        Joints[vsInput.jointIndices.x].NrmMatrix * weights.x +
-        Joints[vsInput.jointIndices.y].NrmMatrix * weights.y +
-        Joints[vsInput.jointIndices.z].NrmMatrix * weights.z +
-        Joints[vsInput.jointIndices.w].NrmMatrix * weights.w;
+        Joints[MeshJointsIndexOffset + jointIndices.x].NrmMatrix * weights.x +
+        Joints[MeshJointsIndexOffset + jointIndices.y].NrmMatrix * weights.y +
+        Joints[MeshJointsIndexOffset + jointIndices.z].NrmMatrix * weights.z +
+        Joints[MeshJointsIndexOffset + jointIndices.w].NrmMatrix * weights.w;
 
     normal = mul(skinNrmMat, normal).xyz;
 #ifndef NO_TANGENT_FRAME
@@ -97,16 +140,20 @@ VSOutput main(VSInput vsInput)
 
 #endif
 
+    MeshConstant meshConstant = MeshConstants[MeshConstantsIndex];
+    float4x4 WorldMatrix = meshConstant.WorldMatrix;
+    float4x3 WorldIT = meshConstant.WorldIT;
     vsOutput.worldPos = mul(WorldMatrix, position).xyz;
     vsOutput.position = mul(ViewProjMatrix, float4(vsOutput.worldPos, 1.0));
     vsOutput.sunShadowCoord = mul(SunShadowMatrix, float4(vsOutput.worldPos, 1.0)).xyz;
-    vsOutput.normal = mul(WorldIT, normal);
+    vsOutput.normal = mul(WorldIT, normal).xyz;
 #ifndef NO_TANGENT_FRAME
-    vsOutput.tangent = float4(mul(WorldIT, tangent.xyz), tangent.w);
+    vsOutput.tangent = float4(mul(WorldIT, tangent.xyz).xyz, tangent.w);
 #endif
-    vsOutput.uv0 = vsInput.uv0;
+    
+    vsOutput.uv0 = DecodeR16G16FLOATToFloat2(PackedUV);
 #ifndef NO_SECOND_UV
-    vsOutput.uv1 = vsInput.uv1;
+    vsOutput.uv1 = DecodeR16G16FLOATToFloat2(PackedUV1);
 #endif
 
     return vsOutput;

@@ -214,6 +214,10 @@ private:
 	UploadBuffer m_MeshJointsCPU;
 	ByteAddressBuffer m_MeshJointsGPU;
 
+	UploadBuffer m_ObjectConstantsCPU;
+	ByteAddressBuffer m_ObjectConstantsGPU;
+	bool m_bObjectConstantsDirty;
+
     std::map<uint32_t, std::shared_ptr<Math::Camera>> m_Cameras;
 
 	std::shared_ptr<IndirectArgsBuffer> m_IndirectArgsBuffer;
