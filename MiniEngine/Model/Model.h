@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -133,8 +133,7 @@ public:
         const GpuBuffer& meshConstants,
         const Math::AffineTransform sphereTransforms[],
         const GpuBuffer& meshJoints,
-		const IndirectArgsBuffer& indirectArgsBuffer,
-		const IndirectArgsBuffer& indirectArgsBufferZPass) const;
+		const IndirectArgsBuffer& indirectArgsBuffer) const;
 
     Math::BoundingSphere m_BoundingSphere; // Object-space bounding sphere
     Math::AxisAlignedBox m_BoundingBox;
@@ -221,5 +220,4 @@ private:
     std::map<uint32_t, std::shared_ptr<Math::Camera>> m_Cameras;
 
 	std::shared_ptr<IndirectArgsBuffer> m_IndirectArgsBuffer;
-    std::shared_ptr<IndirectArgsBuffer> m_IndirectArgsBufferZPass;
 };

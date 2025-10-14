@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -24,6 +24,7 @@
 #include "../Core/ShadowCamera.h"
 
 #include "GPUDriven/ExecuteIndirect.h"
+#include "GPUDriven/CommandBucketer.h"
 
 #include "CompiledShaders/DefaultVS.h"
 #include "CompiledShaders/DefaultSkinVS.h"
@@ -124,31 +125,31 @@ void Renderer::Initialize(void)
     DXGI_FORMAT ColorFormat = g_SceneColorBuffer.GetFormat();
     DXGI_FORMAT DepthFormat = g_SceneDepthBuffer.GetFormat();
 
-    D3D12_INPUT_ELEMENT_DESC posOnly[] =
-    {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-    };
+    //D3D12_INPUT_ELEMENT_DESC posOnly[] =
+    //{
+    //    { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    //};
 
-    D3D12_INPUT_ELEMENT_DESC posAndUV[] =
-    {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "TEXCOORD", 0, DXGI_FORMAT_R16G16_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-    };
+    //D3D12_INPUT_ELEMENT_DESC posAndUV[] =
+    //{
+    //    { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    //    { "TEXCOORD", 0, DXGI_FORMAT_R16G16_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    //};
 
-    D3D12_INPUT_ELEMENT_DESC skinPos[] =
-    {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "BLENDINDICES", 0, DXGI_FORMAT_R16G16B16A16_UINT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "BLENDWEIGHT", 0, DXGI_FORMAT_R16G16B16A16_UNORM, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-    };
+    //D3D12_INPUT_ELEMENT_DESC skinPos[] =
+    //{
+    //    { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    //    { "BLENDINDICES", 0, DXGI_FORMAT_R16G16B16A16_UINT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    //    { "BLENDWEIGHT", 0, DXGI_FORMAT_R16G16B16A16_UNORM, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    //};
 
-    D3D12_INPUT_ELEMENT_DESC skinPosAndUV[] =
-    {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "TEXCOORD", 0, DXGI_FORMAT_R16G16_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "BLENDINDICES", 0, DXGI_FORMAT_R16G16B16A16_UINT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "BLENDWEIGHT", 0, DXGI_FORMAT_R16G16B16A16_UNORM, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-    };
+    //D3D12_INPUT_ELEMENT_DESC skinPosAndUV[] =
+    //{
+    //    { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    //    { "TEXCOORD", 0, DXGI_FORMAT_R16G16_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    //    { "BLENDINDICES", 0, DXGI_FORMAT_R16G16B16A16_UINT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    //    { "BLENDWEIGHT", 0, DXGI_FORMAT_R16G16B16A16_UNORM, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    //};
 
     ASSERT(sm_PSOs.size() == 0);
 
@@ -159,7 +160,8 @@ void Renderer::Initialize(void)
     DepthOnlyPSO.SetRasterizerState(RasterizerDefault);
     DepthOnlyPSO.SetBlendState(BlendDisable);
     DepthOnlyPSO.SetDepthStencilState(DepthStateReadWrite);
-    DepthOnlyPSO.SetInputLayout(_countof(posOnly), posOnly);
+	//DepthOnlyPSO.SetInputLayout(_countof(posOnly), posOnly);
+	DepthOnlyPSO.SetInputLayout(0, nullptr);
     DepthOnlyPSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
     DepthOnlyPSO.SetRenderTargetFormats(0, nullptr, DepthFormat);
     DepthOnlyPSO.SetVertexShader(g_pDepthOnlyVS, sizeof(g_pDepthOnlyVS));
@@ -168,7 +170,7 @@ void Renderer::Initialize(void)
 
     GraphicsPSO CutoutDepthPSO(L"Renderer: Cutout Depth PSO");
     CutoutDepthPSO = DepthOnlyPSO;
-    CutoutDepthPSO.SetInputLayout(_countof(posAndUV), posAndUV);
+    CutoutDepthPSO.SetInputLayout(0, nullptr);
     CutoutDepthPSO.SetRasterizerState(RasterizerTwoSided);
     CutoutDepthPSO.SetVertexShader(g_pCutoutDepthVS, sizeof(g_pCutoutDepthVS));
     CutoutDepthPSO.SetPixelShader(g_pCutoutDepthPS, sizeof(g_pCutoutDepthPS));
@@ -176,13 +178,13 @@ void Renderer::Initialize(void)
     sm_PSOs.push_back(CutoutDepthPSO);
 
     GraphicsPSO SkinDepthOnlyPSO = DepthOnlyPSO;
-    SkinDepthOnlyPSO.SetInputLayout(_countof(skinPos), skinPos);
+    SkinDepthOnlyPSO.SetInputLayout(0, nullptr);
     SkinDepthOnlyPSO.SetVertexShader(g_pDepthOnlySkinVS, sizeof(g_pDepthOnlySkinVS));
     SkinDepthOnlyPSO.Finalize();
     sm_PSOs.push_back(SkinDepthOnlyPSO);
 
     GraphicsPSO SkinCutoutDepthPSO = CutoutDepthPSO;
-    SkinCutoutDepthPSO.SetInputLayout(_countof(skinPosAndUV), skinPosAndUV);
+    SkinCutoutDepthPSO.SetInputLayout(0, nullptr);
     SkinCutoutDepthPSO.SetVertexShader(g_pCutoutDepthSkinVS, sizeof(g_pCutoutDepthSkinVS));
     SkinCutoutDepthPSO.Finalize();
     sm_PSOs.push_back(SkinCutoutDepthPSO);
@@ -267,10 +269,7 @@ void Renderer::Initialize(void)
     g_SSAOFullScreenID = g_SSAOFullScreen.GetVersionID();
     g_ShadowBufferID = g_ShadowBuffer.GetVersionID();
 
-    if (GPUDriven::Enable)
-    {
-        GPUDriven::Initialize(&m_RootSig);
-    }
+    GPUDriven::Initialize(&m_RootSig);
 
     s_Initialized = true;
 }
@@ -365,10 +364,7 @@ void Renderer::Shutdown(void)
     s_TextureHeap.Destroy();
     s_SamplerHeap.Destroy();
 
-	if (GPUDriven::Enable)
-	{
-        GPUDriven::Shutdown();
-	}
+    GPUDriven::Shutdown();
 }
 
 uint8_t Renderer::GetPSO(uint16_t psoFlags)
@@ -380,26 +376,27 @@ uint8_t Renderer::GetPSO(uint16_t psoFlags)
     uint16_t Requirements = kHasPosition | kHasNormal;
     ASSERT((psoFlags & Requirements) == Requirements);
 
-    std::vector<D3D12_INPUT_ELEMENT_DESC> vertexLayout;
-    if (psoFlags & kHasPosition)
-        vertexLayout.push_back({"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT});
-    if (psoFlags & kHasNormal)
-        vertexLayout.push_back({"NORMAL",   0, DXGI_FORMAT_R10G10B10A2_UNORM,  0, D3D12_APPEND_ALIGNED_ELEMENT});
-    if (psoFlags & kHasTangent)
-        vertexLayout.push_back({"TANGENT",  0, DXGI_FORMAT_R10G10B10A2_UNORM,  0, D3D12_APPEND_ALIGNED_ELEMENT});
-    if (psoFlags & kHasUV0)
-        vertexLayout.push_back({"TEXCOORD", 0, DXGI_FORMAT_R16G16_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT});
-    else
-        vertexLayout.push_back({"TEXCOORD", 0, DXGI_FORMAT_R16G16_FLOAT,       1, D3D12_APPEND_ALIGNED_ELEMENT});
-    if (psoFlags & kHasUV1)
-        vertexLayout.push_back({"TEXCOORD", 1, DXGI_FORMAT_R16G16_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT});
-    if (psoFlags & kHasSkin)
-    {
-        vertexLayout.push_back({ "BLENDINDICES", 0, DXGI_FORMAT_R16G16B16A16_UINT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
-        vertexLayout.push_back({ "BLENDWEIGHT", 0, DXGI_FORMAT_R16G16B16A16_UNORM, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
-    }
+    //std::vector<D3D12_INPUT_ELEMENT_DESC> vertexLayout;
+    //if (psoFlags & kHasPosition)
+    //    vertexLayout.push_back({"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT});
+    //if (psoFlags & kHasNormal)
+    //    vertexLayout.push_back({"NORMAL",   0, DXGI_FORMAT_R10G10B10A2_UNORM,  0, D3D12_APPEND_ALIGNED_ELEMENT});
+    //if (psoFlags & kHasTangent)
+    //    vertexLayout.push_back({"TANGENT",  0, DXGI_FORMAT_R10G10B10A2_UNORM,  0, D3D12_APPEND_ALIGNED_ELEMENT});
+    //if (psoFlags & kHasUV0)
+    //    vertexLayout.push_back({"TEXCOORD", 0, DXGI_FORMAT_R16G16_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT});
+    //else
+    //    vertexLayout.push_back({"TEXCOORD", 0, DXGI_FORMAT_R16G16_FLOAT,       1, D3D12_APPEND_ALIGNED_ELEMENT});
+    //if (psoFlags & kHasUV1)
+    //    vertexLayout.push_back({"TEXCOORD", 1, DXGI_FORMAT_R16G16_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT});
+    //if (psoFlags & kHasSkin)
+    //{
+    //    vertexLayout.push_back({ "BLENDINDICES", 0, DXGI_FORMAT_R16G16B16A16_UINT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
+    //    vertexLayout.push_back({ "BLENDWEIGHT", 0, DXGI_FORMAT_R16G16B16A16_UNORM, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
+    //}
 
-    ColorPSO.SetInputLayout((uint32_t)vertexLayout.size(), vertexLayout.data());
+	//ColorPSO.SetInputLayout((uint32_t)vertexLayout.size(), vertexLayout.data());
+	ColorPSO.SetInputLayout(0, nullptr);
 
     if (psoFlags & kHasSkin)
     {
@@ -575,7 +572,6 @@ void MeshSorter::AddMesh( const Mesh& mesh, float distance,
     D3D12_GPU_VIRTUAL_ADDRESS bufferPtr,
     D3D12_GPU_VIRTUAL_ADDRESS meshJoints,
 	const IndirectArgsBuffer& indirectArgsBuffer,
-    const IndirectArgsBuffer& indirectArgsBufferZPass,
     uint32_t indirectArgsOffset)
 {
     SortKey key;
@@ -653,7 +649,7 @@ void MeshSorter::AddMesh( const Mesh& mesh, float distance,
         }
     }
 
-    SortObject object = { &mesh, meshJoints, meshCBV, materialCBV, bufferPtr, indirectArgsBuffer, indirectArgsBufferZPass, indirectArgsOffset};
+    SortObject object = { &mesh, meshJoints, meshCBV, materialCBV, bufferPtr, indirectArgsBuffer, indirectArgsOffset};
     m_SortObjects.push_back(object);
 }
 
@@ -821,55 +817,81 @@ void MeshSorter::RenderMeshes(
 
         while (m_CurrentDraw < lastDraw)
         {
-            SortKey key;
-            key.value = m_SortKeys[m_CurrentDraw];
-            const SortObject& object = m_SortObjects[key.objectIdx];
-            const Mesh& mesh = *object.mesh;
-
-            context.SetPipelineState(sm_PSOs[key.psoIdx]);
-
-            if (GPUDriven::Enable)
+            if (pass == kTransparent)
             {
-                if (pass == kZPass)
-                {
-					context.TransitionResource(const_cast<IndirectArgsBuffer&>(object.indirectArgsBufferZPass), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-					GPUDriven::DrawIndirect(context, const_cast<IndirectArgsBuffer&>(object.indirectArgsBufferZPass), mesh.numDraws, object.indirectArgsOffset);
-                }
-                else
-                {
-					context.TransitionResource(const_cast<IndirectArgsBuffer&>(object.indirectArgsBuffer), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-					GPUDriven::DrawIndirect(context, const_cast<IndirectArgsBuffer&>(object.indirectArgsBuffer), mesh.numDraws, object.indirectArgsOffset);
-                }
+				SortKey key;
+				key.value = m_SortKeys[m_CurrentDraw];
+				const SortObject& object = m_SortObjects[key.objectIdx];
+				const Mesh& mesh = *object.mesh;
+
+				context.SetPipelineState(sm_PSOs[key.psoIdx]);
+				context.TransitionResource(const_cast<IndirectArgsBuffer&>(object.indirectArgsBuffer), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+				GPUDriven::DrawIndirect(context, const_cast<IndirectArgsBuffer&>(object.indirectArgsBuffer), mesh.numDraws, object.indirectArgsOffset);
+                ++m_CurrentDraw;
             }
             else
             {
-				context.SetConstantBuffer(kMeshConstants, object.meshCBV);
-				context.SetConstantBuffer(kMaterialConstants, object.materialCBV);
-				if (mesh.numJoints > 0)
-				{
-					ASSERT(object.meshJoints != D3D12_GPU_VIRTUAL_ADDRESS_NULL, "Unspecified joint matrix array");
-					context.SetBufferSRV(kSkinMatrices, object.meshJoints);
-				}
+                auto& bucketer = GPUDriven::CommandBucketer::Get();
 				if (pass == kZPass)
 				{
-					bool alphaTest = (mesh.psoFlags & PSOFlags::kAlphaTest) == PSOFlags::kAlphaTest;
-					uint32_t stride = alphaTest ? 16u : 12u;
-					if (mesh.numJoints > 0)
-						stride += 16;
-					context.SetVertexBuffer(0, { object.bufferPtr + mesh.vbDepthOffset, mesh.vbDepthSize, stride });
+                    if (m_BatchType == MeshSorter::kShadows)
+                    {
+                        if (bucketer.HasShadow())
+                        {
+							auto& args = bucketer.GetShadowArgsBuffer();
+							context.TransitionResource(args, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+
+							for (const auto& run : bucketer.GetShadowRuns())
+							{
+								context.SetPipelineState(sm_PSOs[run.psoIdx]);
+								GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
+							}
+                        }
+                    }
+                    else
+                    {
+                        if (bucketer.HasDepth())
+                        {
+                            auto& args = bucketer.GetDepthArgsBuffer();
+                            context.TransitionResource(args, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+
+                            for (const auto& run : bucketer.GetDepthRuns())
+                            {
+                                context.SetPipelineState(sm_PSOs[run.psoIdx]);
+                                GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
+                            }
+                        }
+                    }	
 				}
 				else
 				{
-					context.SetVertexBuffer(0, { object.bufferPtr + mesh.vbOffset, mesh.vbSize, mesh.vbStride });
+                    if (bucketer.HasColor())
+                    {
+                        auto& args = bucketer.GetColorArgsBuffer();
+                        context.TransitionResource(args, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+                        if (!SeparateZPass)
+                        {
+                            const auto& runs = bucketer.GetColorRunsRW();
+							for (const auto& run : runs)
+							{
+								const uint16_t psoToUse = run.psoIdx;
+								context.SetPipelineState(sm_PSOs[psoToUse]);
+								GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
+							}
+                        }
+                        
+						const auto& runs = bucketer.GetColorRunsEQ();
+						for (const auto& run : runs)
+						{
+							const uint16_t psoToUse = run.psoIdx + 1;
+							context.SetPipelineState(sm_PSOs[psoToUse]);
+							GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
+						}  
+                    }
 				}
 
-				context.SetIndexBuffer({ object.bufferPtr + mesh.ibOffset, mesh.ibSize, (DXGI_FORMAT)mesh.ibFormat });
-
-                for (uint32_t i = 0; i < mesh.numDraws; ++i)
-                    context.DrawIndexed(mesh.draw[i].primCount, mesh.draw[i].startIndex, mesh.draw[i].baseVertex);
-            }
-
-            ++m_CurrentDraw;
+                m_CurrentDraw += passCount;
+            } 
         }
     }
 

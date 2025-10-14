@@ -61,19 +61,19 @@ StructuredBuffer<MeshConstant> MeshConstants : register(t22);
 
 struct VSInput
 {
-    float3 position : POSITION;
-    float3 normal : NORMAL;
-#ifndef NO_TANGENT_FRAME
-    float4 tangent : TANGENT;
-#endif
-    float2 uv0 : TEXCOORD0;
-#ifndef NO_SECOND_UV
-    float2 uv1 : TEXCOORD1;
-#endif
-#ifdef ENABLE_SKINNING
-    uint4 jointIndices : BLENDINDICES;
-    float4 jointWeights : BLENDWEIGHT;
-#endif
+//    float3 position : POSITION;
+//    float3 normal : NORMAL;
+//#ifndef NO_TANGENT_FRAME
+//    float4 tangent : TANGENT;
+//#endif
+//    float2 uv0 : TEXCOORD0;
+//#ifndef NO_SECOND_UV
+//    float2 uv1 : TEXCOORD1;
+//#endif
+//#ifdef ENABLE_SKINNING
+//    uint4 jointIndices : BLENDINDICES;
+//    float4 jointWeights : BLENDWEIGHT;
+//#endif
     uint vertexID : SV_VertexID;
 };
 

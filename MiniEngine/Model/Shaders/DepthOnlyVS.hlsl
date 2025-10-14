@@ -56,14 +56,14 @@ StructuredBuffer<MeshConstant> MeshConstants : register(t22);
 
 struct VSInput
 {
-    float3 position : POSITION;
-#ifdef ENABLE_ALPHATEST
-    float2 uv0 : TEXCOORD0;
-#endif
-#ifdef ENABLE_SKINNING
-    uint4 jointIndices : BLENDINDICES;
-    float4 jointWeights : BLENDWEIGHT;
-#endif
+//    float3 position : POSITION;
+//#ifdef ENABLE_ALPHATEST
+//    float2 uv0 : TEXCOORD0;
+//#endif
+//#ifdef ENABLE_SKINNING
+//    uint4 jointIndices : BLENDINDICES;
+//    float4 jointWeights : BLENDWEIGHT;
+//#endif
     uint vertexID : SV_VertexID;
 };
 

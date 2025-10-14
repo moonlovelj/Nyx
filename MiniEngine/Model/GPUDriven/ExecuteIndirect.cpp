@@ -1,11 +1,9 @@
-#include "ExecuteIndirect.h"
+﻿#include "ExecuteIndirect.h"
 
 #include "../Core/CommandContext.h"
 
 namespace GPUDriven
 {
-	BoolVar Enable("GPUDriven/Enabled", true);
-
 	CommandSignature GPUDrivenDrawIndirectCommandSignature;
 
 	void Initialize(const RootSignature* RootSignature)

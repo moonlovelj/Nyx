@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "../Core/CommandSignature.h"
 #include "../Core/GpuBuffer.h"
@@ -7,14 +7,14 @@
 
 namespace GPUDriven
 {
-
-    extern BoolVar Enable;
-
-    struct IndirectCommand
+    __declspec(align(16)) struct IndirectCommand
     {
         D3D12_GPU_VIRTUAL_ADDRESS objectCBAddress;
         D3D12_DRAW_INDEXED_ARGUMENTS drawArguments;
     };
+
+	static_assert(alignof(IndirectCommand) >= 16, "IndirectCommand must be >=16B aligned");
+	static_assert(sizeof(IndirectCommand) % 16 == 0, "IndirectCommand size must be multiple of 16");
 
     extern CommandSignature GPUDrivenDrawIndirectCommandSignature;
 

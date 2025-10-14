@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -15,6 +15,7 @@
 #include "Renderer.h"
 #include "ConstantBuffers.h"
 #include "GPUDriven/ExecuteIndirect.h"
+#include "GPUDriven/CommandBucketer.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -39,8 +40,7 @@ void Model::Render(
     const GpuBuffer& meshConstants,
     const AffineTransform sphereTransforms[],
     const GpuBuffer& meshJoints,
-    const IndirectArgsBuffer& indirectArgsBuffer,
-    const IndirectArgsBuffer& indirectArgsBufferZPass) const
+    const IndirectArgsBuffer& indirectArgsBuffer) const
 {
     sorter.SetMeshConstantsBuffer(meshConstants.GetGpuVirtualAddress());
     sorter.SetMaterialConstantsBuffer(m_MaterialConstants.GetGpuVirtualAddress());
@@ -76,7 +76,7 @@ void Model::Render(
                 meshConstants.GetGpuVirtualAddress() + sizeof(MeshConstants) * mesh.meshCBV,
                 m_MaterialConstants.GetGpuVirtualAddress() + sizeof(MaterialConstants) * mesh.materialCBV,
                 m_DataBuffer.GetGpuVirtualAddress(), mesh.numJoints > 0 ? meshJoints.GetGpuVirtualAddress() + sizeof(Joint) * mesh.startJoint : D3D12_GPU_VIRTUAL_ADDRESS_NULL,
-                indirectArgsBuffer, indirectArgsBufferZPass, indirectArgsOffset * sizeof(GPUDriven::IndirectCommand));
+                indirectArgsBuffer, indirectArgsOffset * sizeof(GPUDriven::IndirectCommand));
         }
 
         indirectArgsOffset += mesh.numDraws;
@@ -89,7 +89,7 @@ void ModelInstance::Render(MeshSorter& sorter) const
     if (m_Model != nullptr)
     {
         //const Frustum& frustum = sorter.GetWorldFrustum();
-        m_Model->Render(sorter, m_MeshConstantsGPU, m_BoundingSphereTransforms.get(), m_MeshJointsGPU, *m_IndirectArgsBuffer, *m_IndirectArgsBufferZPass);
+        m_Model->Render(sorter, m_MeshConstantsGPU, m_BoundingSphereTransforms.get(), m_MeshJointsGPU, *m_IndirectArgsBuffer);
     }
 }
 
@@ -406,20 +406,24 @@ void ModelInstance::CreateMeshIndirectCommands()
         ObjectConstants* pObjectConstants = (ObjectConstants*)m_ObjectConstantsCPU.Map();
 
         const uint32_t totalDraws = std::max(1u, GetNumTotalDraws());
-		void* cmdsMemory = ::operator new(sizeof(GPUDriven::IndirectCommand) * totalDraws, std::align_val_t(16));
-		GPUDriven::IndirectCommand* cmds = static_cast<GPUDriven::IndirectCommand*>(cmdsMemory);
-        void* cmdsMemoryZPass = ::operator new(sizeof(GPUDriven::IndirectCommand) * totalDraws, std::align_val_t(16));
-		GPUDriven::IndirectCommand* cmdsZPass = static_cast<GPUDriven::IndirectCommand*>(cmdsMemoryZPass);
+
+        std::vector<GPUDriven::IndirectCommand> cmds;
+        cmds.reserve(totalDraws);
+		std::vector<GPUDriven::IndirectCommand> cmdsZPass;
+        cmdsZPass.reserve(totalDraws);
 
 		const uint8_t* pMesh = m_Model->m_MeshData.get();
 		uint32_t cmdIdx = 0;
         for (uint32_t i = 0; i < m_Model->m_NumMeshes; i++)
         {
             const Mesh& mesh = *(const Mesh*)pMesh;
+            const bool alphaBlend = (mesh.psoFlags & PSOFlags::kAlphaBlend) == PSOFlags::kAlphaBlend;
+            const bool alphaTest = (mesh.psoFlags & PSOFlags::kAlphaTest) == PSOFlags::kAlphaTest;
+			const bool skinned = mesh.numJoints > 0;
 
             for (uint32_t j = 0; j < mesh.numDraws; j++)
             {
-                GPUDriven::IndirectCommand& cmd = cmds[cmdIdx];
+                GPUDriven::IndirectCommand cmd;
 				cmd.objectCBAddress = m_ObjectConstantsGPU.GetGpuVirtualAddress() + sizeof(ObjectConstants) * cmdIdx;
 
                 ASSERT(mesh.ibOffset%4 == 0, "Index buffer error.");
@@ -428,14 +432,14 @@ void ModelInstance::CreateMeshIndirectCommands()
                 cmd.drawArguments.StartIndexLocation = mesh.ibOffset / 4 + mesh.draw[j].startIndex;
 				cmd.drawArguments.BaseVertexLocation = mesh.draw[j].baseVertex;
 				cmd.drawArguments.StartInstanceLocation = 0;
+                cmds.push_back(cmd);
 
                 // ZPass
-				bool alphaTest = (mesh.psoFlags & PSOFlags::kAlphaTest) == PSOFlags::kAlphaTest;
 				uint32_t stride = alphaTest ? 16u : 12u;
-				if (mesh.numJoints > 0)
+				if (skinned)
 					stride += 16;
-                GPUDriven::IndirectCommand& cmdZPass = cmdsZPass[cmdIdx];
-                cmdZPass = cmd;
+
+                cmdsZPass.push_back(cmd);
 
                 ObjectConstants& objectConstants = pObjectConstants[cmdIdx];
                 objectConstants.VertexBufferOffset = mesh.vbOffset;
@@ -446,20 +450,37 @@ void ModelInstance::CreateMeshIndirectCommands()
 				objectConstants.MeshConstantsIndex = mesh.meshCBV;
 				objectConstants.MaterialConstantsIndex = mesh.materialCBV;
 
+				// 预分桶：Depth（阴影）
+				{
+					uint32_t depthBucket = (skinned ? 2u : 0u) + (alphaTest ? 1u : 0u);
+					GPUDriven::CommandBucketer::Get().AppendShadow(depthBucket, cmd);
+				}
+
+				// 预分桶：Depth（非阴影）
+				{
+					uint32_t depthBucket = (skinned ? 2u : 0u) + (alphaTest ? 1u : 0u);
+					GPUDriven::CommandBucketer::Get().AppendDepth(depthBucket, cmd);
+				}
+
+				// 预分桶：Color（半透明过滤；是否等深 = SeparateZPass || alphaTest）
+				if (!alphaBlend)
+				{
+					bool equalDepth = (SeparateZPass || alphaTest);
+					GPUDriven::CommandBucketer::Get().AppendColor(mesh.pso, cmd, equalDepth);
+				}
+
                 ++cmdIdx;
             }
             pMesh += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
         }
 
 		m_IndirectArgsBuffer = std::make_shared<IndirectArgsBuffer>();
-        m_IndirectArgsBuffer->Create(L"Model Indirect Command", totalDraws, sizeof(GPUDriven::IndirectCommand), cmdsMemory);
-		m_IndirectArgsBufferZPass = std::make_shared<IndirectArgsBuffer>();
-        m_IndirectArgsBufferZPass->Create(L"Model ZPass Indirect Command", totalDraws, sizeof(GPUDriven::IndirectCommand), cmdsMemoryZPass);
-		::operator delete(cmdsMemory, std::align_val_t(16));
-		::operator delete(cmdsMemoryZPass, std::align_val_t(16));
+        m_IndirectArgsBuffer->Create(L"Model Indirect Command", totalDraws, sizeof(GPUDriven::IndirectCommand), cmds.data());
 
         m_ObjectConstantsCPU.Unmap();
         m_bObjectConstantsDirty = true;
+
+		GPUDriven::CommandBucketer::Get().FinalizeAll();
     }
 }
 
@@ -471,9 +492,5 @@ void ModelInstance::DestroyMeshIndirectCommands()
         m_IndirectArgsBuffer.reset();
     }
 
-    if (m_IndirectArgsBufferZPass)
-    {
-        m_IndirectArgsBufferZPass->Destroy();
-        m_IndirectArgsBufferZPass.reset();
-    }
+    GPUDriven::CommandBucketer::Get().ResetAll();
 }

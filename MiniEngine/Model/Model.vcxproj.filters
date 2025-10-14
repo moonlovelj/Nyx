@@ -47,6 +47,9 @@
     <ClCompile Include="GPUDriven\ExecuteIndirect.cpp">
       <Filter>GPUDriven</Filter>
     </ClCompile>
+    <ClCompile Include="GPUDriven\CommandBucketer.cpp">
+      <Filter>GPUDriven</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
@@ -104,6 +107,9 @@
     </ClInclude>
     <ClInclude Include="DeferredRenderer.h" />
     <ClInclude Include="GPUDriven\ExecuteIndirect.h">
+      <Filter>GPUDriven</Filter>
+    </ClInclude>
+    <ClInclude Include="GPUDriven\CommandBucketer.h">
       <Filter>GPUDriven</Filter>
     </ClInclude>
   </ItemGroup>

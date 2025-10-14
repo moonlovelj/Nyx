@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -123,7 +123,6 @@ namespace Renderer
             D3D12_GPU_VIRTUAL_ADDRESS bufferPtr,
             D3D12_GPU_VIRTUAL_ADDRESS meshJoints,
 			const IndirectArgsBuffer& indirectArgsBuffer,
-			const IndirectArgsBuffer& indirectArgsBufferZPass,
 			uint32_t indirectArgsOffset);
 
         void Sort();
@@ -155,7 +154,6 @@ namespace Renderer
             D3D12_GPU_VIRTUAL_ADDRESS materialCBV;
             D3D12_GPU_VIRTUAL_ADDRESS bufferPtr;
 			const IndirectArgsBuffer& indirectArgsBuffer;
-			const IndirectArgsBuffer& indirectArgsBufferZPass;
 			uint32_t indirectArgsOffset;
         };
 

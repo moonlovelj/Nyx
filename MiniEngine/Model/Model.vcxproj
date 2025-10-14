@@ -81,6 +81,7 @@
     <ClInclude Include="ConstantBuffers.h" />
     <ClInclude Include="DeferredRenderer.h" />
     <ClInclude Include="glTF.h" />
+    <ClInclude Include="GPUDriven\CommandBucketer.h" />
     <ClInclude Include="GPUDriven\ExecuteIndirect.h" />
     <ClInclude Include="IndexOptimizePostTransform.h" />
     <ClInclude Include="json.hpp" />
@@ -99,6 +100,7 @@
     <ClCompile Include="BuildH3D.cpp" />
     <ClCompile Include="DeferredRenderer.cpp" />
     <ClCompile Include="glTF.cpp" />
+    <ClCompile Include="GPUDriven\CommandBucketer.cpp" />
     <ClCompile Include="GPUDriven\ExecuteIndirect.cpp" />
     <ClCompile Include="IndexOptimizePostTransform.cpp" />
     <ClCompile Include="LightManager.cpp" />
