@@ -1,6 +1,7 @@
-
+﻿
 #include "LightGrid.hlsli"
 #include "LightingCommon.hlsli"
+#include "Common.hlsli"
 
 // outdated warning about for-loop variable scope
 #pragma warning (disable: 3078)
@@ -87,7 +88,7 @@ void main(
             // TODO 阴影有瑕疵
             float sunShadow = GetDirectionalShadow(ScreenUV, shadowCoord.xyz, texShadow);
             // TODO 高光有锯齿，尤其是粗糙度接近0时
-            colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunColor);
+            colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunIntensity);
 
             ShadeLights(colorAccum.rgb, Surface, DTid, posW);
 

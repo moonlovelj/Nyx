@@ -119,6 +119,7 @@
     <None Include="Shaders\Common.hlsli" />
     <None Include="Shaders\DataCodec.hlsli" />
     <None Include="Shaders\FillLightGridCS.hlsli" />
+    <None Include="Shaders\CommonResources.hlsli" />
     <None Include="Shaders\LightGrid.hlsli" />
     <None Include="Shaders\Lighting.hlsli" />
     <None Include="Shaders\LightingCommon.hlsli" />
@@ -196,6 +197,7 @@
     <FxCompile Include="Shaders\DefaultPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
+    <FxCompile Include="Shaders\FrustumCullCS.hlsl" />
     <FxCompile Include="Shaders\GBufferNoTangentNoUV1PS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>

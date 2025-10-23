@@ -130,7 +130,8 @@ public:
     ~Model() { Destroy(); }
 
     void Render(Renderer::MeshSorter& sorter,
-        const GpuBuffer& meshConstants,
+		const GpuBuffer& meshConstants,
+		const GpuBuffer& objectConstants,
         const Math::AffineTransform sphereTransforms[],
         const GpuBuffer& meshJoints,
 		const IndirectArgsBuffer& indirectArgsBuffer) const;

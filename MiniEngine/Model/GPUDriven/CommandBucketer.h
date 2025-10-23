@@ -46,9 +46,11 @@ namespace GPUDriven
 		void ResetColor();
 
 		// 如需重建（场景切换、渲染模式切换）
-		void ResetAll() { ResetShadow(); ResetDepth(); ResetColor(); }
+		void ResetAll();
 
 		void FinalizeAll() { FinalizeShadow(); FinalizeDepth(); FinalizeColor(); }
+
+		size_t CalculateMaxIndirectArgsBufferSize();
 
 	private:
 		CommandBucketer() = default;

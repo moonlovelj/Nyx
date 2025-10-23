@@ -38,14 +38,16 @@ void Model::Destroy()
 void Model::Render(
     MeshSorter& sorter,
     const GpuBuffer& meshConstants,
+    const GpuBuffer& objectConstants,
     const AffineTransform sphereTransforms[],
     const GpuBuffer& meshJoints,
     const IndirectArgsBuffer& indirectArgsBuffer) const
 {
-    sorter.SetMeshConstantsBuffer(meshConstants.GetGpuVirtualAddress());
-    sorter.SetMaterialConstantsBuffer(m_MaterialConstants.GetGpuVirtualAddress());
-	sorter.SetVertexBuffer(m_DataBuffer.GetGpuVirtualAddress());
-	sorter.SetJointsBuffer(meshJoints.GetGpuVirtualAddress());
+    sorter.SetMeshConstantsBuffer(meshConstants.GetSRV());
+    sorter.SetMaterialConstantsBuffer(m_MaterialConstants.GetSRV());
+    sorter.SetObjectConstantsBuffer(objectConstants.GetSRV());
+	sorter.SetVertexBuffer(m_DataBuffer.GetSRV());
+	sorter.SetJointsBuffer(meshJoints.GetSRV());
     sorter.SetIndexBuffer({m_DataBuffer.GetGpuVirtualAddress(), (uint32_t)m_DataBuffer.GetBufferSize(), DXGI_FORMAT_R32_UINT });
 
     // Pointer to current mesh
@@ -89,7 +91,7 @@ void ModelInstance::Render(MeshSorter& sorter) const
     if (m_Model != nullptr)
     {
         //const Frustum& frustum = sorter.GetWorldFrustum();
-        m_Model->Render(sorter, m_MeshConstantsGPU, m_BoundingSphereTransforms.get(), m_MeshJointsGPU, *m_IndirectArgsBuffer);
+        m_Model->Render(sorter, m_MeshConstantsGPU, m_ObjectConstantsGPU, m_BoundingSphereTransforms.get(), m_MeshJointsGPU, *m_IndirectArgsBuffer);
     }
 }
 
@@ -424,9 +426,9 @@ void ModelInstance::CreateMeshIndirectCommands()
             for (uint32_t j = 0; j < mesh.numDraws; j++)
             {
                 GPUDriven::IndirectCommand cmd;
-				cmd.objectCBAddress = m_ObjectConstantsGPU.GetGpuVirtualAddress() + sizeof(ObjectConstants) * cmdIdx;
 
                 ASSERT(mesh.ibOffset%4 == 0, "Index buffer error.");
+                cmd.ObjectIndex = cmdIdx;
                 cmd.drawArguments.IndexCountPerInstance = mesh.draw[j].primCount;
                 cmd.drawArguments.InstanceCount = 1;
                 cmd.drawArguments.StartIndexLocation = mesh.ibOffset / 4 + mesh.draw[j].startIndex;
@@ -442,6 +444,7 @@ void ModelInstance::CreateMeshIndirectCommands()
                 cmdsZPass.push_back(cmd);
 
                 ObjectConstants& objectConstants = pObjectConstants[cmdIdx];
+                //memcpy(objectConstants.BoundingSphere, mesh.bounds, 16);
                 objectConstants.VertexBufferOffset = mesh.vbOffset;
                 objectConstants.VertexStride = mesh.vbStride;
 				objectConstants.VertexBufferDepthOffset = mesh.vbDepthOffset;

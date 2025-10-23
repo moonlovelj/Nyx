@@ -1,31 +1,8 @@
-#ifndef __MATERIAL_COMMON_HLSLI__
+﻿#ifndef __MATERIAL_COMMON_HLSLI__
 #define __MATERIAL_COMMON_HLSLI__
 
 #include "VSTOPSCommon.hlsli"
-
-cbuffer ObjectConstants : register(b2)
-{
-    uint VertexBufferOffset;
-    uint VertexStride;
-    uint VertexBufferDepthOffset;
-    uint VertexDepthStride;
-    uint MeshConstantsIndex;
-    uint MaterialConstantsIndex;
-    uint MeshJointsIndexOffset;
-}
-
-struct MaterialConstant
-{
-    float4 baseColorFactor;
-    float3 emissiveFactor;
-    float normalTextureScale;
-    float2 metallicRoughnessFactor;
-    uint flags;
-
-    uint TextureStartIndex;
-    uint SamplerStartIndex;
-};
-StructuredBuffer<MaterialConstant> MaterialConstants : register(t22);
+#include "CommonResources.hlsli"
 
 // Flag helpers
 static const uint BASECOLOR_UV_OFFSET = 0;
@@ -41,7 +18,8 @@ static const uint NORMAL_UV_OFFSET = 4;
 
 float3 ComputeNormal(VSOutput vsOutput, Texture2D<float3> NormalTexture, SamplerState NormalSampler)
 {
-    MaterialConstant materilConstant = MaterialConstants[MaterialConstantsIndex];
+    ObjectConstant objConstant = ObjectConstants[ObjectIndex];
+    MaterialConstant materilConstant = MaterialConstants[objConstant.MaterialConstantsIndex];
     float normalTextureScale = materilConstant.normalTextureScale;
     uint flags = materilConstant.flags;
 
@@ -78,7 +56,8 @@ struct MaterialProperties
 
 MaterialProperties GetMaterialProperties(VSOutput vsOutput)
 {
-    MaterialConstant materilConstant = MaterialConstants[MaterialConstantsIndex];
+    ObjectConstant objConstant = ObjectConstants[ObjectIndex];
+    MaterialConstant materilConstant = MaterialConstants[objConstant.MaterialConstantsIndex];
 	float4 baseColorFactor = materilConstant.baseColorFactor;
 	float3 emissiveFactor = materilConstant.emissiveFactor;
 	float normalTextureScale = materilConstant.normalTextureScale;
@@ -86,7 +65,6 @@ MaterialProperties GetMaterialProperties(VSOutput vsOutput)
 	uint flags = materilConstant.flags;
 	uint TextureStartIndex = materilConstant.TextureStartIndex;
 	uint SamplerStartIndex = materilConstant.SamplerStartIndex;
-
 
     Texture2D<float4> BaseColorTexture = ResourceDescriptorHeap[TextureStartIndex];
     Texture2D<float3> MetallicRoughnessTexture = ResourceDescriptorHeap[TextureStartIndex + 1];

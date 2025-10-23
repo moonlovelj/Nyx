@@ -9,7 +9,7 @@ namespace GPUDriven
 	void Initialize(const RootSignature* RootSignature)
 	{
 		GPUDrivenDrawIndirectCommandSignature.Reset(2);
-		GPUDrivenDrawIndirectCommandSignature[0].ConstantBufferView(4);
+		GPUDrivenDrawIndirectCommandSignature[0].Constant(4, 0, 1);
 		GPUDrivenDrawIndirectCommandSignature[1].DrawIndexed();
 		GPUDrivenDrawIndirectCommandSignature.Finalize(RootSignature, sizeof(IndirectCommand));
 	}
@@ -19,11 +19,12 @@ namespace GPUDriven
 		GPUDrivenDrawIndirectCommandSignature.Destroy();
 	}
 
-	void DrawIndirect(GraphicsContext& context, GpuBuffer& ArgumentBuffer, uint32_t MaxCommands, uint64_t ArgumentStartOffset)
+	void DrawIndirect(GraphicsContext& context, GpuBuffer& ArgumentBuffer, uint32_t MaxCommands, uint64_t ArgumentStartOffset
+		, GpuBuffer* CommandCounterBuffer, uint64_t CounterOffset)
 	{
 		context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, 
 			ArgumentBuffer,
 			ArgumentStartOffset,
-			MaxCommands);
+			MaxCommands, CommandCounterBuffer, CounterOffset);
 	}
 }

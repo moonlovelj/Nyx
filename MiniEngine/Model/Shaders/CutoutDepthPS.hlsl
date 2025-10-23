@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -12,6 +12,7 @@
 //
 
 #include "Common.hlsli"
+#include "CommonResources.hlsli"
 
 struct VSOutput
 {
@@ -19,24 +20,16 @@ struct VSOutput
     float2 uv : TexCoord0;
 };
 
-cbuffer MaterialConstants : register(b0)
-{
-    float4 baseColorFactor;
-    float3 emissiveFactor;
-    float normalTextureScale;
-    float2 metallicRoughnessFactor;
-    uint flags;
-    uint TextureStartIndex;
-    uint SamplerStartIndex;
-}
-
 [RootSignature(Renderer_RootSig)]
 void main(VSOutput vsOutput)
 {
-    float cutoff = f16tof32(flags >> 16);
+    ObjectConstant objConstant = ObjectConstants[ObjectIndex];
+    MaterialConstant materilConstant = MaterialConstants[objConstant.MaterialConstantsIndex];
     
-    Texture2D<float4> BaseColorTexture = ResourceDescriptorHeap[TextureStartIndex];
-    SamplerState BaseColorSampler = SamplerDescriptorHeap[SamplerStartIndex];
+    float cutoff = f16tof32(materilConstant.flags >> 16);
+    
+    Texture2D<float4> BaseColorTexture = ResourceDescriptorHeap[materilConstant.TextureStartIndex];
+    SamplerState BaseColorSampler = SamplerDescriptorHeap[materilConstant.SamplerStartIndex];
     
     if (BaseColorTexture.Sample(BaseColorSampler, vsOutput.uv).a < cutoff)
         discard;

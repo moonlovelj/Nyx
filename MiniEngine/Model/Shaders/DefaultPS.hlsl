@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -46,7 +46,7 @@ float4 main(VSOutput vsOutput) : SV_Target0
     float4 shadowCoord = mul(SunShadowMatrix, float4(vsOutput.worldPos, 1.0));
     shadowCoord.xyz *= rcp(shadowCoord.w);
     float sunShadow = GetDirectionalShadow(ScreenUV, shadowCoord.xyz, texShadow);
-    colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunColor);
+    colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunIntensity);
 
     ShadeLights(colorAccum.rgb, Surface, pixelPos, vsOutput.worldPos);
 

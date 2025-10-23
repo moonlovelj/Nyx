@@ -1,4 +1,4 @@
-#ifndef __VS_TO_PS_COMMON_HLSLI__
+﻿#ifndef __VS_TO_PS_COMMON_HLSLI__
 #define __VS_TO_PS_COMMON_HLSLI__
 
 struct VSOutput

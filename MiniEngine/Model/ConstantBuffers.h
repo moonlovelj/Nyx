@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -79,8 +79,9 @@ __declspec(align(256)) struct GlobalConstants
     uint32_t IBLSpecularLDMapMipCount;
 };
 
-__declspec(align(256)) struct ObjectConstants
+struct ObjectConstants
 {
+    float BoundingSphere[4];     // Object space bounding sphere
     uint32_t VertexBufferOffset;
     uint32_t VertexStride;
 	uint32_t VertexBufferDepthOffset;

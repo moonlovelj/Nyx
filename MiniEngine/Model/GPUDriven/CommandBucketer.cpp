@@ -168,3 +168,15 @@ void CommandBucketer::ResetColor()
 	m_ColorArgs.Destroy();
 	m_ColorFinalized = false;
 }
+
+size_t CommandBucketer::CalculateMaxIndirectArgsBufferSize()
+{
+	return std::max({ m_ShadowArgs.GetBufferSize(), m_DepthArgs.GetBufferSize(), m_ColorArgs.GetBufferSize() });
+}
+
+void CommandBucketer::ResetAll() 
+{
+	ResetShadow(); 
+	ResetDepth(); 
+	ResetColor();
+}

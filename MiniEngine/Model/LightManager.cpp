@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -74,10 +74,7 @@ namespace Lighting
     Matrix4 m_LightShadowMatrix[MaxLights];
     Math::Camera m_LightCamera[MaxLights];
 
-    RootSignature m_DeferredLightingRootSig;
     ComputePSO m_DeferredLightingPSO(L"Deferred Lighting PSO");
-    DescriptorHandle m_DeferredLightingTextures;
-    DescriptorHandle m_DeferredLightingUAVs;
 
     void InitializeResources(void);
     void CreateRandomLights(const Vector3 minBound, const Vector3 maxBound);
@@ -122,58 +119,7 @@ void Lighting::InitializeResources( void )
 
     m_LightBuffer.Create(L"m_LightBuffer", MaxLights, sizeof(LightData));
     
-    m_DeferredLightingTextures = Renderer::s_TextureHeap.Alloc(5);
-    m_DeferredLightingUAVs = Renderer::s_TextureHeap.Alloc(1);
-    
-    {
-        uint32_t DestCount = 5;
-        uint32_t SourceCounts[] = { 1, 1, 1, 1, 1};
-        D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
-        {
-            g_GBufferA.GetSRV(),
-            g_GBufferB.GetSRV(),
-            g_GBufferC.GetSRV(),
-            g_GBufferD.GetSRV(),
-        	g_SceneDepthBuffer.GetDepthSRV(),
-        };
-
-        g_Device->CopyDescriptors(1, &m_DeferredLightingTextures, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    }
-
-    {
-        uint32_t DestCount = 1;
-        uint32_t SourceCounts[] = { 1 };
-        D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
-        {
-			g_SceneColorBuffer.GetUAV()
-        };
-
-        g_Device->CopyDescriptors(1, &m_DeferredLightingUAVs, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    }
-
-    m_DeferredLightingRootSig.Reset(4, 5);
-    SamplerDesc DefaultSamplerDesc;
-    DefaultSamplerDesc.MaxAnisotropy = 8;
-    SamplerDesc CubeMapSamplerDesc = DefaultSamplerDesc;
-    m_DeferredLightingRootSig.InitStaticSampler(10, DefaultSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-    m_DeferredLightingRootSig.InitStaticSampler(11, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_ALL);
-    m_DeferredLightingRootSig.InitStaticSampler(12, CubeMapSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-    SamplerDesc LinearSamplerDesc;
-    LinearSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-    LinearSamplerDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
-    m_DeferredLightingRootSig.InitStaticSampler(13, LinearSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-    SamplerDesc PointSamplerDesc;
-    PointSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-    PointSamplerDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
-    m_DeferredLightingRootSig.InitStaticSampler(14, PointSamplerDesc, D3D12_SHADER_VISIBILITY_ALL);
-
-    m_DeferredLightingRootSig[0].InitAsConstantBuffer(1);
-    m_DeferredLightingRootSig[1].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 10);
-    m_DeferredLightingRootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 10, 10);
-    m_DeferredLightingRootSig[3].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1);
-    m_DeferredLightingRootSig.Finalize(L"DeferredLightingRS");
-    
-	m_DeferredLightingPSO.SetRootSignature(m_DeferredLightingRootSig);
+	m_DeferredLightingPSO.SetRootSignature(Renderer::m_RootSig);
     m_DeferredLightingPSO.SetComputeShader(g_pDeferredLightingCS, sizeof(g_pDeferredLightingCS));
     m_DeferredLightingPSO.Finalize();
 }
@@ -248,6 +194,8 @@ void Lighting::CreateRandomLights( const Vector3 minBound, const Vector3 maxBoun
             type = 1;
         else
             type = 2;
+
+        type = 2;
 
         Vector3 coneDir = randVecGaussian();
         float coneInner = (randFloat() * .2f + .025f) * pi;
@@ -403,9 +351,36 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
 {
     ScopedTimer _prof(L"DeferredLighting", gfxContext);
 
+    {
+        uint32_t DestCount = 5;
+        uint32_t SourceCounts[] = { 1, 1, 1, 1, 1 };
+        D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
+        {
+            g_GBufferA.GetSRV(),
+            g_GBufferB.GetSRV(),
+            g_GBufferC.GetSRV(),
+            g_GBufferD.GetSRV(),
+            g_SceneDepthBuffer.GetDepthSRV(),
+        };
+
+        DescriptorHandle dest = Renderer::m_CommonTextures + 10 * Renderer::s_TextureHeap.GetDescriptorSize();
+        g_Device->CopyDescriptors(1, &dest, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    }
+
+	{
+		uint32_t DestCount = 1;
+		uint32_t SourceCounts[] = { 1 };
+		D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
+		{
+			g_SceneColorBuffer.GetUAV()
+		};
+
+		g_Device->CopyDescriptors(1, &Renderer::m_CommonUAVs, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	}
+
     ComputeContext& Context = gfxContext.GetComputeContext();
 
-    Context.SetRootSignature(m_DeferredLightingRootSig);
+    Context.SetRootSignature(Renderer::m_RootSig);
 
     Context.SetPipelineState(m_DeferredLightingPSO);
 
@@ -429,12 +404,10 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
     Context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
     Context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Renderer::s_TextureHeap.GetHeapPointer());
-    Context.SetDescriptorTable(1, Renderer::m_CommonTextures);
-    Context.SetDescriptorTable(2, m_DeferredLightingTextures);
-    Context.SetDescriptorTable(3, m_DeferredLightingUAVs);
+    Context.SetDynamicConstantBufferView(Renderer::kCommonCBV, sizeof(GlobalConstants), &globals);
+    Context.SetDescriptorTable(Renderer::kCommonSRVs, Renderer::m_CommonTextures);
+    Context.SetDescriptorTable(Renderer::kCommonUAVs, Renderer::m_CommonUAVs);
 
-    Context.SetDynamicConstantBufferView(0, sizeof(GlobalConstants), &globals);
-    
     uint32_t groupCountX = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), 8);
     uint32_t groupCountY = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), 8);
 

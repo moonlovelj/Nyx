@@ -49,6 +49,7 @@
 #include "CompiledShaders/GBufferNoUV1PS.h"
 #include "CompiledShaders/GBufferNoTangentPS.h"
 #include "CompiledShaders/GBufferNoTangentNoUV1PS.h"
+#include "CompiledShaders/FrustumCullCS.h"
 
 #pragma warning(disable:4319) // '~': zero extending 'uint32_t' to 'uint64_t' of greater size
 
@@ -59,8 +60,8 @@ using namespace Renderer;
 namespace Renderer
 {
     BoolVar SeparateZPass("Renderer/Separate Z Pass", true);
-    
     BoolVar DeferredRendering("Renderer/Deferred Rendering", true);
+	BoolVar UseGPUFrustumCull("Renderer/Use GPU Frustum Cull", true);
 
     bool s_Initialized = false;
 
@@ -80,6 +81,12 @@ namespace Renderer
     GraphicsPSO m_DefaultPSO(L"Renderer: Default PSO"); // Not finalized.  Used as a template.
 
     DescriptorHandle m_CommonTextures;
+    DescriptorHandle m_GPUDrivenBuffers;
+    DescriptorHandle m_CommonUAVs;
+
+    StructuredBuffer m_IndirectArgsBuffer;
+    UploadBuffer m_IndirectArgsCounterBufferReset;
+	ComputePSO m_FrustrumCullPSO(L"Renderer: Frustum Cull PSO");
 }
 
 void Renderer::Initialize(void)
@@ -102,22 +109,20 @@ void Renderer::Initialize(void)
     PointSamplerDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
 
     m_RootSig.Reset(kNumRootBindings, 5);
-    m_RootSig.InitStaticSampler(10, DefaultSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
-    m_RootSig.InitStaticSampler(11, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_PIXEL);
-    m_RootSig.InitStaticSampler(12, CubeMapSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
-    m_RootSig.InitStaticSampler(13, LinearSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
-    m_RootSig.InitStaticSampler(14, PointSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
+    m_RootSig.InitStaticSampler(10, DefaultSamplerDesc);
+    m_RootSig.InitStaticSampler(11, SamplerShadowDesc);
+    m_RootSig.InitStaticSampler(12, CubeMapSamplerDesc);
+    m_RootSig.InitStaticSampler(13, LinearSamplerDesc);
+    m_RootSig.InitStaticSampler(14, PointSamplerDesc);
     m_RootSig[kMeshConstants].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_VERTEX);
     m_RootSig[kMaterialConstants].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL);
-    //m_RootSig[kMaterialSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 10, D3D12_SHADER_VISIBILITY_PIXEL);
-    //m_RootSig[kMaterialSamplers].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, 0, 10, D3D12_SHADER_VISIBILITY_PIXEL);
-    m_RootSig[kCommonSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 20, D3D12_SHADER_VISIBILITY_PIXEL);
+    m_RootSig[kCommonSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 20);
 	m_RootSig[kCommonCBV].InitAsConstantBuffer(1);
-	m_RootSig[kObjectConstants].InitAsConstantBuffer(2);
-	m_RootSig[kSkinMatrices].InitAsBufferSRV(20, D3D12_SHADER_VISIBILITY_VERTEX);
-	m_RootSig[kVertexBuffer].InitAsBufferSRV(21, D3D12_SHADER_VISIBILITY_VERTEX);
-	m_RootSig[kMeshConstantsSRV].InitAsBufferSRV(22, D3D12_SHADER_VISIBILITY_VERTEX);
-	m_RootSig[kMaterialConstantsSRV].InitAsBufferSRV(22, D3D12_SHADER_VISIBILITY_PIXEL);
+    m_RootSig[kRootConstants].InitAsConstants(2, 4);
+	m_RootSig[kGPUDrivenSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 20, 10);
+    m_RootSig[kCommonSRV].InitAsBufferSRV(30);
+	m_RootSig[kCommonUAVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 10);
+    m_RootSig[kCommonUAV].InitAsBufferUAV(10);
     m_RootSig.Finalize(L"RootSig", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT 
         | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED
         | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED);
@@ -246,10 +251,10 @@ void Renderer::Initialize(void)
     Lighting::InitializeResources();
 
     // Allocate a descriptor table for the common textures
-    m_CommonTextures = s_TextureHeap.Alloc(9);
+    m_CommonTextures = s_TextureHeap.Alloc(20);
 
     uint32_t DestCount = 9;
-    uint32_t SourceCounts[] = { 1, 1, 1, 1, 1, 1, 1, 1, 1};
+    uint32_t SourceCounts[] = { 1, 1, 1, 1, 1, 1, 1, 1, 1 };
 
     D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
     {
@@ -266,10 +271,23 @@ void Renderer::Initialize(void)
 
     g_Device->CopyDescriptors(1, &m_CommonTextures, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
+    m_CommonUAVs = s_TextureHeap.Alloc(10);
+
     g_SSAOFullScreenID = g_SSAOFullScreen.GetVersionID();
     g_ShadowBufferID = g_ShadowBuffer.GetVersionID();
 
     GPUDriven::Initialize(&m_RootSig);
+
+    m_IndirectArgsCounterBufferReset.Create(L"IndirectArgsCounterBufferReset", sizeof(uint32_t));
+    uint32_t* pCounterBufferReset = (uint32_t*)m_IndirectArgsCounterBufferReset.Map();
+    pCounterBufferReset[0] = 0;
+    m_IndirectArgsCounterBufferReset.Unmap();
+
+    m_GPUDrivenBuffers = s_TextureHeap.Alloc(10);
+
+    m_FrustrumCullPSO.SetRootSignature(m_RootSig);
+    m_FrustrumCullPSO.SetComputeShader(g_pFrustumCullCS, sizeof(g_pFrustumCullCS));
+    m_FrustrumCullPSO.Finalize();
 
     s_Initialized = true;
 }
@@ -363,6 +381,7 @@ void Renderer::Shutdown(void)
     TextureManager::Shutdown();
     s_TextureHeap.Destroy();
     s_SamplerHeap.Destroy();
+    m_IndirectArgsCounterBufferReset.Destroy();
 
     GPUDriven::Shutdown();
 }
@@ -566,6 +585,52 @@ void Renderer::DrawSkybox( GraphicsContext& gfxContext, const Camera& Camera, co
     gfxContext.Draw(3);
 }
 
+void Renderer::FrustrumCulling(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, 
+    IndirectArgsBuffer& inArgsBuffer, uint32_t startCommandOffset, uint32_t maxCommands)
+{
+    ScopedTimer _prof(L"Renderer::FrustrumCulling", gfxContext);
+
+    ComputeContext& context = gfxContext.GetComputeContext();
+
+	auto& bucketer = GPUDriven::CommandBucketer::Get();
+	const size_t bufferSize = bucketer.CalculateMaxIndirectArgsBufferSize();
+	if (m_IndirectArgsBuffer.GetBufferSize() < bufferSize)
+	{
+		m_IndirectArgsBuffer.Destroy();
+		m_IndirectArgsBuffer.Create(L"IndirectArgsBuffer", Math::DivideByMultiple((uint32_t)bufferSize, (uint32_t)sizeof(GPUDriven::IndirectCommand)), (uint32_t)sizeof(GPUDriven::IndirectCommand));
+		uint32_t DestCount = 1;
+		uint32_t SourceCounts[] = { 1 };
+		D3D12_CPU_DESCRIPTOR_HANDLE SourceBuffers[] =
+		{
+			m_IndirectArgsBuffer.GetUAV()
+		};
+		DescriptorHandle dest = Renderer::m_CommonUAVs + 5 * Renderer::s_TextureHeap.GetDescriptorSize();
+		g_Device->CopyDescriptors(1, &dest, &DestCount, DestCount, SourceBuffers, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	}
+
+	context.TransitionResource(m_IndirectArgsBuffer.GetCounterBuffer(), D3D12_RESOURCE_STATE_COPY_DEST);
+	context.CopyBufferRegion(m_IndirectArgsBuffer.GetCounterBuffer(), 0, m_IndirectArgsCounterBufferReset, 0, sizeof(UINT));
+
+    context.TransitionResource(m_IndirectArgsBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    context.TransitionResource(inArgsBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+	context.SetRootSignature(m_RootSig);
+	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+	context.SetPipelineState(m_FrustrumCullPSO);
+
+	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
+	context.SetDescriptorTable(kGPUDrivenSRVs, m_GPUDrivenBuffers);
+    context.SetBufferSRV(kCommonSRV, inArgsBuffer);
+	context.SetDescriptorTable(kCommonUAVs, m_CommonUAVs);
+	context.SetConstants(kRootConstants, startCommandOffset, maxCommands);
+
+	const uint32_t groupCountX = Math::DivideByMultiple(maxCommands, 128);
+	context.Dispatch(groupCountX, 1, 1);
+
+	context.TransitionResource(m_IndirectArgsBuffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+	context.TransitionResource(m_IndirectArgsBuffer.GetCounterBuffer(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+}
+
 void MeshSorter::AddMesh( const Mesh& mesh, float distance,
     D3D12_GPU_VIRTUAL_ADDRESS meshCBV,
     D3D12_GPU_VIRTUAL_ADDRESS materialCBV,
@@ -666,9 +731,27 @@ void MeshSorter::RenderMeshes(
 {
 	ASSERT(m_DSV != nullptr);
 
-    ScopedTimer _prof(L"MeshSorter::RenderMeshes", context);
+	ScopedTimer _prof(L"MeshSorter::RenderMeshes", context);
+
+	GlobalConstants globals = inGlobals;
+	// Set common shader constants
+	globals.ViewProjMatrix = m_Camera->GetViewProjMatrix();
+	globals.ViewerPos = m_Camera->GetPosition();
 
     Renderer::UpdateGlobalDescriptors();
+
+	uint32_t DestCount = 5;
+	uint32_t SourceCounts[] = { 1, 1, 1, 1, 1};
+	D3D12_CPU_DESCRIPTOR_HANDLE SourceBuffers[] =
+	{
+        m_ObjectConstantsBufferSRV,
+        m_MeshConstantsBufferSRV,
+        m_MaterialConstantsBufferSRV,
+        m_VertexBufferSRV,
+        m_JointsBufferSRV
+	};
+	g_Device->CopyDescriptors(1, &m_GPUDrivenBuffers, &DestCount, DestCount, SourceBuffers, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
 
     //context.SetRootSignature(m_RootSig);
     context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -680,16 +763,8 @@ void MeshSorter::RenderMeshes(
     // Set common textures
     context.SetDescriptorTable(kCommonSRVs, m_CommonTextures);
 
-    GlobalConstants globals = inGlobals;
-    // Set common shader constants
-	globals.ViewProjMatrix = m_Camera->GetViewProjMatrix();
-	globals.ViewerPos = m_Camera->GetPosition();
-
 	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &globals);
-	context.SetBufferSRV(kMeshConstantsSRV, m_MeshConstantsBuffer);
-	context.SetBufferSRV(kMaterialConstantsSRV, m_MaterialConstantsBuffer);
-	context.SetBufferSRV(kVertexBuffer, m_VertexBuffer);
-	context.SetBufferSRV(kSkinMatrices, m_JointsBuffer);
+    context.SetDescriptorTable(kGPUDrivenSRVs, m_GPUDrivenBuffers);
 
 	if (m_BatchType == kShadows)
 	{
@@ -843,8 +918,18 @@ void MeshSorter::RenderMeshes(
 
 							for (const auto& run : bucketer.GetShadowRuns())
 							{
-								context.SetPipelineState(sm_PSOs[run.psoIdx]);
-								GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
+								if (UseGPUFrustumCull)
+								{
+                                    // TODO 重构，裁剪应该应该在设置管线状态前进行
+									FrustrumCulling(context, globals, args, (uint32_t)run.startCmd, run.count);
+									context.SetPipelineState(sm_PSOs[run.psoIdx]);
+									GPUDriven::DrawIndirect(context, m_IndirectArgsBuffer, run.count, 0, &m_IndirectArgsBuffer.GetCounterBuffer(), 0);
+								}
+                                else
+                                {
+                                    context.SetPipelineState(sm_PSOs[run.psoIdx]);
+                                    GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
+                                }
 							}
                         }
                     }
@@ -857,8 +942,17 @@ void MeshSorter::RenderMeshes(
 
                             for (const auto& run : bucketer.GetDepthRuns())
                             {
-                                context.SetPipelineState(sm_PSOs[run.psoIdx]);
-                                GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
+								if (UseGPUFrustumCull)
+								{
+									FrustrumCulling(context, globals, args, (uint32_t)run.startCmd, run.count);
+									context.SetPipelineState(sm_PSOs[run.psoIdx]);
+									GPUDriven::DrawIndirect(context, m_IndirectArgsBuffer, run.count, 0, &m_IndirectArgsBuffer.GetCounterBuffer(), 0);
+								}
+                                else
+                                {
+                                    context.SetPipelineState(sm_PSOs[run.psoIdx]);
+                                    GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
+                                }
                             }
                         }
                     }	
@@ -875,17 +969,36 @@ void MeshSorter::RenderMeshes(
 							for (const auto& run : runs)
 							{
 								const uint16_t psoToUse = run.psoIdx;
-								context.SetPipelineState(sm_PSOs[psoToUse]);
-								GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
+								if (UseGPUFrustumCull)
+								{
+									FrustrumCulling(context, globals, args, (uint32_t)run.startCmd, run.count);
+									context.SetPipelineState(sm_PSOs[psoToUse]);
+									GPUDriven::DrawIndirect(context, m_IndirectArgsBuffer, run.count, 0, &m_IndirectArgsBuffer.GetCounterBuffer(), 0);
+								}
+                                else
+                                {
+                                    context.SetPipelineState(sm_PSOs[psoToUse]);
+                                    GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
+                                }
 							}
                         }
                         
 						const auto& runs = bucketer.GetColorRunsEQ();
 						for (const auto& run : runs)
 						{
-							const uint16_t psoToUse = run.psoIdx + 1;
-							context.SetPipelineState(sm_PSOs[psoToUse]);
-							GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
+                            const uint16_t psoToUse = run.psoIdx + 1;
+                            if (UseGPUFrustumCull)
+                            {
+								FrustrumCulling(context, globals, args, (uint32_t)run.startCmd, run.count);
+                                context.SetPipelineState(sm_PSOs[psoToUse]);
+                                GPUDriven::DrawIndirect(context, m_IndirectArgsBuffer, run.count, 0, &m_IndirectArgsBuffer.GetCounterBuffer(), 0);
+                            }
+                            else
+                            {
+								
+								context.SetPipelineState(sm_PSOs[psoToUse]);
+								GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
+                            }
 						}  
                     }
 				}

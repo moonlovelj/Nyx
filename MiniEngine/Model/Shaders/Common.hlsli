@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -23,21 +23,21 @@
     "RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED | SAMPLER_HEAP_DIRECTLY_INDEXED), " \
     "CBV(b0, visibility = SHADER_VISIBILITY_VERTEX), " \
     "CBV(b0, visibility = SHADER_VISIBILITY_PIXEL), " \
-    "DescriptorTable(SRV(t0, numDescriptors = 20), visibility = SHADER_VISIBILITY_PIXEL)," \
+    "DescriptorTable(SRV(t0, numDescriptors = 20))," \
     "CBV(b1), " \
-    "CBV(b2), " \
-    "SRV(t20, visibility = SHADER_VISIBILITY_VERTEX), " \
-    "SRV(t21, visibility = SHADER_VISIBILITY_VERTEX), " \
-    "SRV(t22, visibility = SHADER_VISIBILITY_VERTEX), " \
-    "SRV(t22, visibility = SHADER_VISIBILITY_PIXEL), " \
-    "StaticSampler(s10, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_PIXEL)," \
-    "StaticSampler(s11, visibility = SHADER_VISIBILITY_PIXEL," \
+    "RootConstants(b2, num32BitConstants = 4), " \
+    "DescriptorTable(SRV(t20, numDescriptors = 10))," \
+    "SRV(t30), " \
+    "DescriptorTable(UAV(u0, numDescriptors = 10))," \
+    "UAV(u10), " \
+    "StaticSampler(s10, maxAnisotropy = 8)," \
+    "StaticSampler(s11," \
         "addressU = TEXTURE_ADDRESS_CLAMP," \
         "addressV = TEXTURE_ADDRESS_CLAMP," \
         "addressW = TEXTURE_ADDRESS_CLAMP," \
         "comparisonFunc = COMPARISON_GREATER_EQUAL," \
         "filter = FILTER_MIN_MAG_LINEAR_MIP_POINT)," \
-    "StaticSampler(s12, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_PIXEL)," \
+    "StaticSampler(s12, maxAnisotropy = 8)," \
     "StaticSampler(s13," \
         "addressU = TEXTURE_ADDRESS_CLAMP," \
         "addressV = TEXTURE_ADDRESS_CLAMP," \

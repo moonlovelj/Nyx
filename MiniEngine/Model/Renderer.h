@@ -44,10 +44,13 @@ namespace Renderer
     extern RootSignature m_RootSig;
     extern DescriptorHeap s_TextureHeap;
     extern DescriptorHeap s_SamplerHeap;
-    extern DescriptorHandle m_CommonTextures;
+	extern DescriptorHandle m_CommonTextures;
+	extern DescriptorHandle m_CommonUAVs;
 
 	extern float s_SpecularIBLRange;
 	extern float s_SpecularIBLBias;
+
+    extern UploadBuffer m_IndirectArgsCounterBufferReset;
 
     enum RootBindings
     {
@@ -55,11 +58,11 @@ namespace Renderer
         kMaterialConstants,
         kCommonSRVs,
 		kCommonCBV,
-		kObjectConstants,
-        kSkinMatrices,
-		kVertexBuffer,
-        kMeshConstantsSRV,
-        kMaterialConstantsSRV,
+        kRootConstants,
+		kGPUDrivenSRVs,
+		kCommonSRV,
+		kCommonUAVs,
+        kCommonUAV,
         kNumRootBindings
     };
 
@@ -71,6 +74,8 @@ namespace Renderer
     void SetIBLBias(float LODBias);
     void UpdateGlobalDescriptors(void);
     void DrawSkybox( GraphicsContext& gfxContext, const Camera& camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor );
+	void FrustrumCulling(GraphicsContext& gfxContext, const GlobalConstants& inGlobals,
+		IndirectArgsBuffer& inArgsBuffer, uint32_t startCommandOffset, uint32_t maxCommands);
 
     class MeshSorter
     {
@@ -91,18 +96,20 @@ namespace Renderer
 			std::memset(m_PassCounts, 0, sizeof(m_PassCounts));
 			//m_CurrentPass = kZPass;
 			m_CurrentDraw = 0;
-			m_VertexBuffer = D3D12_GPU_VIRTUAL_ADDRESS_NULL;
-			m_JointsBuffer = D3D12_GPU_VIRTUAL_ADDRESS_NULL;
-			m_MeshConstantsBuffer = D3D12_GPU_VIRTUAL_ADDRESS_NULL;
-			m_MaterialConstantsBuffer = D3D12_GPU_VIRTUAL_ADDRESS_NULL;
+			m_VertexBufferSRV.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
+			m_JointsBufferSRV.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
+			m_MeshConstantsBufferSRV.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
+			m_MaterialConstantsBufferSRV.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
+			m_ObjectConstantsBufferSRV.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
 			m_IBV = {};
 		}
 
 		void SetIndexBuffer(const D3D12_INDEX_BUFFER_VIEW& ibv) { m_IBV = ibv; }
-		void SetMeshConstantsBuffer(D3D12_GPU_VIRTUAL_ADDRESS mb) { m_MeshConstantsBuffer = mb; }
-		void SetMaterialConstantsBuffer(D3D12_GPU_VIRTUAL_ADDRESS matb) { m_MaterialConstantsBuffer = matb; }
-		void SetVertexBuffer(D3D12_GPU_VIRTUAL_ADDRESS vb) { m_VertexBuffer = vb; }
-		void SetJointsBuffer(D3D12_GPU_VIRTUAL_ADDRESS jb) { m_JointsBuffer = jb; }
+		void SetMeshConstantsBuffer(D3D12_CPU_DESCRIPTOR_HANDLE mb) { m_MeshConstantsBufferSRV = mb; }
+		void SetMaterialConstantsBuffer(D3D12_CPU_DESCRIPTOR_HANDLE matb) { m_MaterialConstantsBufferSRV = matb; }
+		void SetObjectConstantsBuffer(D3D12_CPU_DESCRIPTOR_HANDLE ob) { m_ObjectConstantsBufferSRV = ob; }
+		void SetVertexBuffer(D3D12_CPU_DESCRIPTOR_HANDLE vb) { m_VertexBufferSRV = vb; }
+		void SetJointsBuffer(D3D12_CPU_DESCRIPTOR_HANDLE jb) { m_JointsBufferSRV = jb; }
 		void SetCamera( const BaseCamera& camera ) { m_Camera = &camera; }
 		void SetViewport( const D3D12_VIEWPORT& viewport ) { m_Viewport = viewport; }
 		void SetScissor( const D3D12_RECT& scissor ) { m_Scissor = scissor; }
@@ -170,10 +177,11 @@ namespace Renderer
 		uint32_t m_NumRTVs;
 		ColorBuffer* m_RTV[8];
 		DepthBuffer* m_DSV;
-		D3D12_GPU_VIRTUAL_ADDRESS m_MeshConstantsBuffer;
-		D3D12_GPU_VIRTUAL_ADDRESS m_MaterialConstantsBuffer;
-		D3D12_GPU_VIRTUAL_ADDRESS m_VertexBuffer;
-		D3D12_GPU_VIRTUAL_ADDRESS m_JointsBuffer;
+        D3D12_CPU_DESCRIPTOR_HANDLE m_MeshConstantsBufferSRV;
+        D3D12_CPU_DESCRIPTOR_HANDLE m_MaterialConstantsBufferSRV;
+        D3D12_CPU_DESCRIPTOR_HANDLE m_ObjectConstantsBufferSRV;
+        D3D12_CPU_DESCRIPTOR_HANDLE m_VertexBufferSRV;
+        D3D12_CPU_DESCRIPTOR_HANDLE m_JointsBufferSRV;
 		D3D12_INDEX_BUFFER_VIEW m_IBV;
 	};
 

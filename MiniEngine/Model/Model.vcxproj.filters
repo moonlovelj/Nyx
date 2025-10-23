@@ -142,6 +142,9 @@
     <None Include="Shaders\DataCodec.hlsli">
       <Filter>Shaders</Filter>
     </None>
+    <None Include="Shaders\CommonResources.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Shaders\DefaultVS.hlsl">
@@ -238,6 +241,9 @@
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\DeferredLightingCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\FrustumCullCS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>

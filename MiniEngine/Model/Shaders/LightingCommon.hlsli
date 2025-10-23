@@ -1,4 +1,4 @@
-#ifndef __LIGHTING_COMMON_HLSLI__
+﻿#ifndef __LIGHTING_COMMON_HLSLI__
 #define __LIGHTING_COMMON_HLSLI__
 
 #include "Common.hlsli"
@@ -7,34 +7,12 @@
 #include "../../Core/Shaders/IBL.hlsli"
 #include "LightGrid.hlsli"
 #include "PCSS.hlsli"
+#include "CommonResources.hlsli"
 
 #define PCSS_SHADOW     1
 
 static const float3 kDielectricSpecular = float3(0.04, 0.04, 0.04);
 
-cbuffer GlobalConstants : register(b1)
-{
-    float4x4 ViewProjMatrix;
-    float4x4 InverseViewProjMatrix;
-    float4x4 SunShadowMatrix;
-    float3 ViewerPos;
-    float3 SunDirection;
-    float3 SunColor;
-    float4 ShadowTexelSize;
-    
-    float4 InvTileDim;
-    uint4 TileCount;
-    uint4 FirstLightIndex;
-
-    uint ViewportWidth;
-    uint ViewportHeight;
-
-    uint FrameIndexMod2;
-
-    uint IBLLutTextureSize;
-    uint IBLSpecularLDMapMipCount;
-
-};
 
 // Common textures
 TextureCube<float3> IBLDiffuseLDMap      : register(t0);
