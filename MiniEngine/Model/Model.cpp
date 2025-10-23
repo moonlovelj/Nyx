@@ -444,7 +444,7 @@ void ModelInstance::CreateMeshIndirectCommands()
                 cmdsZPass.push_back(cmd);
 
                 ObjectConstants& objectConstants = pObjectConstants[cmdIdx];
-                //memcpy(objectConstants.BoundingSphere, mesh.bounds, 16);
+                memcpy(objectConstants.BoundingSphere, mesh.bounds, 16);
                 objectConstants.VertexBufferOffset = mesh.vbOffset;
                 objectConstants.VertexStride = mesh.vbStride;
 				objectConstants.VertexBufferDepthOffset = mesh.vbDepthOffset;

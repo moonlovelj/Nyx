@@ -118,7 +118,8 @@ void Renderer::Initialize(void)
     m_RootSig[kMaterialConstants].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL);
     m_RootSig[kCommonSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 20);
 	m_RootSig[kCommonCBV].InitAsConstantBuffer(1);
-    m_RootSig[kRootConstants].InitAsConstants(2, 4);
+	m_RootSig[kRootConstants].InitAsConstants(2, 4);
+	m_RootSig[kRootConstants1].InitAsConstants(3, 4);
 	m_RootSig[kGPUDrivenSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 20, 10);
     m_RootSig[kCommonSRV].InitAsBufferSRV(30);
 	m_RootSig[kCommonUAVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 10);
@@ -622,7 +623,7 @@ void Renderer::FrustrumCulling(GraphicsContext& gfxContext, const GlobalConstant
 	context.SetDescriptorTable(kGPUDrivenSRVs, m_GPUDrivenBuffers);
     context.SetBufferSRV(kCommonSRV, inArgsBuffer);
 	context.SetDescriptorTable(kCommonUAVs, m_CommonUAVs);
-	context.SetConstants(kRootConstants, startCommandOffset, maxCommands);
+	context.SetConstants(kRootConstants1, startCommandOffset, maxCommands);
 
 	const uint32_t groupCountX = Math::DivideByMultiple(maxCommands, 128);
 	context.Dispatch(groupCountX, 1, 1);
@@ -736,7 +737,18 @@ void MeshSorter::RenderMeshes(
 	GlobalConstants globals = inGlobals;
 	// Set common shader constants
 	globals.ViewProjMatrix = m_Camera->GetViewProjMatrix();
+    globals.ViewMatrix = m_Camera->GetViewMatrix();
 	globals.ViewerPos = m_Camera->GetPosition();
+    const Frustum& frustum = m_Camera->GetViewSpaceFrustum();
+
+    //kNearPlane, kFarPlane, kLeftPlane, kRightPlane, kTopPlane, kBottomPlane
+
+	globals.ViewSpaceFrustumPlanes[0] = frustum.GetFrustumPlane(Frustum::kNearPlane);
+	globals.ViewSpaceFrustumPlanes[1] = frustum.GetFrustumPlane(Frustum::kFarPlane);
+	globals.ViewSpaceFrustumPlanes[2] = frustum.GetFrustumPlane(Frustum::kLeftPlane);
+	globals.ViewSpaceFrustumPlanes[3] = frustum.GetFrustumPlane(Frustum::kRightPlane);
+	globals.ViewSpaceFrustumPlanes[4] = frustum.GetFrustumPlane(Frustum::kTopPlane);
+	globals.ViewSpaceFrustumPlanes[5] = frustum.GetFrustumPlane(Frustum::kBottomPlane);
 
     Renderer::UpdateGlobalDescriptors();
 

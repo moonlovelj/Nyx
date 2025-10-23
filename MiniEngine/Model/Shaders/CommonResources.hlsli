@@ -3,6 +3,13 @@
 
 cbuffer GlobalConstants : register(b1)
 {
+    float4x4 ViewMatrix;
+    float4 ViewSpaceFrustumPlanes0;
+    float4 ViewSpaceFrustumPlanes1;
+    float4 ViewSpaceFrustumPlanes2;
+    float4 ViewSpaceFrustumPlanes3;
+    float4 ViewSpaceFrustumPlanes4;
+    float4 ViewSpaceFrustumPlanes5;
     float4x4 ViewProjMatrix;
     float4x4 InverseViewProjMatrix;
     float4x4 SunShadowMatrix;

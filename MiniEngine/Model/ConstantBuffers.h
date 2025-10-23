@@ -62,6 +62,8 @@ struct MaterialConstants
 
 __declspec(align(256)) struct GlobalConstants
 {
+    Math::Matrix4 ViewMatrix;
+    Math::Vector4 ViewSpaceFrustumPlanes[6];
     Math::Matrix4 ViewProjMatrix;
     Math::Matrix4 InverseViewProjMatrix;
     Math::Matrix4 SunShadowMatrix;
