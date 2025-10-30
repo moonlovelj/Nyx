@@ -33,10 +33,10 @@ cbuffer GlobalConstants : register(b1)
 
 cbuffer CB2 : register(b2)
 {
-    uint ObjectIndex;
+    uint MeshletIndex;
 }
 
-struct ObjectConstant
+struct MeshletConstant
 {
     float4 BoundingSphere;
     uint VertexBufferOffset;
@@ -48,7 +48,7 @@ struct ObjectConstant
     uint MeshJointsIndexOffset;
 };
 
-StructuredBuffer<ObjectConstant> ObjectConstants : register(t20);
+StructuredBuffer<MeshletConstant> MeshletConstants : register(t20);
 
 struct MeshConstant
 {

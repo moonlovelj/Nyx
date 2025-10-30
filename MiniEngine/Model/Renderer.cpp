@@ -756,7 +756,7 @@ void MeshSorter::RenderMeshes(
 	uint32_t SourceCounts[] = { 1, 1, 1, 1, 1};
 	D3D12_CPU_DESCRIPTOR_HANDLE SourceBuffers[] =
 	{
-        m_ObjectConstantsBufferSRV,
+        m_MeshletConstantsBufferSRV,
         m_MeshConstantsBufferSRV,
         m_MaterialConstantsBufferSRV,
         m_VertexBufferSRV,

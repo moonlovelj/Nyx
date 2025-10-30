@@ -37,8 +37,8 @@ VSOutput main(VSInput vsInput)
 {
     VSOutput vsOutput;
         
-    ObjectConstant objConstant = ObjectConstants[ObjectIndex];
-    uint VertexLoadOffset = objConstant.VertexBufferDepthOffset + vsInput.vertexID * objConstant.VertexDepthStride;
+    MeshletConstant meshletConstant = MeshletConstants[MeshletIndex];
+    uint VertexLoadOffset = meshletConstant.VertexBufferDepthOffset + vsInput.vertexID * meshletConstant.VertexDepthStride;
     
     uint3 PackedPos = VertexBuffer.Load3(VertexLoadOffset);
     float4 position = float4(asfloat(PackedPos), 1.0);
@@ -63,16 +63,16 @@ VSOutput main(VSInput vsInput)
     float4 weights = jointWeights / dot(jointWeights, 1);
 
     float4x4 skinPosMat =
-        Joints[objConstant.MeshJointsIndexOffset + jointIndices.x].PosMatrix * weights.x +
-        Joints[objConstant.MeshJointsIndexOffset + jointIndices.y].PosMatrix * weights.y +
-        Joints[objConstant.MeshJointsIndexOffset + jointIndices.z].PosMatrix * weights.z +
-        Joints[objConstant.MeshJointsIndexOffset + jointIndices.w].PosMatrix * weights.w;
+        Joints[meshletConstant.MeshJointsIndexOffset + jointIndices.x].PosMatrix * weights.x +
+        Joints[meshletConstant.MeshJointsIndexOffset + jointIndices.y].PosMatrix * weights.y +
+        Joints[meshletConstant.MeshJointsIndexOffset + jointIndices.z].PosMatrix * weights.z +
+        Joints[meshletConstant.MeshJointsIndexOffset + jointIndices.w].PosMatrix * weights.w;
 
     position = mul(skinPosMat, position);
 
 #endif
 
-    MeshConstant meshConstant = MeshConstants[objConstant.MeshConstantsIndex];
+    MeshConstant meshConstant = MeshConstants[meshletConstant.MeshConstantsIndex];
     float4x4 WorldMatrix = meshConstant.WorldMatrix;
     float4x3 WorldIT = meshConstant.WorldIT;
     float3 worldPos = mul(WorldMatrix, position).xyz;

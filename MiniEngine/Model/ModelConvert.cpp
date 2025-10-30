@@ -96,7 +96,11 @@ void Renderer::CompileMesh(
     for (auto& iter : renderMeshes)
     {
 		// 预计算：每个 primitive 的 meshlets 与重排后的 IB
-		struct MeshletRange { uint32_t startIndex; uint32_t indexCount; }; // 局部（相对该 primitive 重排后 IB）的范围
+		struct MeshletRange { 
+            uint32_t startIndex; 
+            uint32_t indexCount; 
+            float    bounds[4];     // A bounding sphere
+        }; // 局部（相对该 primitive 重排后 IB）的范围
 		struct PreMeshletInfo
 		{
 			bool index32 = false;
@@ -171,6 +175,12 @@ void Renderer::CompileMesh(
                 max_triangles,
                 cone_weight);
 
+            for (size_t m = 0; m < meshlet_count; ++m)
+            {
+                const meshopt_Meshlet& ml = meshlets[m];
+                meshopt_optimizeMeshlet(&meshlet_vertices[ml.vertex_offset], &meshlet_triangles[ml.triangle_offset], ml.triangle_count, ml.vertex_count);
+            }
+
             // 组装重排后的 IB（保持原位宽）
             info.newIB.resize(draw->IB->size());
             uint32_t localIndexCursor = 0;
@@ -180,9 +190,16 @@ void Renderer::CompileMesh(
                 const meshopt_Meshlet& ml = meshlets[m];
                 const uint32_t triCount = ml.triangle_count;
 
+				const meshopt_Bounds bounds = meshopt_computeMeshletBounds(&meshlet_vertices[ml.vertex_offset], &meshlet_triangles[ml.triangle_offset],
+					ml.triangle_count, positions, ml.vertex_count, info.vertexStride);
+
                 MeshletRange r{};
                 r.startIndex = localIndexCursor;
                 r.indexCount = triCount * 3;
+				r.bounds[0] = bounds.center[0];
+				r.bounds[1] = bounds.center[1];
+				r.bounds[2] = bounds.center[2];
+				r.bounds[3] = bounds.radius;
 
                 for (uint32_t t = 0; t < triCount; ++t)
                 {
@@ -281,6 +298,10 @@ void Renderer::CompileMesh(
 				d.primCount = r.indexCount;              // index 数
 				d.baseVertex = curVertOffset;            // 该 primitive 的顶点基址
 				d.startIndex = curIndexOffset + r.startIndex; // 相对整个 Mesh 的 IB 起点
+				d.bounds[0] = r.bounds[0];
+				d.bounds[1] = r.bounds[1];
+				d.bounds[2] = r.bounds[2];
+				d.bounds[3] = r.bounds[3];
 			}
 
 			// 拷贝 VB / DepthVB

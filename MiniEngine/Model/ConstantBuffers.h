@@ -81,7 +81,7 @@ __declspec(align(256)) struct GlobalConstants
     uint32_t IBLSpecularLDMapMipCount;
 };
 
-struct ObjectConstants
+struct MeshletConstants
 {
     float BoundingSphere[4];     // Object space bounding sphere
     uint32_t VertexBufferOffset;

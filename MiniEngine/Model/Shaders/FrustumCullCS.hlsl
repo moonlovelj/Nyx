@@ -14,7 +14,7 @@ cbuffer CullConstants : register(b3)
 
 struct IndirectCommand
 {
-    uint ObjectIndex;
+    uint MeshletIndex;
     uint4 drawArgumentsLo;
     uint drawArgumentsHi;
     uint2 paddings;
@@ -60,10 +60,10 @@ void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
     if (index < maxCommands)
     {
         IndirectCommand inCommand = inputCommands[index + startCommand];
-        ObjectConstant objConstant = ObjectConstants[inCommand.ObjectIndex];
-        MeshConstant meshConstant = MeshConstants[objConstant.MeshConstantsIndex];
+        MeshletConstant meshletConstant = MeshletConstants[inCommand.MeshletIndex];
+        MeshConstant meshConstant = MeshConstants[meshletConstant.MeshConstantsIndex];
         float4x4 WorldMatrix = meshConstant.WorldMatrix;
-        if(IsSphereInFrustum(WorldMatrix, objConstant.BoundingSphere))
+        if(IsSphereInFrustum(WorldMatrix, meshletConstant.BoundingSphere))
         {
             outputCommands.Append(inCommand);
         }

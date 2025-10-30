@@ -18,8 +18,8 @@ static const uint NORMAL_UV_OFFSET = 4;
 
 float3 ComputeNormal(VSOutput vsOutput, Texture2D<float3> NormalTexture, SamplerState NormalSampler)
 {
-    ObjectConstant objConstant = ObjectConstants[ObjectIndex];
-    MaterialConstant materilConstant = MaterialConstants[objConstant.MaterialConstantsIndex];
+    MeshletConstant meshletConstant = MeshletConstants[MeshletIndex];
+    MaterialConstant materilConstant = MaterialConstants[meshletConstant.MaterialConstantsIndex];
     float normalTextureScale = materilConstant.normalTextureScale;
     uint flags = materilConstant.flags;
 
@@ -56,8 +56,8 @@ struct MaterialProperties
 
 MaterialProperties GetMaterialProperties(VSOutput vsOutput)
 {
-    ObjectConstant objConstant = ObjectConstants[ObjectIndex];
-    MaterialConstant materilConstant = MaterialConstants[objConstant.MaterialConstantsIndex];
+    MeshletConstant meshletConstant = MeshletConstants[MeshletIndex];
+    MaterialConstant materilConstant = MaterialConstants[meshletConstant.MaterialConstantsIndex];
 	float4 baseColorFactor = materilConstant.baseColorFactor;
 	float3 emissiveFactor = materilConstant.emissiveFactor;
 	float normalTextureScale = materilConstant.normalTextureScale;

@@ -9,7 +9,7 @@ namespace GPUDriven
 {
     __declspec(align(16)) struct IndirectCommand
     {
-        UINT ObjectIndex;
+        UINT MeshletIndex;
         D3D12_DRAW_INDEXED_ARGUMENTS drawArguments;
     };
 

@@ -78,6 +78,7 @@ struct Mesh
         uint32_t primCount;   // Number of indices = 3 * number of triangles
         uint32_t startIndex;  // Offset to first index in index buffer 
         uint32_t baseVertex;  // Offset to first vertex in vertex buffer
+		float    bounds[4];     // meshlet bounding sphere
     };
     Draw draw[1];           // Actually 1 or more draws
 };
@@ -131,7 +132,7 @@ public:
 
     void Render(Renderer::MeshSorter& sorter,
 		const GpuBuffer& meshConstants,
-		const GpuBuffer& objectConstants,
+		const GpuBuffer& meshletConstants,
         const Math::AffineTransform sphereTransforms[],
         const GpuBuffer& meshJoints,
 		const IndirectArgsBuffer& indirectArgsBuffer) const;
@@ -214,9 +215,9 @@ private:
 	UploadBuffer m_MeshJointsCPU;
 	ByteAddressBuffer m_MeshJointsGPU;
 
-	UploadBuffer m_ObjectConstantsCPU;
-	ByteAddressBuffer m_ObjectConstantsGPU;
-	bool m_bObjectConstantsDirty;
+	UploadBuffer m_MeshletConstantsCPU;
+	ByteAddressBuffer m_MeshletConstantsGPU;
+	bool m_bMeshletConstantsDirty;
 
     std::map<uint32_t, std::shared_ptr<Math::Camera>> m_Cameras;
 
