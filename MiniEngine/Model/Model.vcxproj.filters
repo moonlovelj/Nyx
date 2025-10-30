@@ -50,6 +50,54 @@
     <ClCompile Include="GPUDriven\CommandBucketer.cpp">
       <Filter>GPUDriven</Filter>
     </ClCompile>
+    <ClCompile Include="MeshOptimizer\allocator.cpp">
+      <Filter>MeshOptimizer</Filter>
+    </ClCompile>
+    <ClCompile Include="MeshOptimizer\clusterizer.cpp">
+      <Filter>MeshOptimizer</Filter>
+    </ClCompile>
+    <ClCompile Include="MeshOptimizer\indexanalyzer.cpp">
+      <Filter>MeshOptimizer</Filter>
+    </ClCompile>
+    <ClCompile Include="MeshOptimizer\indexcodec.cpp">
+      <Filter>MeshOptimizer</Filter>
+    </ClCompile>
+    <ClCompile Include="MeshOptimizer\indexgenerator.cpp">
+      <Filter>MeshOptimizer</Filter>
+    </ClCompile>
+    <ClCompile Include="MeshOptimizer\overdrawoptimizer.cpp">
+      <Filter>MeshOptimizer</Filter>
+    </ClCompile>
+    <ClCompile Include="MeshOptimizer\partition.cpp">
+      <Filter>MeshOptimizer</Filter>
+    </ClCompile>
+    <ClCompile Include="MeshOptimizer\quantization.cpp">
+      <Filter>MeshOptimizer</Filter>
+    </ClCompile>
+    <ClCompile Include="MeshOptimizer\rasterizer.cpp">
+      <Filter>MeshOptimizer</Filter>
+    </ClCompile>
+    <ClCompile Include="MeshOptimizer\simplifier.cpp">
+      <Filter>MeshOptimizer</Filter>
+    </ClCompile>
+    <ClCompile Include="MeshOptimizer\spatialorder.cpp">
+      <Filter>MeshOptimizer</Filter>
+    </ClCompile>
+    <ClCompile Include="MeshOptimizer\stripifier.cpp">
+      <Filter>MeshOptimizer</Filter>
+    </ClCompile>
+    <ClCompile Include="MeshOptimizer\vcacheoptimizer.cpp">
+      <Filter>MeshOptimizer</Filter>
+    </ClCompile>
+    <ClCompile Include="MeshOptimizer\vertexcodec.cpp">
+      <Filter>MeshOptimizer</Filter>
+    </ClCompile>
+    <ClCompile Include="MeshOptimizer\vertexfilter.cpp">
+      <Filter>MeshOptimizer</Filter>
+    </ClCompile>
+    <ClCompile Include="MeshOptimizer\vfetchoptimizer.cpp">
+      <Filter>MeshOptimizer</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
@@ -60,6 +108,9 @@
     </Filter>
     <Filter Include="GPUDriven">
       <UniqueIdentifier>{4dbdecf1-13d2-4f16-b1d8-e688db856ab8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="MeshOptimizer">
+      <UniqueIdentifier>{f8da113d-85ae-4614-800a-21aa0fe71cb4}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -111,6 +162,9 @@
     </ClInclude>
     <ClInclude Include="GPUDriven\CommandBucketer.h">
       <Filter>GPUDriven</Filter>
+    </ClInclude>
+    <ClInclude Include="MeshOptimizer\meshoptimizer.h">
+      <Filter>MeshOptimizer</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -23,6 +23,7 @@
 #include "GraphicsCommon.h"
 #include "../Core/Utility.h"
 #include "../Core/Math/Common.h"
+#include "MeshOptimizer/MeshOptimizer.h"
 
 #include <fstream>
 #include <map>
@@ -94,22 +95,142 @@ void Renderer::CompileMesh(
 
     for (auto& iter : renderMeshes)
     {
-        size_t numDraws = iter.second.size();
-        Mesh* mesh = (Mesh*)malloc(sizeof(Mesh) + sizeof(Mesh::Draw) * (numDraws - 1));
-        size_t vbSize = 0;
-        size_t vbDepthSize = 0;
-        size_t ibSize = 0;
+		// 预计算：每个 primitive 的 meshlets 与重排后的 IB
+		struct MeshletRange { uint32_t startIndex; uint32_t indexCount; }; // 局部（相对该 primitive 重排后 IB）的范围
+		struct PreMeshletInfo
+		{
+			bool index32 = false;
+			std::vector<uint8_t> newIB; // 重排后的 IB（与原大小相同）
+			std::vector<MeshletRange> ranges; // 每个 meshlet 的 index 子区间
+			uint32_t indexCount = 0; // 总 index 数
+			uint32_t vertexCount = 0; // 顶点数
+			uint16_t vertexStride = 0;
+			Utility::ByteArray VB;      
+			Utility::ByteArray DepthVB;
+		};
 
-        // Compute local space bounding sphere for all submeshes
-        BoundingSphere collectiveSphere(kZero);
+		std::vector<PreMeshletInfo> preInfo;
+		preInfo.reserve(iter.second.size());
 
-        for (auto& draw : iter.second)
+		size_t vbSize = 0;
+		size_t vbDepthSize = 0;
+		size_t ibSize = 0;
+		size_t totalDrawsAfterSplit = 0;
+
+		// Compute local space bounding sphere for all submeshes
+		BoundingSphere collectiveSphere(kZero);
+
+		const size_t max_vertices = 64;
+		const size_t max_triangles = 126;
+		const float cone_weight = 0.0f;
+
+        for (Primitive* draw : iter.second)
         {
+            PreMeshletInfo info{};
+            info.index32 = (draw->index32 != 0);
+            info.indexCount = draw->primCount;
+            info.vertexStride = draw->vertexStride;
+            info.vertexCount = static_cast<uint32_t>(draw->VB->size() / draw->vertexStride);
+            info.VB = draw->VB;
+            info.DepthVB = draw->DepthVB;
+
+            // 准备 positions 指针与索引（构建时使用 32-bit）
+            const float* positions = reinterpret_cast<const float*>(draw->VB->data());
+            std::vector<uint32_t> indices32;
+            indices32.resize(info.indexCount);
+
+            if (info.index32)
+            {
+                const uint32_t* src = reinterpret_cast<const uint32_t*>(draw->IB->data());
+                std::memcpy(indices32.data(), src, info.indexCount * sizeof(uint32_t));
+            }
+            else
+            {
+                const uint16_t* src = reinterpret_cast<const uint16_t*>(draw->IB->data());
+                for (uint32_t i = 0; i < info.indexCount; ++i)
+                    indices32[i] = uint32_t(src[i]);
+            }
+
+            // 计算 meshlet 上限并分配临时输出
+            size_t max_meshlets = meshopt_buildMeshletsBound(indices32.size(), max_vertices, max_triangles);
+            std::vector<meshopt_Meshlet> meshlets(max_meshlets);
+            std::vector<unsigned int> meshlet_vertices(indices32.size());
+            std::vector<unsigned char> meshlet_triangles(indices32.size());
+
+            // 构建 meshlets
+            size_t meshlet_count = meshopt_buildMeshlets(
+                meshlets.data(),
+                meshlet_vertices.data(),
+                meshlet_triangles.data(),
+                indices32.data(),
+                indices32.size(),
+                positions,
+                info.vertexCount,
+                info.vertexStride,
+                max_vertices,
+                max_triangles,
+                cone_weight);
+
+            // 组装重排后的 IB（保持原位宽）
+            info.newIB.resize(draw->IB->size());
+            uint32_t localIndexCursor = 0;
+
+            for (size_t m = 0; m < meshlet_count; ++m)
+            {
+                const meshopt_Meshlet& ml = meshlets[m];
+                const uint32_t triCount = ml.triangle_count;
+
+                MeshletRange r{};
+                r.startIndex = localIndexCursor;
+                r.indexCount = triCount * 3;
+
+                for (uint32_t t = 0; t < triCount; ++t)
+                {
+                    const unsigned char ia = meshlet_triangles[ml.triangle_offset + t * 3 + 0];
+                    const unsigned char ib = meshlet_triangles[ml.triangle_offset + t * 3 + 1];
+                    const unsigned char ic = meshlet_triangles[ml.triangle_offset + t * 3 + 2];
+
+                    const uint32_t va = meshlet_vertices[ml.vertex_offset + ia];
+                    const uint32_t vb = meshlet_vertices[ml.vertex_offset + ib];
+                    const uint32_t vc = meshlet_vertices[ml.vertex_offset + ic];
+
+                    if (info.index32)
+                    {
+                        uint32_t* dst32 = reinterpret_cast<uint32_t*>(info.newIB.data());
+                        dst32[localIndexCursor + 0] = va;
+                        dst32[localIndexCursor + 1] = vb;
+                        dst32[localIndexCursor + 2] = vc;
+                    }
+                    else
+                    {
+                        uint16_t* dst16 = reinterpret_cast<uint16_t*>(info.newIB.data());
+                        dst16[localIndexCursor + 0] = static_cast<uint16_t>(va);
+                        dst16[localIndexCursor + 1] = static_cast<uint16_t>(vb);
+                        dst16[localIndexCursor + 2] = static_cast<uint16_t>(vc);
+                    }
+
+                    localIndexCursor += 3;
+                }
+
+                info.ranges.push_back(r);
+            }
+
+            // 断言 index 数量一致
+            ASSERT(localIndexCursor == info.indexCount);
+
+            // 汇总尺寸/包围体/拆分后 draw 数
             vbSize += draw->VB->size();
             vbDepthSize += draw->DepthVB->size();
             ibSize += draw->IB->size();
             collectiveSphere = collectiveSphere.Union(draw->m_BoundsLS);
+            totalDrawsAfterSplit += info.ranges.size();
+
+            preInfo.push_back(std::move(info));
         }
+
+        // 分配 Mesh（使用 meshlet 粒度的 draw 数）
+        size_t numDraws = totalDrawsAfterSplit;
+        Mesh* mesh = (Mesh*)malloc(sizeof(Mesh) + sizeof(Mesh::Draw) * (numDraws - 1));
 
         mesh->bounds[0] = collectiveSphere.GetCenter().GetX();
         mesh->bounds[1] = collectiveSphere.GetCenter().GetY();
@@ -140,27 +261,41 @@ void Renderer::CompileMesh(
 
         mesh->numDraws = (uint16_t)numDraws;
 
+        // 第二遍：拷贝数据 + 填充 Draw（按 meshlet）
         uint32_t drawIdx = 0;
         uint32_t curVertByteOffset = 0;
         uint32_t curVertOffset = 0;
         uint32_t curIndexByteOffset = 0;
         uint32_t curIndexOffset = 0;
         uint32_t curDepthVertByteOffset = 0;
-        for (auto& draw : iter.second)
-        {
-            Mesh::Draw& d = mesh->draw[drawIdx++];
-            d.primCount = draw->primCount;
-            d.baseVertex = curVertOffset;
-            d.startIndex = curIndexOffset;
-            std::memcpy(uploadMem + curVBOffset + curVertByteOffset, draw->VB->data(), draw->VB->size());
-            curVertByteOffset += (uint32_t)draw->VB->size();
-            curVertOffset += (uint32_t)draw->VB->size() / draw->vertexStride;
-            std::memcpy(uploadMem + curDepthVBOffset + curDepthVertByteOffset, draw->DepthVB->data(), draw->DepthVB->size());
-            curDepthVertByteOffset += (uint32_t)draw->DepthVB->size();
-            std::memcpy(uploadMem + curIBOffset + curIndexByteOffset, draw->IB->data(), draw->IB->size());
-            curIndexByteOffset += (uint32_t)draw->IB->size();
-            curIndexOffset += (uint32_t)draw->IB->size() >> (draw->index32 + 1);
-        }
+
+		for (size_t iPrim = 0; iPrim < preInfo.size(); ++iPrim)
+		{
+			const PreMeshletInfo& info = preInfo[iPrim];
+			//const Primitive* srcPrim = iter.second[iPrim];
+
+			// 填充该 primitive 的所有 meshlet Draw
+			for (const MeshletRange& r : info.ranges)
+			{
+				Mesh::Draw& d = mesh->draw[drawIdx++];
+				d.primCount = r.indexCount;              // index 数
+				d.baseVertex = curVertOffset;            // 该 primitive 的顶点基址
+				d.startIndex = curIndexOffset + r.startIndex; // 相对整个 Mesh 的 IB 起点
+			}
+
+			// 拷贝 VB / DepthVB
+			std::memcpy(uploadMem + curVBOffset + curVertByteOffset, info.VB->data(), info.VB->size());
+			curVertByteOffset += (uint32_t)info.VB->size();
+			curVertOffset += (uint32_t)(info.VB->size() / info.vertexStride);
+
+			std::memcpy(uploadMem + curDepthVBOffset + curDepthVertByteOffset, info.DepthVB->data(), info.DepthVB->size());
+            curDepthVertByteOffset += (uint32_t)info.DepthVB->size();
+
+			// 拷贝 IB（使用 meshlet 重排后的 newIB）
+			std::memcpy(uploadMem + curIBOffset + curIndexByteOffset, info.newIB.data(), info.newIB.size());
+			curIndexByteOffset += (uint32_t)info.newIB.size();
+			curIndexOffset += info.indexCount;
+		}
 
         curVBOffset += (uint32_t)vbSize;
         curDepthVBOffset += (uint32_t)vbDepthSize;
