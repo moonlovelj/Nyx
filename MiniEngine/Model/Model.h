@@ -71,7 +71,14 @@ struct Mesh
     uint16_t pso;           // Index of pipeline state object
     uint16_t numJoints;     // Number of skeleton joints when skinning
     uint16_t startJoint;    // Flat offset to first joint index
-    uint16_t numDraws;      // Number of draw groups
+    uint16_t numDraws;      // Number of draw groups （包含所有 LOD 层级）
+
+	// Nanite LOD 扩展
+	uint8_t  numLODs;        // LOD 层数
+	uint8_t  _padding1[3];
+	//uint32_t lodOffsets[1];  // 每层 LOD 的 draw[] 起始索引 Actually 1 or more draws
+	uint16_t numRootMeshlets; // 根节点（最粗糙层级）数量
+	uint16_t _padding2;
 
     struct Draw
     {
@@ -79,6 +86,12 @@ struct Mesh
         uint32_t startIndex;  // Offset to first index in index buffer 
         uint32_t baseVertex;  // Offset to first vertex in vertex buffer
 		float    bounds[4];     // meshlet bounding sphere
+
+		// Nanite LOD 数据
+		float    parentError;      // 父层级简化误差（Infinity = 根节点）
+		float    parentBounds[4];  // 父层级包围球
+		float    lodError;         // 当前层级的误差（用于调试）
+        uint32_t  lodLevel;         // 当前 LOD 层级（0 = 最精细)
     };
     Draw draw[1];           // Actually 1 or more draws
 };

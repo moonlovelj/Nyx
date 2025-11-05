@@ -396,6 +396,7 @@ uint32_t ModelInstance::GetNumTotalDraws() const
         {
             const Mesh& mesh = *(const Mesh*)pMesh;
             totalDraws += mesh.numDraws;
+            pMesh += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
         }
     }
     return totalDraws;
@@ -452,6 +453,10 @@ void ModelInstance::CreateMeshIndirectCommands()
                 meshletConstants.MeshJointsIndexOffset = mesh.startJoint;
                 meshletConstants.MeshConstantsIndex = mesh.meshCBV;
                 meshletConstants.MaterialConstantsIndex = mesh.materialCBV;
+				meshletConstants.parentError = mesh.draw[j].parentError;
+				memcpy(meshletConstants.parentBounds, mesh.draw[j].parentBounds, 16);
+                meshletConstants.lodError = mesh.draw[j].lodError;
+				meshletConstants.lodLevel = mesh.draw[j].lodLevel;
 
 				// 预分桶：Depth（阴影）
 				{

@@ -63,7 +63,7 @@ void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
         MeshletConstant meshletConstant = MeshletConstants[inCommand.MeshletIndex];
         MeshConstant meshConstant = MeshConstants[meshletConstant.MeshConstantsIndex];
         float4x4 WorldMatrix = meshConstant.WorldMatrix;
-        if(IsSphereInFrustum(WorldMatrix, meshletConstant.BoundingSphere))
+        if (IsSphereInFrustum(WorldMatrix, meshletConstant.BoundingSphere) && meshletConstant.lodLevel == 0)
         {
             outputCommands.Append(inCommand);
         }

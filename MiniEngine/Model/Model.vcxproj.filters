@@ -166,6 +166,9 @@
     <ClInclude Include="MeshOptimizer\meshoptimizer.h">
       <Filter>MeshOptimizer</Filter>
     </ClInclude>
+    <ClInclude Include="NaniteLODConfig.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="Shaders\Common.hlsli">

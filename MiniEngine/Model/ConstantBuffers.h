@@ -91,4 +91,10 @@ struct MeshletConstants
 	uint32_t MeshConstantsIndex;
 	uint32_t MaterialConstantsIndex;
     uint32_t MeshJointsIndexOffset;
+
+	// Nanite LOD 数据
+	float    parentError;      // 父层级简化误差（Infinity = 根节点）
+	float    parentBounds[4];  // 父层级包围球
+	float    lodError;         // 当前层级的误差（用于调试）
+    uint32_t  lodLevel;         // 当前 LOD 层级（0 = 最精细）
 };
