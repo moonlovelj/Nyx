@@ -5,11 +5,16 @@
 #include "CommonResources.hlsli"
 
 #define threadBlockSize 128
+#define PIXEL_ERROR_THRESHOLD 0.5
 
 cbuffer CullConstants : register(b3)
 {
     uint startCommand;
     uint maxCommands;
+    
+    // 计算meshlet屏幕误差时使用的提前计算的常量
+    // (cotHalfFov * screenHeight) / 2.0;
+    float screenErrorConstant; 
 };
 
 struct IndirectCommand
@@ -23,8 +28,29 @@ struct IndirectCommand
 StructuredBuffer<IndirectCommand> inputCommands : register(t30); // SRV: Indirect commands
 AppendStructuredBuffer<IndirectCommand> outputCommands : register(u5); // UAV: Processed indirect commands
 
+float ComputeScreenError(float3 posV, float geometricError)
+{
+    return screenErrorConstant * geometricError / max(abs(posV.z), 1e-6);
+}
 
-bool IsSphereInFrustum(float4x4 WorldMatrix, float4 sphereLS)
+bool nearlyGreater(float a, float b, float rel = 1e-4, float abse = 1e-6)
+{
+    return a > b - max(rel * max(abs(a), abs(b)), abse);
+}
+
+bool nearlyLess(float a, float b, float rel = 1e-4, float abse = 1e-6)
+{
+    return a < b + max(rel * max(abs(a), abs(b)), abse);
+}
+
+float GetProjectedError(float4 sphereVS, float errorWS)
+{
+    float d2 = dot(sphereVS.xyz, sphereVS.xyz);
+    float r = errorWS;
+    return screenErrorConstant * r / sqrt(d2 - r * r);
+}
+
+bool IsSphereInFrustum(float4x4 WorldMatrix, float4 sphereLS, float4 parentBounds, float parentError, float lodError)
 {
     float3 column0 = float3(WorldMatrix._m00, WorldMatrix._m10, WorldMatrix._m20);
     float3 column1 = float3(WorldMatrix._m01, WorldMatrix._m11, WorldMatrix._m21);
@@ -33,7 +59,24 @@ bool IsSphereInFrustum(float4x4 WorldMatrix, float4 sphereLS)
     
     float4 sphereWS = float4(mul(WorldMatrix, float4(sphereLS.xyz, 1)).xyz, sphereScale * sphereLS.w);
     float4 sphereVS = float4(mul(ViewMatrix, float4(sphereWS.xyz, 1)).xyz, sphereWS.w);
+   
+    float screenError = GetProjectedError(sphereVS, lodError * sphereScale);
+    if (nearlyGreater(screenError, PIXEL_ERROR_THRESHOLD))
+    {
+        return false;
+    }
     
+    if (!isinf(parentError))
+    {
+        float4 parentSphereWS = float4(mul(WorldMatrix, float4(parentBounds.xyz, 1)).xyz, sphereScale * parentBounds.w);
+        float4 parentSphereVS = float4(mul(ViewMatrix, float4(parentSphereWS.xyz, 1)).xyz, parentSphereWS.w);
+        float parentScreenError = GetProjectedError(parentSphereVS, parentError * sphereScale);
+        if (nearlyLess(parentScreenError, PIXEL_ERROR_THRESHOLD))
+        {
+            return false;
+        }
+    }
+
     // Sphere: xyz = center, w = radius
     [unroll]
     for (int i = 0; i < 6; ++i)
@@ -63,7 +106,8 @@ void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
         MeshletConstant meshletConstant = MeshletConstants[inCommand.MeshletIndex];
         MeshConstant meshConstant = MeshConstants[meshletConstant.MeshConstantsIndex];
         float4x4 WorldMatrix = meshConstant.WorldMatrix;
-        if (IsSphereInFrustum(WorldMatrix, meshletConstant.BoundingSphere) && meshletConstant.lodLevel == 0)
+        if (IsSphereInFrustum(WorldMatrix, meshletConstant.BoundingSphere, meshletConstant.parentBounds,
+            meshletConstant.parentError, meshletConstant.lodError))
         {
             outputCommands.Append(inCommand);
         }

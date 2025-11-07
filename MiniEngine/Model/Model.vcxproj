@@ -32,13 +32,13 @@
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <EnableASAN>true</EnableASAN>
+    <EnableASAN>false</EnableASAN>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">
-    <EnableASAN>true</EnableASAN>
+    <EnableASAN>false</EnableASAN>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <EnableASAN>true</EnableASAN>
+    <EnableASAN>false</EnableASAN>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings" />
@@ -152,6 +152,7 @@
     <None Include="Shaders\LightingCommon.hlsli" />
     <None Include="Shaders\MaterialCommon.hlsli" />
     <None Include="Shaders\PCSS.hlsli" />
+    <None Include="Shaders\ViewMode.hlsli" />
     <None Include="Shaders\VSToPSCommon.hlsli" />
   </ItemGroup>
   <ItemGroup>

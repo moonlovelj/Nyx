@@ -36,6 +36,11 @@ cbuffer CB2 : register(b2)
     uint MeshletIndex;
 }
 
+cbuffer CB4 : register(b4)
+{
+    uint ViewMode;
+}
+
 struct MeshletConstant
 {
     float4 BoundingSphere;

@@ -60,6 +60,7 @@ namespace Renderer
 		kCommonCBV,
 		kRootConstants,
 		kRootConstants1,
+		kViewModeConstants,
 		kGPUDrivenSRVs,
 		kCommonSRV,
 		kCommonUAVs,
@@ -75,8 +76,8 @@ namespace Renderer
     void SetIBLBias(float LODBias);
     void UpdateGlobalDescriptors(void);
     void DrawSkybox( GraphicsContext& gfxContext, const Camera& camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor );
-	void FrustrumCulling(GraphicsContext& gfxContext, const GlobalConstants& inGlobals,
-		IndirectArgsBuffer& inArgsBuffer, uint32_t startCommandOffset, uint32_t maxCommands);
+	void FrustrumCulling(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, const BaseCamera* camera,
+        const D3D12_VIEWPORT& viewport, IndirectArgsBuffer& inArgsBuffer, uint32_t startCommandOffset, uint32_t maxCommands);
 
     class MeshSorter
     {

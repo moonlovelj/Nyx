@@ -62,6 +62,9 @@ namespace Renderer
     BoolVar SeparateZPass("Renderer/Separate Z Pass", true);
     BoolVar DeferredRendering("Renderer/Deferred Rendering", true);
 	BoolVar UseGPUFrustumCull("Renderer/Use GPU Frustum Cull", true);
+    
+	const char* ViewModeLabels[] = { "Lit", "MeshletLOD", "MeshletID", "MeshletTriangle"};
+	EnumVar ViewMode("View/View Mode", 0, _countof(ViewModeLabels), ViewModeLabels);
 
     bool s_Initialized = false;
 
@@ -120,6 +123,7 @@ void Renderer::Initialize(void)
 	m_RootSig[kCommonCBV].InitAsConstantBuffer(1);
 	m_RootSig[kRootConstants].InitAsConstants(2, 4);
 	m_RootSig[kRootConstants1].InitAsConstants(3, 4);
+	m_RootSig[kViewModeConstants].InitAsConstants(4, 4);
 	m_RootSig[kGPUDrivenSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 20, 10);
     m_RootSig[kCommonSRV].InitAsBufferSRV(30);
 	m_RootSig[kCommonUAVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 10);
@@ -586,8 +590,8 @@ void Renderer::DrawSkybox( GraphicsContext& gfxContext, const Camera& Camera, co
     gfxContext.Draw(3);
 }
 
-void Renderer::FrustrumCulling(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, 
-    IndirectArgsBuffer& inArgsBuffer, uint32_t startCommandOffset, uint32_t maxCommands)
+void Renderer::FrustrumCulling(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, const BaseCamera* camera,
+    const D3D12_VIEWPORT& viewport, IndirectArgsBuffer& inArgsBuffer, uint32_t startCommandOffset, uint32_t maxCommands)
 {
     ScopedTimer _prof(L"Renderer::FrustrumCulling", gfxContext);
 
@@ -623,7 +627,16 @@ void Renderer::FrustrumCulling(GraphicsContext& gfxContext, const GlobalConstant
 	context.SetDescriptorTable(kGPUDrivenSRVs, m_GPUDrivenBuffers);
     context.SetBufferSRV(kCommonSRV, inArgsBuffer);
 	context.SetDescriptorTable(kCommonUAVs, m_CommonUAVs);
-	context.SetConstants(kRootConstants1, startCommandOffset, maxCommands);
+
+    float screenErrorConstant = 1.f;
+	auto* cameraProj = static_cast<const Camera*>(camera);
+    if (cameraProj)
+    {
+        // (cotHalfFov * screenHeight) / 2.0;
+		float cotHalfFov = 1.0f / std::tanf(0.5f * cameraProj->GetFOV());
+        screenErrorConstant = cotHalfFov * viewport.Height * 0.5f;
+    }
+	context.SetConstants(kRootConstants1, startCommandOffset, maxCommands, screenErrorConstant);
 
 	const uint32_t groupCountX = Math::DivideByMultiple(maxCommands, 128);
 	context.Dispatch(groupCountX, 1, 1);
@@ -777,6 +790,7 @@ void MeshSorter::RenderMeshes(
 
 	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &globals);
     context.SetDescriptorTable(kGPUDrivenSRVs, m_GPUDrivenBuffers);
+    context.SetConstants(kViewModeConstants, (uint32_t)ViewMode);
 
 	if (m_BatchType == kShadows)
 	{
@@ -933,7 +947,7 @@ void MeshSorter::RenderMeshes(
 								if (UseGPUFrustumCull)
 								{
                                     // TODO 重构，裁剪应该应该在设置管线状态前进行
-									FrustrumCulling(context, globals, args, (uint32_t)run.startCmd, run.count);
+									FrustrumCulling(context, globals, m_Camera, m_Viewport, args, (uint32_t)run.startCmd, run.count);
 									context.SetPipelineState(sm_PSOs[run.psoIdx]);
 									GPUDriven::DrawIndirect(context, m_IndirectArgsBuffer, run.count, 0, &m_IndirectArgsBuffer.GetCounterBuffer(), 0);
 								}
@@ -956,7 +970,7 @@ void MeshSorter::RenderMeshes(
                             {
 								if (UseGPUFrustumCull)
 								{
-									FrustrumCulling(context, globals, args, (uint32_t)run.startCmd, run.count);
+									FrustrumCulling(context, globals, m_Camera, m_Viewport, args, (uint32_t)run.startCmd, run.count);
 									context.SetPipelineState(sm_PSOs[run.psoIdx]);
 									GPUDriven::DrawIndirect(context, m_IndirectArgsBuffer, run.count, 0, &m_IndirectArgsBuffer.GetCounterBuffer(), 0);
 								}
@@ -983,7 +997,7 @@ void MeshSorter::RenderMeshes(
 								const uint16_t psoToUse = run.psoIdx;
 								if (UseGPUFrustumCull)
 								{
-									FrustrumCulling(context, globals, args, (uint32_t)run.startCmd, run.count);
+									FrustrumCulling(context, globals, m_Camera, m_Viewport, args, (uint32_t)run.startCmd, run.count);
 									context.SetPipelineState(sm_PSOs[psoToUse]);
 									GPUDriven::DrawIndirect(context, m_IndirectArgsBuffer, run.count, 0, &m_IndirectArgsBuffer.GetCounterBuffer(), 0);
 								}
@@ -1001,7 +1015,7 @@ void MeshSorter::RenderMeshes(
                             const uint16_t psoToUse = run.psoIdx + 1;
                             if (UseGPUFrustumCull)
                             {
-								FrustrumCulling(context, globals, args, (uint32_t)run.startCmd, run.count);
+								FrustrumCulling(context, globals, m_Camera, m_Viewport, args, (uint32_t)run.startCmd, run.count);
                                 context.SetPipelineState(sm_PSOs[psoToUse]);
                                 GPUDriven::DrawIndirect(context, m_IndirectArgsBuffer, run.count, 0, &m_IndirectArgsBuffer.GetCounterBuffer(), 0);
                             }

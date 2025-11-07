@@ -1,5 +1,6 @@
-#include "Common.hlsli"
+﻿#include "Common.hlsli"
 #include "MaterialCommon.hlsli"
+#include "ViewMode.hlsli"
 
 struct MRT
 {
@@ -20,7 +21,17 @@ MRT main(VSOutput vsOutput)
     mrt.GBufferA = float4(MatProps.Normal, 1.0);
     mrt.GBufferB = MatProps.BaseColor;
     mrt.GBufferC = float4(MatProps.Metallic, MatProps.Roughness, MatProps.Occlusion, 0.f);
-    mrt.GBufferD = 0;
+    mrt.GBufferD.a = ViewMode;
+    
+    if (ViewMode == VIEW_MODE_SHOW_MESHLET_LOD)
+    {
+        MeshletConstant meshletConstant = MeshletConstants[MeshletIndex];
+        mrt.GBufferD.rgb = ColorFromLOD(meshletConstant.lodLevel);
+    }
+    else
+    {
+        mrt.GBufferD.rgb = 0;
+    }
 
     return mrt;
 }

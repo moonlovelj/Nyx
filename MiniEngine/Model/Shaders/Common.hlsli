@@ -27,6 +27,7 @@
     "CBV(b1), " \
     "RootConstants(b2, num32BitConstants = 4), " \
     "RootConstants(b3, num32BitConstants = 4), " \
+    "RootConstants(b4, num32BitConstants = 4), " \
     "DescriptorTable(SRV(t20, numDescriptors = 10))," \
     "SRV(t30), " \
     "DescriptorTable(UAV(u0, numDescriptors = 10))," \
@@ -80,5 +81,10 @@ uint HashTriangleID(uint vertexID)
 }
 
 #endif // ENABLE_TRIANGLE_ID
+
+#define VIEW_MODE_LIT                0
+#define VIEW_MODE_SHOW_MESHLET_LOD   1
+#define VIEW_MODE_SHOW_MESHLET_ID    2
+#define VIEW_MODE_SHOW_TRIANGLE      3
 
 #endif // __COMMON_HLSLI__

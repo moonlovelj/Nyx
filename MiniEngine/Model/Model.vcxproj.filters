@@ -202,6 +202,9 @@
     <None Include="Shaders\CommonResources.hlsli">
       <Filter>Shaders</Filter>
     </None>
+    <None Include="Shaders\ViewMode.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Shaders\DefaultVS.hlsl">
