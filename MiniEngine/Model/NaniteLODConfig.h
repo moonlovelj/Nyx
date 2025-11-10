@@ -19,7 +19,7 @@ namespace Renderer
 		float meshletBackfaceCullingConeWeight = 0.0f;
 
 		// ========== 分组参数 ==========
-		size_t groupSize = 4;  // 每组合并的 meshlet 数量
+		size_t groupSize = 16;  // 每组合并的 meshlet 数量
 
 		// ========== 简化参数 ==========
 		float simplificationDecimateFactor = 2.0f;  // 每层简化到多少倍（2.0 = 减半）
@@ -28,7 +28,7 @@ namespace Renderer
 
 		// ========== 简化率要求 ==========
 		// 单组简化率要求（> 此值则认为简化失败）
-		float simplificationFactorRequirement = 0.97f;  // 1.1 = 禁用检查，0.97 = 至少简化 3%
+		float simplificationFactorRequirement = 1.1f;  // 1.1 = 禁用检查，0.97 = 至少简化 3%
 
 		// 层间简化率要求（< 此值则停止整个流程）
 		float simplificationFactorRequirementBetweenLevels = 0.97f;  // 至少简化 3%
@@ -37,10 +37,10 @@ namespace Renderer
 		struct DynamicSimplificationRates
 		{
 			size_t largeThreshold = 10000;   // 大网格阈值（三角形数）
-			float largeRate = 0.3f;          // 大网格目标简化率
+			float largeRate = 0.5f;          // 大网格目标简化率
 
 			size_t mediumThreshold = 1000;   // 中等网格阈值
-			float mediumRate = 0.4f;         // 中等网格目标简化率
+			float mediumRate = 0.5f;         // 中等网格目标简化率
 
 			size_t smallThreshold = 100;     // 小网格阈值
 			float smallRate = 0.5f;          // 小网格目标简化率
@@ -66,7 +66,7 @@ namespace Renderer
 
 		// ========== 调试参数 ==========
 		bool enableDetailedLogging = true;   // 启用详细日志
-		bool enablePerGroupLogging = false;  // 启用每组的详细日志
+		bool enablePerGroupLogging = true;   // 启用每组的详细日志
 	};
 
 	// 预设配置

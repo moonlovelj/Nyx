@@ -12,7 +12,7 @@ struct MRT
 };
 
 [RootSignature(Renderer_RootSig)]
-MRT main(VSOutput vsOutput)
+MRT main(VSOutput vsOutput, uint primID : SV_PrimitiveID)
 {
     MaterialProperties MatProps = GetMaterialProperties(vsOutput);
 
@@ -26,7 +26,15 @@ MRT main(VSOutput vsOutput)
     if (ViewMode == VIEW_MODE_SHOW_MESHLET_LOD)
     {
         MeshletConstant meshletConstant = MeshletConstants[MeshletIndex];
-        mrt.GBufferD.rgb = ColorFromLOD(meshletConstant.lodLevel);
+        mrt.GBufferD.rgb = Uint32ToColorR16G16B16(meshletConstant.lodLevel);
+    }
+    else if (ViewMode == VIEW_MODE_SHOW_MESHLET_ID)
+    {
+        mrt.GBufferD.rgb = Uint32ToColorR16G16B16(MeshletIndex);
+    }
+    else if (ViewMode == VIEW_MODE_SHOW_TRIANGLE)
+    {
+        mrt.GBufferD.rgb = Uint32ToColorR16G16B16(primID);
     }
     else
     {

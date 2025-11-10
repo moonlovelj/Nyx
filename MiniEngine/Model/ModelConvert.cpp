@@ -24,6 +24,7 @@
 #include "../Core/Utility.h"
 #include "../Core/Math/Common.h"
 #include "MeshOptimizer/MeshOptimizer.h"
+#include "metis.h"
 
 #include <fstream>
 #include <map>
@@ -70,6 +71,230 @@ namespace Renderer
 		Utility::ByteArray VB;
 		Utility::ByteArray DepthVB;
 	};
+
+	// 无向边 key
+	static inline uint64_t MakeEdgeKey(uint32_t a, uint32_t b)
+	{
+		uint32_t lo = std::min(a, b);
+		uint32_t hi = std::max(a, b);
+		return (uint64_t(hi) << 32) | uint64_t(lo);
+	}
+
+	// 从 meshlet 中提取边界边
+	static std::unordered_set<uint64_t> ExtractBoundaryEdges(const MeshletWIP* m, bool is32BitIndex)
+	{
+		std::unordered_map<uint64_t, uint32_t> edgeCount;
+		edgeCount.reserve(m->indexCount * 3 / 2);
+
+		auto addEdge = [&](uint32_t v0, uint32_t v1)
+			{
+				uint64_t k = MakeEdgeKey(v0, v1);
+				edgeCount[k] += 1;
+			};
+
+		if (is32BitIndex)
+		{
+			const uint32_t* idx = reinterpret_cast<const uint32_t*>(m->indexBuffer.data());
+			for (uint32_t i = 0; i < m->indexCount; i += 3)
+			{
+				uint32_t a = idx[i + 0];
+				uint32_t b = idx[i + 1];
+				uint32_t c = idx[i + 2];
+				addEdge(a, b); addEdge(b, c); addEdge(c, a);
+			}
+		}
+		else
+		{
+			const uint16_t* idx = reinterpret_cast<const uint16_t*>(m->indexBuffer.data());
+			for (uint32_t i = 0; i < m->indexCount; i += 3)
+			{
+				uint32_t a = idx[i + 0];
+				uint32_t b = idx[i + 1];
+				uint32_t c = idx[i + 2];
+				addEdge(a, b); addEdge(b, c); addEdge(c, a);
+			}
+		}
+
+		std::unordered_set<uint64_t> boundary;
+		boundary.reserve(edgeCount.size());
+		for (auto& kv : edgeCount)
+			if (kv.second == 1) boundary.insert(kv.first);
+		return boundary;
+	}
+
+	// METIS 分区：返回每组 meshlets（组内大小≤groupSize；失败则顺序分组）
+	static std::vector<std::vector<MeshletWIP*>> PartitionMeshletsByMetis(
+		const std::vector<MeshletWIP*>& levelMeshlets,
+		bool is32BitIndex,
+		size_t groupSize,
+		bool enableLogging)
+	{
+		std::vector<std::vector<MeshletWIP*>> groups;
+		const size_t N = levelMeshlets.size();
+		if (N == 0) return groups;
+		if (groupSize == 0) groupSize = 1;
+		if (N <= groupSize)
+		{
+			groups.push_back(levelMeshlets);
+			return groups;
+		}
+
+		// 每个 meshlet 的边界边
+		std::vector<std::unordered_set<uint64_t>> boundaries(N);
+		for (size_t i = 0; i < N; ++i)
+			boundaries[i] = ExtractBoundaryEdges(levelMeshlets[i], is32BitIndex);
+
+		// 构建邻接（共享边界边 => 邻接，权重=共享边界边数量 ----
+		std::vector<std::unordered_map<uint32_t, uint32_t>> adjacencyWeighted(N);
+
+		// 统计所有 boundary 边数量，便于预留
+		size_t totalBoundaryEdges = 0;
+		for (const auto& bset : boundaries)
+			totalBoundaryEdges += bset.size();
+
+		// 反向索引：edgeKey -> 拥有该边的 meshlet 列表
+		std::unordered_map<uint64_t, std::vector<uint32_t>> edgeToMeshlets;
+		edgeToMeshlets.reserve(totalBoundaryEdges * 2); // 经验系数，减少 rehash
+
+		for (uint32_t mi = 0; mi < (uint32_t)N; ++mi)
+		{
+			for (uint64_t edgeKey : boundaries[mi])
+			{
+				auto& list = edgeToMeshlets[edgeKey];
+				list.push_back(mi);
+			}
+		}
+
+		// 根据每条共享边的参与者两两配对增加权重
+		for (auto& kv : edgeToMeshlets)
+		{
+			const std::vector<uint32_t>& owners = kv.second;
+			for (size_t a = 0; a < owners.size(); ++a)
+			{
+				uint32_t i = owners[a];
+				for (size_t b = a + 1; b < owners.size(); ++b)
+				{
+					uint32_t j = owners[b];
+					adjacencyWeighted[i][j] += 1;
+					adjacencyWeighted[j][i] += 1;
+				}
+			}
+		}
+
+		size_t totalLinks = 0;
+		for (auto& mp : adjacencyWeighted) totalLinks += mp.size();
+		if (totalLinks == 0)
+		{
+			// 无邻接，顺序分组
+			for (size_t i = 0; i < N; i += groupSize)
+			{
+				std::vector<MeshletWIP*> g;
+				for (size_t j = i; j < std::min(i + groupSize, N); ++j)
+					g.push_back(levelMeshlets[j]);
+				groups.push_back(std::move(g));
+			}
+			if (enableLogging)
+				Utility::Printf("    [METIS] No adjacency, fallback sequential groups=%zu\n", groups.size());
+			return groups;
+		}
+
+		// 构建 METIS CSR 结构
+		// xadj: size N+1, adjncy: size 2*E (双向), adjwgt
+		std::vector<idx_t> xadj(N + 1, 0);
+		std::vector<idx_t> adjncy;
+		std::vector<idx_t> adjwgt;
+
+		// 统计总边数（双向）
+		size_t edgeEntries = 0;
+		for (size_t i = 0; i < N; ++i)
+			edgeEntries += adjacencyWeighted[i].size();
+
+		adjncy.reserve(edgeEntries);
+		adjwgt.reserve(edgeEntries);
+
+		for (size_t i = 0; i < N; ++i)
+		{
+			xadj[i] = (idx_t)adjncy.size();
+			for (auto& kv : adjacencyWeighted[i])
+			{
+				adjncy.push_back((idx_t)kv.first);
+				adjwgt.push_back((idx_t)kv.second); // 权重=共享边界边数量
+			}
+		}
+		xadj[N] = (idx_t)adjncy.size();
+
+		// 节点权重：三角形数（提高均衡性）
+		std::vector<idx_t> vwgt(N, 0);
+		for (size_t i = 0; i < N; ++i)
+			vwgt[i] = (idx_t)(levelMeshlets[i]->indexCount / 3);
+
+		idx_t ncon = 1;
+		idx_t nvtxs = (idx_t)N;
+		idx_t nparts = (idx_t)((N + groupSize - 1) / groupSize); // 目标划分簇数
+
+		std::vector<idx_t> part(N, 0);
+		idx_t objval = 0;
+
+		int options[METIS_NOPTIONS];
+		METIS_SetDefaultOptions(options);
+		options[METIS_OPTION_UFACTOR] = 200;
+
+		int status = METIS_PartGraphKway(
+			&nvtxs, &ncon,
+			xadj.data(), adjncy.data(),
+			vwgt.data(), nullptr, adjwgt.data(),
+			&nparts,
+			nullptr, nullptr,
+			options,
+			&objval, part.data());
+
+		if (status != METIS_OK)
+		{
+			if (enableLogging)
+				Utility::Printf("    [METIS] Partition failed (status=%d). Fallback sequential.\n", status);
+			for (size_t i = 0; i < N; i += groupSize)
+			{
+				std::vector<MeshletWIP*> g;
+				for (size_t j = i; j < std::min(i + groupSize, N); ++j)
+					g.push_back(levelMeshlets[j]);
+				groups.push_back(std::move(g));
+			}
+			return groups;
+		}
+
+		// 根据 part 汇聚初始簇
+		std::unordered_map<idx_t, std::vector<MeshletWIP*>> buckets;
+		buckets.reserve(nparts);
+		for (size_t i = 0; i < N; ++i)
+			buckets[part[i]].push_back(levelMeshlets[i]);
+
+		// 处理超大簇：拆分为 ≤ groupSize 块（简单顺序或 BFS）
+		for (auto& kv : buckets)
+		{
+			auto& vec = kv.second;
+			if (vec.size() <= groupSize)
+			{
+				groups.push_back(vec);
+			}
+			else
+			{
+				// 简单顺序 chunk 拆分（//TODO: 换为局部再次调用 METIS）
+				for (size_t i = 0; i < vec.size(); i += groupSize)
+				{
+					std::vector<MeshletWIP*> g;
+					for (size_t j = i; j < std::min(i + groupSize, vec.size()); ++j)
+						g.push_back(vec[j]);
+					groups.push_back(std::move(g));
+				}
+			}
+		}
+
+		if (enableLogging)
+			Utility::Printf("    [METIS] Partition result: %zu groups (target parts=%d, obj=%d)\n",
+				groups.size(), (int)nparts, (int)objval);
+
+		return groups;
+	}
 
 	// 合并包围球（Ritter's algorithm）
 	static void MergeBoundingSpheres(float* result, const float* a, const float* b)
@@ -354,20 +579,19 @@ namespace Renderer
 
 			std::vector<MeshletWIP*> nextLevel;
 
-			// 临时分组
-			for (size_t i = 0; i < currentLevel.size(); i += cfg.groupSize)
+			std::vector<std::vector<MeshletWIP*>> partitionedGroups =
+				PartitionMeshletsByMetis(currentLevel, outInfo.index32, cfg.groupSize, cfg.enablePerGroupLogging);
+
+			for (size_t groupIndex = 0; groupIndex < partitionedGroups.size(); ++groupIndex)
 			{
-				std::vector<MeshletWIP*> group;
-				for (size_t j = i; j < std::min(i + cfg.groupSize, currentLevel.size()); ++j)
-					group.push_back(currentLevel[j]);
+				const std::vector<MeshletWIP*>& group = partitionedGroups[groupIndex];
 
-				size_t groupIndex = i / cfg.groupSize;
-
-				// 1. 合并
+				// 合并
 				std::vector<uint32_t> megaMeshlet = MergeMeshlets(group, outInfo.index32);
 				size_t currentTriCount = megaMeshlet.size() / 3;
 
-				// 2. 停止条件 3：已经足够小
+				// 停止条件
+				// 已经足够小
 				if (currentTriCount <= cfg.minRootTriangles)
 				{
 					if (cfg.enablePerGroupLogging)
@@ -384,11 +608,11 @@ namespace Renderer
 					continue;
 				}
 
-				// 3. 动态调整目标简化率
+				// 动态调整目标简化率
 				float dynamicRate = CalculateDynamicSimplificationRate(currentTriCount, cfg);
 				size_t targetIndexCount = size_t(megaMeshlet.size() * dynamicRate);
 
-				// 4. 尝试正常简化
+				// 尝试正常简化
 				std::vector<uint32_t> simplifiedIndices(megaMeshlet.size());
 				float resultError = 0.0f;
 
@@ -399,6 +623,9 @@ namespace Renderer
 					targetIndexCount, targetError,
 					meshopt_SimplifyLockBorder,
 					&resultError);
+
+				float errorScale = meshopt_simplifyScale(positions, outInfo.vertexCount, outInfo.vertexStride);
+				resultError *= errorScale;
 
 				simplifiedIndices.resize(resultCount);
 
@@ -420,7 +647,7 @@ namespace Renderer
 
 				float simplificationRate = float(resultCount) / megaMeshlet.size();
 
-				// 5. 检查简化率（单组要求）
+				// 检查简化率（单组要求）
 				if (simplificationRate > cfg.simplificationFactorRequirement)
 				{
 					if (cfg.enablePerGroupLogging)
@@ -478,7 +705,7 @@ namespace Renderer
 					}
 				}
 
-				// 6. 计算误差和包围体
+				// 计算误差和包围体
 				float groupMaxError = 0.0f;
 				float groupBounds[4] = { 0, 0, 0, 0 };
 
@@ -497,43 +724,23 @@ namespace Renderer
 					}
 				}
 
-				float lodError = std::max(resultError, 0.000001f);
+				float lodError = std::max(resultError, 1e-9f);
 				float totalError = lodError + groupMaxError;
 
-				// 7. 停止条件 4：屏幕空间误差预算
-				//float estimatedScreenError = EstimateScreenSpaceError(totalError, cfg);
-
-				//if (estimatedScreenError < cfg.maxScreenErrorPixels)
-				//{
-				//	if (cfg.enablePerGroupLogging)
-				//	{
-				//		Utility::Printf("    Group %zu: Screen error %.2fpx < %.2fpx, marking as root\n",
-				//			groupIndex, estimatedScreenError,
-				//			cfg.maxScreenErrorPixels);
-				//	}
-
-				//	for (auto* child : group)
-				//	{
-				//		child->parentError = std::numeric_limits<float>::infinity();
-				//		outInfo.rootMeshletIds.push_back(child->id);
-				//	}
-				//	continue;
-				//}
-
-				// 8. 拆分为新 meshlets
+				// 拆分为新 meshlets
 				auto newMeshlets = SplitIntoMeshlets(
 					simplifiedIndices, (uint32_t)lod, nextMeshletId, lodError, totalError, groupBounds,
 					positions, outInfo.vertexStride, outInfo.vertexCount,
 					outInfo.index32, cfg);
 
-				// 9. 更新子 meshlets 的 parent 信息（共享）
+				// 更新子 meshlets 的 parent 信息（共享）
 				for (auto* childMeshlet : group)
 				{
 					childMeshlet->parentError = totalError;
 					std::memcpy(childMeshlet->parentBounds, groupBounds, sizeof(groupBounds));
 				}
 
-				// 10. 添加到下一层级
+				// 添加到下一层级
 				for (auto& m : newMeshlets)
 				{
 					outInfo.allMeshlets.push_back(std::move(m));

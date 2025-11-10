@@ -105,7 +105,7 @@ void main(
                 sceneColor[DTid] = colorAccum;
             }
         }
-        else if (viewMode == VIEW_MODE_SHOW_MESHLET_LOD)
+        else
         {
             sceneColor[DTid] = float4(gBufferD[DTid].rgb, 1.0f);
         }
