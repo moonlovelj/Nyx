@@ -95,6 +95,7 @@ struct MeshletConstants
 	// Nanite LOD 数据
 	float    parentError;      // 父层级简化误差（Infinity = 根节点）
 	float    parentBounds[4];  // 父层级包围球
-	float    lodError;         // 当前层级的误差（用于调试）
+	float    maxSiblingsError;	        // 当前层级简化误差
+	float    shareSiblingsBounds[4];    // 当前层级包围球
     uint32_t  lodLevel;         // 当前 LOD 层级（0 = 最精细）
 };

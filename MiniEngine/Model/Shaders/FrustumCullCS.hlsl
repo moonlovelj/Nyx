@@ -50,17 +50,18 @@ float GetProjectedErrorPerspective(float clipW, float errorWS, float lodScalePix
     return errorWS * lodScalePixels / max(abs(clipW), 1e-6);
 }
 
-bool IsSphereInFrustum(float4x4 WorldMatrix, float4 sphereLS, float4 parentBounds, float parentError, float lodError)
+bool ShouldMeshletLodVisible(float4x4 WorldMatrix, 
+    float siblingsError, float4 siblingsBounds,
+    float parentError, float4 parentBounds)
 {
     float3 column0 = float3(WorldMatrix._m00, WorldMatrix._m10, WorldMatrix._m20);
     float3 column1 = float3(WorldMatrix._m01, WorldMatrix._m11, WorldMatrix._m21);
     float3 column2 = float3(WorldMatrix._m02, WorldMatrix._m12, WorldMatrix._m22);
     float sphereScale = max(length(column0), max(length(column1), length(column2)));
     
-    float4 sphereWS = float4(mul(WorldMatrix, float4(sphereLS.xyz, 1)).xyz, sphereScale * sphereLS.w);
+    float4 sphereWS = float4(mul(WorldMatrix, float4(siblingsBounds.xyz, 1)).xyz, sphereScale * siblingsBounds.w);
     float4 sphereVS = float4(mul(ViewMatrix, float4(sphereWS.xyz, 1)).xyz, sphereWS.w);
-    
-    float screenError = GetProjectedError(sphereVS, lodError * sphereScale);
+    float screenError = GetProjectedError(sphereVS, siblingsError * sphereScale);
     if (screenError >= PIXEL_ERROR_THRESHOLD)
     {
         return false;
@@ -76,6 +77,19 @@ bool IsSphereInFrustum(float4x4 WorldMatrix, float4 sphereLS, float4 parentBound
             return false;
         }
     }
+    
+    return true;
+}
+
+bool IsSphereInFrustum(float4x4 WorldMatrix, float4 sphereLS)
+{
+    float3 column0 = float3(WorldMatrix._m00, WorldMatrix._m10, WorldMatrix._m20);
+    float3 column1 = float3(WorldMatrix._m01, WorldMatrix._m11, WorldMatrix._m21);
+    float3 column2 = float3(WorldMatrix._m02, WorldMatrix._m12, WorldMatrix._m22);
+    float sphereScale = max(length(column0), max(length(column1), length(column2)));
+    
+    float4 sphereWS = float4(mul(WorldMatrix, float4(sphereLS.xyz, 1)).xyz, sphereScale * sphereLS.w);
+    float4 sphereVS = float4(mul(ViewMatrix, float4(sphereWS.xyz, 1)).xyz, sphereWS.w);
 
     // Sphere: xyz = center, w = radius
     [unroll]
@@ -106,9 +120,13 @@ void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
         MeshletConstant meshletConstant = MeshletConstants[inCommand.MeshletIndex];
         MeshConstant meshConstant = MeshConstants[meshletConstant.MeshConstantsIndex];
         float4x4 WorldMatrix = meshConstant.WorldMatrix;
-        if (IsSphereInFrustum(WorldMatrix, meshletConstant.BoundingSphere, meshletConstant.parentBounds,
-            meshletConstant.parentError, meshletConstant.lodError))
-         //if (meshletConstant.lodLevel == 0)
+        
+        float maxSiblingsError; // 当前层级简化误差
+        float4 shareSiblingsBounds; // 当前层级包围球
+        if (IsSphereInFrustum(WorldMatrix, meshletConstant.BoundingSphere) &&
+            ShouldMeshletLodVisible(WorldMatrix,
+            meshletConstant.maxSiblingsError, meshletConstant.shareSiblingsBounds,
+            meshletConstant.parentError, meshletConstant.parentBounds))
         {
             outputCommands.Append(inCommand);
         }

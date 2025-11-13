@@ -19,11 +19,11 @@ namespace Renderer
 		float meshletBackfaceCullingConeWeight = 0.0f;
 
 		// ========== 分组参数 ==========
-		size_t groupSize = 16;  // 每组合并的 meshlet 数量
+		size_t groupSize = 24;  // 每组合并的 meshlet 数量
 
 		// ========== 简化参数 ==========
 		float simplificationDecimateFactor = 2.0f;  // 每层简化到多少倍（2.0 = 减半）
-		float simplificationTargetError = 0.05f;    // meshoptimizer 的 target_error
+		float simplificationTargetError = 1.1f;    // meshoptimizer 的 target_error
 		float simplificationTargetErrorMultiplier = 1.1f;  // 每层误差增长倍数
 
 		// ========== 简化率要求 ==========
@@ -31,7 +31,7 @@ namespace Renderer
 		float simplificationFactorRequirement = 1.1f;  // 1.1 = 禁用检查，0.97 = 至少简化 3%
 
 		// 层间简化率要求（< 此值则停止整个流程）
-		float simplificationFactorRequirementBetweenLevels = 0.97f;  // 至少简化 3%
+		float simplificationFactorRequirementBetweenLevels = 0.995f;
 
 		// ========== 动态简化率参数 ==========
 		struct DynamicSimplificationRates
@@ -45,7 +45,7 @@ namespace Renderer
 			size_t smallThreshold = 100;     // 小网格阈值
 			float smallRate = 0.5f;          // 小网格目标简化率
 
-			float tinyRate = 0.6f;           // 极小网格目标简化率
+			float tinyRate = 0.5f;		     // 极小网格目标简化率
 		};
 		DynamicSimplificationRates dynamicRates;
 
@@ -58,15 +58,9 @@ namespace Renderer
 		size_t maxLods = 20;                 // 最大 LOD 层数
 		size_t minRootTriangles = 128;        // 根节点最少三角形数
 
-		// ========== 屏幕空间误差参数 ==========
-		float maxScreenErrorPixels = 0.5f;   // 最大屏幕误差（像素）
-		float assumedDistance = 100.0f;      // 假设的观察距离
-		float assumedScreenHeight = 1080.0f; // 假设的屏幕高度
-		float assumedFOV = 1.0472f;          // 假设的 FOV（60 度 = 1.0472 弧度）
-
 		// ========== 调试参数 ==========
 		bool enableDetailedLogging = true;   // 启用详细日志
-		bool enablePerGroupLogging = true;   // 启用每组的详细日志
+		bool enablePerGroupLogging = false;   // 启用每组的详细日志
 	};
 
 	// 预设配置
@@ -89,7 +83,6 @@ namespace Renderer
 			cfg.dynamicRates.largeRate = 0.4f;
 			cfg.dynamicRates.mediumRate = 0.5f;
 			cfg.dynamicRates.smallRate = 0.6f;
-			cfg.maxScreenErrorPixels = 0.25f;
 			return cfg;
 		}
 
@@ -104,7 +97,6 @@ namespace Renderer
 			cfg.dynamicRates.largeRate = 0.2f;
 			cfg.dynamicRates.mediumRate = 0.3f;
 			cfg.dynamicRates.smallRate = 0.4f;
-			cfg.maxScreenErrorPixels = 1.0f;
 			cfg.aggressiveErrorMultiplier = 10.0f;
 			return cfg;
 		}
@@ -115,7 +107,6 @@ namespace Renderer
 			NaniteLODConfig cfg = HighQuality();
 			cfg.maxLods = 30;
 			cfg.simplificationTargetError = 0.01f;
-			cfg.maxScreenErrorPixels = 0.1f;
 			cfg.minRootTriangles = 32;
 			return cfg;
 		}

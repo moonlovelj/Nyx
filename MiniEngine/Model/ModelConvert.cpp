@@ -42,6 +42,9 @@ using namespace Graphics;
 #include <algorithm>
 #include <numeric>
 #include <deque>
+#include <future>
+#include <iostream>
+#include <thread>
 
 namespace Renderer
 {
@@ -54,11 +57,12 @@ namespace Renderer
 		uint32_t indexCount;
 		uint32_t indexSize;
 
-		float bounds[4];           // {cx, cy, cz, r}
-		float lodError;            // 当前层级的简化误差
-		float maxSiblingsError;    // 累积误差
-		float parentError;         // 父层级误差
-		float parentBounds[4];     // 父层级包围球
+		float bounds[4];						// {cx, cy, cz, r}
+		float shareSiblingsBounds[4];           // {cx, cy, cz, r}
+		float lodError;							// 当前层级的简化误差
+		float maxSiblingsError;					// 累积误差
+		float parentError;						// 父层级误差
+		float parentBounds[4];					// 父层级包围球
 	};
 
 	struct PreMeshletInfo
@@ -323,15 +327,6 @@ namespace Renderer
 		}
 	}
 
-	// 估算屏幕空间误差
-	static float EstimateScreenSpaceError(
-		float geometricError,
-		const NaniteLODConfig& cfg)
-	{
-		return (geometricError * cfg.assumedScreenHeight) /
-			(cfg.assumedDistance * std::tan(cfg.assumedFOV * 0.5f));
-	}
-
 	// 根据三角形数量计算动态简化率
 	static float CalculateDynamicSimplificationRate(
 		size_t triangleCount,
@@ -481,6 +476,195 @@ namespace Renderer
 		return result;
 	}
 
+	static std::vector<MeshletWIP> SplitIntoMeshletsConcurrent(
+		const std::vector<uint32_t>& indices,
+		uint32_t lodLevel,
+		std::atomic<uint32_t>& idCounter,
+		float lodError,
+		float cumulativeError,
+		const float* groupBounds,
+		const float* positions,
+		uint16_t vertexStride,
+		uint32_t vertexCount,
+		bool is32BitIndex,
+		const NaniteLODConfig& cfg)
+	{
+		size_t max_meshlets = meshopt_buildMeshletsBound(
+			indices.size(), cfg.meshletMaxVertices, cfg.meshletMaxTriangles);
+		std::vector<meshopt_Meshlet> meshlets(max_meshlets);
+		std::vector<unsigned int> meshlet_vertices(indices.size());
+		std::vector<unsigned char> meshlet_triangles(indices.size());
+
+		size_t meshlet_count = meshopt_buildMeshlets(
+			meshlets.data(), meshlet_vertices.data(), meshlet_triangles.data(),
+			indices.data(), indices.size(),
+			positions, vertexCount, vertexStride,
+			cfg.meshletMaxVertices, cfg.meshletMaxTriangles,
+			cfg.meshletBackfaceCullingConeWeight);
+
+		for (size_t m = 0; m < meshlet_count; ++m)
+		{
+			const meshopt_Meshlet& ml = meshlets[m];
+			meshopt_optimizeMeshlet(
+				&meshlet_vertices[ml.vertex_offset],
+				&meshlet_triangles[ml.triangle_offset],
+				ml.triangle_count, ml.vertex_count);
+		}
+
+		std::vector<MeshletWIP> result;
+		result.reserve(meshlet_count);
+
+		for (size_t m = 0; m < meshlet_count; ++m)
+		{
+			const meshopt_Meshlet& ml = meshlets[m];
+			MeshletWIP wip{};
+			wip.id = idCounter.fetch_add(1, std::memory_order_relaxed);
+			wip.lodLevel = lodLevel;
+			wip.indexCount = ml.triangle_count * 3;
+			wip.indexSize = is32BitIndex ? 4 : 2;
+			wip.lodError = lodError;
+			wip.maxSiblingsError = cumulativeError;
+			std::memcpy(wip.shareSiblingsBounds, groupBounds, sizeof(float) * 4);
+			wip.parentError = std::numeric_limits<float>::infinity();
+			std::memcpy(wip.parentBounds, groupBounds, sizeof(float) * 4);
+
+			const meshopt_Bounds mb = meshopt_computeMeshletBounds(
+				&meshlet_vertices[ml.vertex_offset],
+				&meshlet_triangles[ml.triangle_offset],
+				ml.triangle_count, positions, vertexCount, vertexStride);
+			wip.bounds[0] = mb.center[0];
+			wip.bounds[1] = mb.center[1];
+			wip.bounds[2] = mb.center[2];
+			wip.bounds[3] = mb.radius;
+
+			size_t ibSize = wip.indexCount * wip.indexSize;
+			wip.indexBuffer.resize(ibSize);
+			uint32_t localIndexCursor = 0;
+			for (uint32_t t = 0; t < ml.triangle_count; ++t)
+			{
+				unsigned char ia = meshlet_triangles[ml.triangle_offset + t * 3 + 0];
+				unsigned char ib = meshlet_triangles[ml.triangle_offset + t * 3 + 1];
+				unsigned char ic = meshlet_triangles[ml.triangle_offset + t * 3 + 2];
+				uint32_t va = meshlet_vertices[ml.vertex_offset + ia];
+				uint32_t vb = meshlet_vertices[ml.vertex_offset + ib];
+				uint32_t vc = meshlet_vertices[ml.vertex_offset + ic];
+
+				if (is32BitIndex)
+				{
+					uint32_t* dst = reinterpret_cast<uint32_t*>(wip.indexBuffer.data());
+					dst[localIndexCursor++] = va;
+					dst[localIndexCursor++] = vb;
+					dst[localIndexCursor++] = vc;
+				}
+				else
+				{
+					uint16_t* dst = reinterpret_cast<uint16_t*>(wip.indexBuffer.data());
+					dst[localIndexCursor++] = static_cast<uint16_t>(va);
+					dst[localIndexCursor++] = static_cast<uint16_t>(vb);
+					dst[localIndexCursor++] = static_cast<uint16_t>(vc);
+				}
+			}
+			result.push_back(std::move(wip));
+		}
+		return result;
+	}
+
+	// 基于 megaMeshlet（索引并集）计算包围球；positions 的前 12 字节为 float3 位置
+	static void ComputeMegaMeshletBounds(
+		const std::vector<uint32_t>& megaMeshlet,
+		const float* positions,
+		uint16_t vertexStride,
+		float outBounds[4],          // {cx, cy, cz, r}
+		float expandRadius = 0.0f)   // 可选外扩半径（为 0 则不外扩）
+	{
+		if (megaMeshlet.empty())
+		{
+			outBounds[0] = outBounds[1] = outBounds[2] = 0.0f;
+			outBounds[3] = 0.0f;
+			return;
+		}
+
+		// 收集唯一顶点到紧凑 float3 数组
+		thread_local std::vector<float> localPositions;
+		localPositions.clear();
+		localPositions.reserve(megaMeshlet.size()); // 近似保留，减少重分配
+
+		// 用哈希表做 old->local 映射，避免全局 visited = vertexCount 的巨型数组
+		std::unordered_map<uint32_t, uint32_t> old2new;
+		old2new.reserve(megaMeshlet.size() / 2 + 1);
+
+		for (uint32_t gi : megaMeshlet)
+		{
+			auto it = old2new.find(gi);
+			if (it == old2new.end())
+			{
+				const uint8_t* base = reinterpret_cast<const uint8_t*>(positions) + size_t(gi) * vertexStride;
+				const float* p = reinterpret_cast<const float*>(base); // 要求位置在前 12 字节
+				localPositions.push_back(p[0]);
+				localPositions.push_back(p[1]);
+				localPositions.push_back(p[2]);
+				old2new.emplace(gi, static_cast<uint32_t>(old2new.size()));
+			}
+		}
+
+		// 可选：为每个点添加统一半径进行保守外扩
+		const float* radiiPtr = nullptr;
+		size_t radiiStride = 0;
+		thread_local std::vector<float> localRadii;
+		if (expandRadius > 0.0f)
+		{
+			localRadii.assign(localPositions.size() / 3, expandRadius);
+			radiiPtr = localRadii.data();
+			radiiStride = sizeof(float);
+		}
+
+		meshopt_Bounds sb = meshopt_computeSphereBounds(
+			localPositions.data(),
+			localPositions.size() / 3,
+			sizeof(float) * 3,
+			radiiPtr,
+			radiiStride);
+
+		outBounds[0] = sb.center[0];
+		outBounds[1] = sb.center[1];
+		outBounds[2] = sb.center[2];
+		outBounds[3] = sb.radius;
+	}
+
+	// 计算 megaMeshlet 所引用子集顶点的 scale（用于相对误差->绝对误差）
+	static float ComputeMegaMeshletScale(
+		const std::vector<uint32_t>& megaMeshlet,
+		const float* positions,
+		uint16_t vertexStride)
+	{
+		if (megaMeshlet.empty()) return 0.0f;
+
+		thread_local std::vector<float> subsetPositions;
+		subsetPositions.clear();
+		subsetPositions.reserve(megaMeshlet.size()); // 粗略预留
+
+		// 去重收集唯一顶点
+		std::unordered_set<uint32_t> seen;
+		seen.reserve(megaMeshlet.size());
+		for (uint32_t idx : megaMeshlet)
+		{
+			if (!seen.insert(idx).second) continue;
+			const uint8_t* base = reinterpret_cast<const uint8_t*>(positions) + size_t(idx) * vertexStride;
+			const float* p = reinterpret_cast<const float*>(base); // 要求位置在前 12 字节
+			subsetPositions.push_back(p[0]);
+			subsetPositions.push_back(p[1]);
+			subsetPositions.push_back(p[2]);
+		}
+
+		// 计算子集 scale（与 Sparse 的“子集 extents”一致）
+		float scale = meshopt_simplifyScale(
+			subsetPositions.data(),
+			subsetPositions.size() / 3,
+			sizeof(float) * 3);
+
+		return scale;
+	}
+
 	static void BuildNaniteLODDAG(
 		const std::vector<uint32_t>& indices32,
 		const float* positions,
@@ -507,10 +691,11 @@ namespace Renderer
 		}
 
 		// ========== LOD 0: 创建底层 meshlets ==========
+		std::atomic<uint32_t> atomicNextMeshletId(nextMeshletId);
 		{
 			float mockBounds[4] = { 0, 0, 0, 1.0f };
-			auto bottomMeshlets = SplitIntoMeshlets(
-				indices32, 0, nextMeshletId, 0.0f, 0.0f, mockBounds,
+			auto bottomMeshlets = SplitIntoMeshletsConcurrent(
+				indices32, 0, atomicNextMeshletId, 0.0f, 0.0f, mockBounds,
 				positions, outInfo.vertexStride, outInfo.vertexCount,
 				outInfo.index32, cfg);
 
@@ -530,26 +715,12 @@ namespace Renderer
 
 		// ========== LOD 1-N: 迭代简化 ==========
 		float targetError = cfg.simplificationTargetError;
-		uint32_t lastTriangleCount = UINT32_MAX;
+		uint32_t lastTriangleCount = initialTriCount;
+		uint32_t currentTriangleCount = initialTriCount;
 
 		for (size_t lod = 1; lod < cfg.maxLods && currentLevel.size() > 1; ++lod)
 		{
-			// 统计三角形数
-			uint32_t currentTriangleCount = 0;
-			for (auto* m : currentLevel)
-				currentTriangleCount += m->indexCount / 3;
-
-			// 停止条件 1：连续两层级无变化
-			if (currentTriangleCount == lastTriangleCount)
-			{
-				if (cfg.enableDetailedLogging)
-				{
-					Utility::Printf("  LOD %zu: No simplification progress, stopping.\n", lod);
-				}
-				break;
-			}
-
-			// 停止条件 2：层间简化率不足
+			// 停止条件：层间简化率不足
 			if (lod > 1)
 			{
 				float simplificationBetweenLevels =
@@ -569,200 +740,152 @@ namespace Renderer
 			}
 
 			lastTriangleCount = currentTriangleCount;
+			
+			std::vector<MeshletWIP*> nextLevel;
+			std::vector<std::vector<MeshletWIP*>> partitionedGroups =
+				PartitionMeshletsByMetis(currentLevel, outInfo.index32, cfg.groupSize, cfg.enablePerGroupLogging);
 
+			struct GroupResult
+			{
+				std::vector<MeshletWIP> newMeshlets;
+				std::vector<uint32_t> rootIds;
+				struct ChildUpdate { MeshletWIP* ptr; float parentError; float parentBounds[4]; };
+				std::vector<ChildUpdate> childUpdates;
+			};
+
+			std::vector<GroupResult> results(partitionedGroups.size());
+			std::vector<std::future<void>> tasks;
+			tasks.reserve(partitionedGroups.size());
+
+			for (size_t gi = 0; gi < partitionedGroups.size(); ++gi)
+			{
+				tasks.push_back(std::async(std::launch::async, [&, gi]() {
+					const auto& group = partitionedGroups[gi];
+					GroupResult local;
+
+					std::vector<uint32_t> megaMeshlet = MergeMeshlets(group, outInfo.index32);
+					size_t currentTriCount = megaMeshlet.size() / 3;
+
+					float megaMeshletBounds[4];
+					ComputeMegaMeshletBounds(
+						megaMeshlet,
+						positions,
+						outInfo.vertexStride,
+						megaMeshletBounds);
+
+					if (currentTriCount <= cfg.minRootTriangles)
+					{
+						for (auto* child : group)
+						{
+							GroupResult::ChildUpdate upd;
+							upd.ptr = child;
+							upd.parentError = std::numeric_limits<float>::infinity();
+							std::memcpy(upd.parentBounds, megaMeshletBounds, sizeof(upd.parentBounds));
+							local.childUpdates.push_back(upd);
+							local.rootIds.push_back(child->id);
+						}
+						results[gi] = std::move(local);
+						return;
+					}
+
+					float dynamicRate = CalculateDynamicSimplificationRate(currentTriCount, cfg);
+					size_t targetIndexCount = size_t(megaMeshlet.size() * dynamicRate);
+
+					std::vector<uint32_t> simplifiedIndices(megaMeshlet.size());
+					float resultError = 0.0f;
+
+					size_t resultCount = meshopt_simplify(
+						simplifiedIndices.data(),
+						megaMeshlet.data(), megaMeshlet.size(),
+						positions, outInfo.vertexCount, outInfo.vertexStride,
+						targetIndexCount, targetError,
+						meshopt_SimplifyLockBorder | meshopt_SimplifySparse,
+						&resultError);
+
+					float errorScale = ComputeMegaMeshletScale(megaMeshlet, positions, outInfo.vertexStride);
+					resultError *= errorScale;
+
+					simplifiedIndices.resize(resultCount);
+
+					meshopt_optimizeVertexCache(
+						simplifiedIndices.data(),
+						simplifiedIndices.data(),
+						simplifiedIndices.size(),
+						outInfo.vertexCount);
+
+					meshopt_optimizeOverdraw(
+						simplifiedIndices.data(),
+						simplifiedIndices.data(),
+						simplifiedIndices.size(),
+						positions,
+						outInfo.vertexCount,
+						outInfo.vertexStride,
+						1.05f);
+
+					// 计算误差与合并包围球
+					float groupMaxError = 0.0f;
+					for (auto* m : group)
+					{
+						groupMaxError = std::max(groupMaxError, m->maxSiblingsError);
+					}
+
+					float lodError = std::max(resultError, 1e-9f);
+					float totalError = lodError + groupMaxError;
+					// 拆分新 meshlets（并发版本）
+					auto newMeshlets = SplitIntoMeshletsConcurrent(
+						simplifiedIndices, (uint32_t)lod, atomicNextMeshletId,
+						lodError, totalError, megaMeshletBounds,
+						positions, outInfo.vertexStride, outInfo.vertexCount,
+						outInfo.index32, cfg);
+
+					// 延迟对子 meshlet 的 parent 写入
+					for (auto* childMeshlet : group)
+					{
+						GroupResult::ChildUpdate upd;
+						upd.ptr = childMeshlet;
+						upd.parentError = totalError;
+						std::memcpy(upd.parentBounds, megaMeshletBounds, sizeof(upd.parentBounds));
+						local.childUpdates.push_back(upd);
+					}
+
+					local.newMeshlets = std::move(newMeshlets);
+					results[gi] = std::move(local);
+				}));
+			}
+
+			// 等待任务
+			for (auto& f : tasks) f.get();
+
+			// 串行合并结果
+			for (auto& r : results)
+			{
+				for (auto& upd : r.childUpdates)
+				{
+					upd.ptr->parentError = upd.parentError;
+					std::memcpy(upd.ptr->parentBounds, upd.parentBounds, sizeof(upd.parentBounds));
+				}
+				for (auto rid : r.rootIds)
+					outInfo.rootMeshletIds.push_back(rid);
+				for (auto& nm : r.newMeshlets)
+				{
+					outInfo.allMeshlets.push_back(std::move(nm));
+					nextLevel.push_back(&outInfo.allMeshlets.back());
+				}
+			}
+
+			currentLevel = nextLevel;
+			targetError *= cfg.simplificationTargetErrorMultiplier;
+
+			currentTriangleCount = 0;
+			for (auto* m : currentLevel)
+				currentTriangleCount += m->indexCount / 3;
+			
 			if (cfg.enableDetailedLogging)
 			{
 				float percentOfOriginal = 100.0f * currentTriangleCount / initialTriCount;
 				Utility::Printf("  LOD %zu: %u triangles (%.1f%%), %zu meshlets\n",
 					lod, currentTriangleCount, percentOfOriginal, currentLevel.size());
 			}
-
-			std::vector<MeshletWIP*> nextLevel;
-
-			std::vector<std::vector<MeshletWIP*>> partitionedGroups =
-				PartitionMeshletsByMetis(currentLevel, outInfo.index32, cfg.groupSize, cfg.enablePerGroupLogging);
-
-			for (size_t groupIndex = 0; groupIndex < partitionedGroups.size(); ++groupIndex)
-			{
-				const std::vector<MeshletWIP*>& group = partitionedGroups[groupIndex];
-
-				// 合并
-				std::vector<uint32_t> megaMeshlet = MergeMeshlets(group, outInfo.index32);
-				size_t currentTriCount = megaMeshlet.size() / 3;
-
-				// 停止条件
-				// 已经足够小
-				if (currentTriCount <= cfg.minRootTriangles)
-				{
-					if (cfg.enablePerGroupLogging)
-					{
-						Utility::Printf("    Group %zu: Already small (%zu tris), marking as root\n",
-							groupIndex, currentTriCount);
-					}
-
-					for (auto* child : group)
-					{
-						child->parentError = std::numeric_limits<float>::infinity();
-						outInfo.rootMeshletIds.push_back(child->id);
-					}
-					continue;
-				}
-
-				// 动态调整目标简化率
-				float dynamicRate = CalculateDynamicSimplificationRate(currentTriCount, cfg);
-				size_t targetIndexCount = size_t(megaMeshlet.size() * dynamicRate);
-
-				// 尝试正常简化
-				std::vector<uint32_t> simplifiedIndices(megaMeshlet.size());
-				float resultError = 0.0f;
-
-				size_t resultCount = meshopt_simplify(
-					simplifiedIndices.data(),
-					megaMeshlet.data(), megaMeshlet.size(),
-					positions, outInfo.vertexCount, outInfo.vertexStride,
-					targetIndexCount, targetError,
-					meshopt_SimplifyLockBorder,
-					&resultError);
-
-				float errorScale = meshopt_simplifyScale(positions, outInfo.vertexCount, outInfo.vertexStride);
-				resultError *= errorScale;
-
-				simplifiedIndices.resize(resultCount);
-
-				// 优化
-				meshopt_optimizeVertexCache(
-					simplifiedIndices.data(),
-					simplifiedIndices.data(),
-					simplifiedIndices.size(),
-					outInfo.vertexCount);
-
-				meshopt_optimizeOverdraw(
-					simplifiedIndices.data(),
-					simplifiedIndices.data(),
-					simplifiedIndices.size(),
-					positions,
-					outInfo.vertexCount,
-					outInfo.vertexStride,
-					1.05f);
-
-				float simplificationRate = float(resultCount) / megaMeshlet.size();
-
-				// 检查简化率（单组要求）
-				if (simplificationRate > cfg.simplificationFactorRequirement)
-				{
-					if (cfg.enablePerGroupLogging)
-					{
-						Utility::Printf("    Group %zu: Normal simplification insufficient (%.1f%% > %.1f%%), trying aggressive\n",
-							groupIndex, simplificationRate * 100.0f,
-							cfg.simplificationFactorRequirement * 100.0f);
-					}
-
-					size_t aggressiveTarget = std::max(
-						cfg.minRootTriangles * 3,
-						size_t(megaMeshlet.size() / cfg.aggressiveTargetDivisor));
-
-					std::vector<uint32_t> aggressiveIndices(megaMeshlet.size());
-					float aggressiveError = 0.0f;
-
-					size_t aggressiveCount = meshopt_simplifySloppy(
-						aggressiveIndices.data(),
-						megaMeshlet.data(), megaMeshlet.size(),
-						positions, outInfo.vertexCount, outInfo.vertexStride,
-						aggressiveTarget,
-						targetError * cfg.aggressiveErrorMultiplier,
-						&aggressiveError);
-
-					aggressiveIndices.resize(aggressiveCount);
-
-					float aggressiveRate = float(aggressiveCount) / megaMeshlet.size();
-
-					if (aggressiveRate < cfg.aggressiveSimplificationRate)
-					{
-						if (cfg.enablePerGroupLogging)
-						{
-							Utility::Printf("    Group %zu: Aggressive simplification succeeded (%.1f%%)\n",
-								groupIndex, aggressiveRate * 100.0f);
-						}
-
-						simplifiedIndices = std::move(aggressiveIndices);
-						resultCount = aggressiveCount;
-						resultError = aggressiveError;
-					}
-					else
-					{
-						if (cfg.enablePerGroupLogging)
-						{
-							Utility::Printf("    Group %zu: All simplification failed, marking as root\n",
-								groupIndex);
-						}
-
-						for (auto* child : group)
-						{
-							child->parentError = std::numeric_limits<float>::infinity();
-							outInfo.rootMeshletIds.push_back(child->id);
-						}
-						continue;
-					}
-				}
-
-				// 计算误差和包围体
-				float groupMaxError = 0.0f;
-				float groupBounds[4] = { 0, 0, 0, 0 };
-
-				for (auto* m : group)
-				{
-					groupMaxError = std::max(groupMaxError, m->maxSiblingsError);
-					if (groupBounds[3] == 0.0f)
-					{
-						std::memcpy(groupBounds, m->bounds, sizeof(groupBounds));
-					}
-					else
-					{
-						float tempBounds[4];
-						MergeBoundingSpheres(tempBounds, groupBounds, m->bounds);
-						std::memcpy(groupBounds, tempBounds, sizeof(groupBounds));
-					}
-				}
-
-				float lodError = std::max(resultError, 1e-9f);
-				float totalError = lodError + groupMaxError;
-
-				// 拆分为新 meshlets
-				auto newMeshlets = SplitIntoMeshlets(
-					simplifiedIndices, (uint32_t)lod, nextMeshletId, lodError, totalError, groupBounds,
-					positions, outInfo.vertexStride, outInfo.vertexCount,
-					outInfo.index32, cfg);
-
-				// 更新子 meshlets 的 parent 信息（共享）
-				for (auto* childMeshlet : group)
-				{
-					childMeshlet->parentError = totalError;
-					std::memcpy(childMeshlet->parentBounds, groupBounds, sizeof(groupBounds));
-				}
-
-				// 添加到下一层级
-				for (auto& m : newMeshlets)
-				{
-					outInfo.allMeshlets.push_back(std::move(m));
-					nextLevel.push_back(&outInfo.allMeshlets.back());
-				}
-			}
-
-			// 如果没有新层级，当前层级为根节点
-			if (nextLevel.empty())
-			{
-				for (auto* m : currentLevel)
-				{
-					if (m->parentError == std::numeric_limits<float>::infinity())
-						continue;
-					m->parentError = std::numeric_limits<float>::infinity();
-					outInfo.rootMeshletIds.push_back(m->id);
-				}
-				break;
-			}
-
-			currentLevel = nextLevel;
-			targetError *= cfg.simplificationTargetErrorMultiplier;
 		}
 
 		// 最后一层级标记为根节点
@@ -1017,7 +1140,8 @@ void Renderer::CompileMesh(
 				// LOD 数据
 				d.parentError = m->parentError;
 				std::memcpy(d.parentBounds, m->parentBounds, sizeof(d.parentBounds));
-				d.lodError = m->lodError;
+				d.maxSiblingsError = m->maxSiblingsError;
+				std::memcpy(d.shareSiblingsBounds, m->shareSiblingsBounds, sizeof(d.shareSiblingsBounds));
 				d.lodLevel = (uint8_t)m->lodLevel;
 
 				++drawIdx;
