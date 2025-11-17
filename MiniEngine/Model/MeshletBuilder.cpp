@@ -4,6 +4,7 @@
 #include <numeric>
 #include <cassert>
 #include <cfloat>
+#include <execution> 
 #include "../Core/Utility.h"
 
 static constexpr float kInfinity = std::numeric_limits<float>::infinity();
@@ -48,45 +49,94 @@ std::vector<TempMeshlet> MeshletBuilder::Build(
 		BuildVertexLocksByGroups(groups, current, posRemap, vertices.size(), vertexLock);
 
 		// 对每个组尝试简化 -> 生成下一层 meshlets
+		struct GroupResult
+		{
+			bool simplified = false;
+			float err = 0.0f;                     // SimplifyGroup 返回的误差
+			float groupError = 0.0f;              // g.GroupError
+			float groupSphere[4]{};
+			std::vector<TempMeshlet> generated;   // 该组生成的新 meshlets
+			std::vector<uint32_t> keepIds;        // 简化失败或单元素组：直接延续的 meshlet id
+			std::vector<uint32_t> originalIds;    // 该组原有 meshlet id（用于写回 ParentError/Bounds）
+		};
+
+		std::vector<GroupResult> results(groups.size());
+		std::vector<size_t> gi(groups.size());
+		std::iota(gi.begin(), gi.end(), size_t(0));
+
+		// 并行执行每个分组的简化尝试（只产生局部结果，不改写 shared 状态）
+		std::for_each(std::execution::par, gi.begin(), gi.end(),
+			[&](size_t idx)
+			{
+				const Group& g = groups[idx];
+				GroupResult r;
+				r.groupError = g.GroupError;
+				std::copy(g.GroupSphere, g.GroupSphere + 4, r.groupSphere);
+				r.originalIds = g.MeshletIDs;
+
+				// 单个 meshlet 分组无需简化
+				if (g.MeshletIDs.size() <= 1)
+				{
+					r.simplified = false;
+					r.keepIds = g.MeshletIDs;
+					results[idx] = std::move(r);
+					return;
+				}
+
+				float err = 0.0f;
+				std::vector<TempMeshlet> generated;
+				if (SimplifyGroup(g, current, vertices, settings, vertexLock, generated, err))
+				{
+					r.simplified = true;
+					r.err = err;
+					r.generated = std::move(generated);
+				}
+				else
+				{
+					r.simplified = false;
+					r.keepIds = g.MeshletIDs; // 简化失败 -> 保留原 meshlet
+				}
+
+				results[idx] = std::move(r);
+			});
+
 		std::vector<TempMeshlet> newMeshlets;
 		std::vector<uint32_t> nextActive;
-		for (const Group& g : groups)
+		nextActive.reserve(activeIds.size());
+
+		// 串行：设置误差、包围球、LODLevel，更新父误差，构建 nextActive
+		for (const auto& r : results)
 		{
-			// 单个 meshlet 分组无需简化
-			if (g.MeshletIDs.size() <= 1)
+			if (!r.simplified)
 			{
-				for (uint32_t id : g.MeshletIDs) nextActive.push_back(id);
+				for (uint32_t id : r.keepIds) nextActive.push_back(id);
 				continue;
 			}
 
-			float err = 0.0f;
-			std::vector<TempMeshlet> generated;
-			if (SimplifyGroup(g, current, vertices, settings, vertexLock, generated, err))
-			{
-				float totalErr = err + g.GroupError;
-				// 写回新 meshlet 的误差与包围球
-				size_t base = current.size() + newMeshlets.size();
-				for (auto& nm : generated)
-				{
-					nm.Error = totalErr; // 单调
-					nm.LodError = totalErr;
-					std::copy(g.GroupSphere, g.GroupSphere + 4, nm.LodBounds);
-					ComputeMeshletSphere(nm, vertices, nm.Sphere);
-					nm.LODLevel = lodLevel;
-					newMeshlets.emplace_back(std::move(nm));
-					nextActive.push_back(static_cast<uint32_t>(base++));
-				}
+			const float totalErr = r.err + r.groupError;
+			const size_t baseOffset = newMeshlets.size();
 
-				for (uint32_t id : g.MeshletIDs)
-				{
-					current[id].ParentError = totalErr;
-					std::copy(g.GroupSphere, g.GroupSphere + 4, current[id].ParentBounds);
-				}
-			}
-			else
+			// 写新 meshlet 的误差与包围球等
+			for (auto& nm : const_cast<std::vector<TempMeshlet>&>(r.generated))
 			{
-				// 简化失败 -> 保留原 meshlet，等待下一轮（与 Rust 一致）
-				for (uint32_t id : g.MeshletIDs) nextActive.push_back(id);
+				TempMeshlet out = std::move(nm);
+				out.Error = totalErr;
+				out.LodError = totalErr;
+				std::copy(r.groupSphere, r.groupSphere + 4, out.LodBounds);
+				ComputeMeshletSphere(out, vertices, out.Sphere);
+				out.LODLevel = lodLevel;
+				newMeshlets.emplace_back(std::move(out));
+			}
+
+			// 新 meshlet 的全局索引：current.size() + baseOffset + j
+			for (size_t j = 0; j < r.generated.size(); ++j)
+				nextActive.push_back(static_cast<uint32_t>(current.size() + baseOffset + j));
+
+			// 写回父误差/包围（仅在成功简化时）
+			for (uint32_t id : r.originalIds)
+			{
+				current[id].ParentError = totalErr;
+				std::copy(r.groupSphere, r.groupSphere + 4, current[id].ParentBounds);
 			}
 		}
 
@@ -386,7 +436,7 @@ bool MeshletBuilder::SimplifyGroup(
 		normals[i * 3 + 1] = vertices[i].Normal.GetY();
 		normals[i * 3 + 2] = vertices[i].Normal.GetZ();
 	}
-	const float attributeWeights[2] = { 0.5f, 0.5f};
+	const float attributeWeights[3] = { 0.5f, 0.5f, 0.5f };
 
 	// 目标索引数（保留 ~50%）
 	const size_t targetIndexCount = size_t(expanded.size() * s.TargetSimplifyRatio);
@@ -394,18 +444,18 @@ bool MeshletBuilder::SimplifyGroup(
 	std::vector<uint32_t> simplified(expanded.size());
 	float resultError = 0.0f;
 
-	unsigned int options = 
+	unsigned int options =
 		meshopt_SimplifySparse |
-		meshopt_SimplifyErrorAbsolute |
+		meshopt_SimplifyErrorAbsolute;
 		//meshopt_SimplifyPermissive |
-		meshopt_SimplifyPrune;
+		//meshopt_SimplifyPrune;
 
 	size_t newCount = meshopt_simplifyWithAttributes(
 		simplified.data(),
 		expanded.data(), expanded.size(),
 		pos, vertices.size(), stride,
 		normals.data(), sizeof(float) * 3,
-		attributeWeights, 2,
+		attributeWeights, 3,
 		vertexLock.data(),                    // 锁边
 		targetIndexCount,
 		FLT_MAX,                              // 绝对误差上限
