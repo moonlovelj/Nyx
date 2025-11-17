@@ -99,11 +99,11 @@
     <ClInclude Include="json.hpp" />
     <ClInclude Include="LightManager.h" />
     <ClInclude Include="MeshConvert.h" />
+    <ClInclude Include="MeshletBuilder.h" />
     <ClInclude Include="MeshOptimizer\meshoptimizer.h" />
     <ClInclude Include="Model.h" />
     <ClInclude Include="ModelLoader.h" />
     <ClInclude Include="ModelH3D.h" />
-    <ClInclude Include="NaniteLODConfig.h" />
     <ClInclude Include="ParticleEffects.h" />
     <ClInclude Include="Renderer.h" />
     <ClInclude Include="SponzaRenderer.h" />
@@ -119,6 +119,7 @@
     <ClCompile Include="IndexOptimizePostTransform.cpp" />
     <ClCompile Include="LightManager.cpp" />
     <ClCompile Include="MeshConvert.cpp" />
+    <ClCompile Include="MeshletBuilder.cpp" />
     <ClCompile Include="MeshOptimizer\allocator.cpp" />
     <ClCompile Include="MeshOptimizer\clusterizer.cpp" />
     <ClCompile Include="MeshOptimizer\indexanalyzer.cpp" />

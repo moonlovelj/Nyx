@@ -5,7 +5,7 @@
 #include "CommonResources.hlsli"
 
 #define threadBlockSize 128
-#define PIXEL_ERROR_THRESHOLD 0.5
+#define PIXEL_ERROR_THRESHOLD 1.0
 
 cbuffer CullConstants : register(b3)
 {
@@ -50,8 +50,9 @@ float GetProjectedErrorPerspective(float clipW, float errorWS, float lodScalePix
     return errorWS * lodScalePixels / max(abs(clipW), 1e-6);
 }
 
-bool ShouldMeshletLodVisible(float4x4 WorldMatrix, 
-    float siblingsError, float4 siblingsBounds,
+bool ShouldMeshletLodVisible(
+    float4x4 WorldMatrix, 
+    float lodError, float4 lodBounds,
     float parentError, float4 parentBounds)
 {
     float3 column0 = float3(WorldMatrix._m00, WorldMatrix._m10, WorldMatrix._m20);
@@ -59,9 +60,9 @@ bool ShouldMeshletLodVisible(float4x4 WorldMatrix,
     float3 column2 = float3(WorldMatrix._m02, WorldMatrix._m12, WorldMatrix._m22);
     float sphereScale = max(length(column0), max(length(column1), length(column2)));
     
-    float4 sphereWS = float4(mul(WorldMatrix, float4(siblingsBounds.xyz, 1)).xyz, sphereScale * siblingsBounds.w);
+    float4 sphereWS = float4(mul(WorldMatrix, float4(lodBounds.xyz, 1)).xyz, sphereScale * lodBounds.w);
     float4 sphereVS = float4(mul(ViewMatrix, float4(sphereWS.xyz, 1)).xyz, sphereWS.w);
-    float screenError = GetProjectedError(sphereVS, siblingsError * sphereScale);
+    float screenError = GetProjectedError(sphereVS, lodError * sphereScale);
     if (screenError >= PIXEL_ERROR_THRESHOLD)
     {
         return false;
@@ -125,7 +126,7 @@ void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
         float4 shareSiblingsBounds; // 当前层级包围球
         if (IsSphereInFrustum(WorldMatrix, meshletConstant.BoundingSphere) &&
             ShouldMeshletLodVisible(WorldMatrix,
-            meshletConstant.maxSiblingsError, meshletConstant.shareSiblingsBounds,
+            meshletConstant.lodError, meshletConstant.lodBounds,
             meshletConstant.parentError, meshletConstant.parentBounds))
         {
             outputCommands.Append(inCommand);

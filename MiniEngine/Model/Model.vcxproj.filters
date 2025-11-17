@@ -98,6 +98,9 @@
     <ClCompile Include="MeshOptimizer\vfetchoptimizer.cpp">
       <Filter>MeshOptimizer</Filter>
     </ClCompile>
+    <ClCompile Include="MeshletBuilder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
@@ -166,7 +169,7 @@
     <ClInclude Include="MeshOptimizer\meshoptimizer.h">
       <Filter>MeshOptimizer</Filter>
     </ClInclude>
-    <ClInclude Include="NaniteLODConfig.h">
+    <ClInclude Include="MeshletBuilder.h">
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>

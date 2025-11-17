@@ -455,8 +455,8 @@ void ModelInstance::CreateMeshIndirectCommands()
                 meshletConstants.MaterialConstantsIndex = mesh.materialCBV;
 				meshletConstants.parentError = mesh.draw[j].parentError;
 				memcpy(meshletConstants.parentBounds, mesh.draw[j].parentBounds, 16);
-                meshletConstants.maxSiblingsError = mesh.draw[j].maxSiblingsError;
-                memcpy(meshletConstants.shareSiblingsBounds, mesh.draw[j].shareSiblingsBounds, 16);
+                meshletConstants.lodError = mesh.draw[j].lodError;
+                memcpy(meshletConstants.lodBounds, mesh.draw[j].lodBounds, 16);
 				meshletConstants.lodLevel = mesh.draw[j].lodLevel;
 
 				// 预分桶：Depth（阴影）
