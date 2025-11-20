@@ -68,6 +68,7 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="HierarchicalDepthBuffer.h" />
     <ClInclude Include="IBL.h" />
     <ClInclude Include="BitonicSort.h" />
     <ClInclude Include="BuddyAllocator.h" />
@@ -142,6 +143,7 @@
     <ClInclude Include="VectorMath.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="HierarchicalDepthBuffer.cpp" />
     <ClCompile Include="IBL.cpp" />
     <ClCompile Include="BitonicSort.cpp" />
     <ClCompile Include="BuddyAllocator.cpp" />
@@ -321,6 +323,7 @@
     <FxCompile Include="Shaders\GenerateMipsLinearOddCS.hlsl" />
     <FxCompile Include="Shaders\GenerateMipsLinearOddXCS.hlsl" />
     <FxCompile Include="Shaders\GenerateMipsLinearOddYCS.hlsl" />
+    <FxCompile Include="Shaders\GenerateHZBCS.hlsl" />
     <FxCompile Include="Shaders\IBLDiffuseLDMapCS.hlsl" />
     <FxCompile Include="Shaders\IBLGenerateCubeMapCS.hlsl" />
     <FxCompile Include="Shaders\IBLLutCS.hlsl" />

@@ -487,6 +487,9 @@
     <FxCompile Include="Shaders\GenerateMipsArrayLinearOddYCS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="Shaders\GenerateHZBCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BitonicSort.cpp" />
@@ -545,6 +548,7 @@
     <ClCompile Include="Utility.cpp" />
     <ClCompile Include="Util\CommandLineArg.cpp" />
     <ClCompile Include="IBL.cpp" />
+    <ClCompile Include="HierarchicalDepthBuffer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BitonicSort.h" />
@@ -619,6 +623,7 @@
     <ClInclude Include="Util\CommandLineArg.h" />
     <ClInclude Include="VectorMath.h" />
     <ClInclude Include="IBL.h" />
+    <ClInclude Include="HierarchicalDepthBuffer.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Math\Functions.inl" />

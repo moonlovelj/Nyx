@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -38,6 +38,8 @@
 #include "CompiledShaders/GenerateMipsArrayGammaOddCS.h"
 #include "CompiledShaders/GenerateMipsArrayGammaOddXCS.h"
 #include "CompiledShaders/GenerateMipsArrayGammaOddYCS.h"
+
+#include "CompiledShaders/GenerateHZBCS.h"
 
 #include "CompiledShaders/ScreenQuadCommonVS.h"
 #include "CompiledShaders/DownsampleDepthPS.h"
@@ -128,6 +130,7 @@ namespace Graphics
 		{ L"Generate Mips Array Gamma Odd CS" },
 	};
 
+    ComputePSO g_GenerateHZBPSO(L"GenerateHZB PSO");
 
     GraphicsPSO g_DownsampleDepthPSO(L"DownsampleDepth PSO");
 }
@@ -320,6 +323,8 @@ void Graphics::InitializeCommonState(void)
 	CreatePSO(g_GenerateMipsArrayGammaPSO[1], g_pGenerateMipsArrayGammaOddXCS);
 	CreatePSO(g_GenerateMipsArrayGammaPSO[2], g_pGenerateMipsArrayGammaOddYCS);
 	CreatePSO(g_GenerateMipsArrayGammaPSO[3], g_pGenerateMipsArrayGammaOddCS);
+
+    CreatePSO(g_GenerateHZBPSO, g_pGenerateHZBCS);
 
     g_DownsampleDepthPSO.SetRootSignature(g_CommonRS);
     g_DownsampleDepthPSO.SetRasterizerState(RasterizerTwoSided);

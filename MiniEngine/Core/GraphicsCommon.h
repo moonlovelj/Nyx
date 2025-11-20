@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -89,5 +89,6 @@ namespace Graphics
     extern ComputePSO g_GenerateMipsGammaPSO[4];
 	extern ComputePSO g_GenerateMipsArrayLinearPSO[4];
 	extern ComputePSO g_GenerateMipsArrayGammaPSO[4];
+	extern ComputePSO g_GenerateHZBPSO;
     extern GraphicsPSO g_DownsampleDepthPSO;
 }

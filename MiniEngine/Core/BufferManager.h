@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -16,6 +16,7 @@
 #include "ColorBuffer.h"
 #include "DepthBuffer.h"
 #include "ShadowBuffer.h"
+#include "HierarchicalDepthBuffer.h"
 #include "GpuBuffer.h"
 #include "GraphicsCore.h"
 
@@ -35,6 +36,7 @@ namespace Graphics
     extern ColorBuffer g_PostEffectsBuffer; // R32_UINT (to support Read-Modify-Write with a UAV)
     extern ColorBuffer g_OverlayBuffer;     // R8G8B8A8_UNORM
     extern ColorBuffer g_HorizontalBuffer;  // For separable (bicubic) upsampling
+	extern HierarchicalDepthBuffer g_FurthestHZB;	    // R32_FLOAT (for Hi-Z depth culling)
 
     extern ColorBuffer g_VelocityBuffer;    // R10G10B10  (3D velocity)
     extern ShadowBuffer g_ShadowBuffer;
