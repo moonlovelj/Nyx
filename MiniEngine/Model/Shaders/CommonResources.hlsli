@@ -33,6 +33,7 @@ cbuffer GlobalConstants : register(b1)
 
 cbuffer CB2 : register(b2)
 {
+    uint MeshConstantsIndex;
     uint MeshletIndex;
 }
 
@@ -55,13 +56,16 @@ struct MeshletConstant
     // Nanite LOD 数据
     float    parentError;      // 父层级简化误差（Infinity = 根节点）
     float4   parentBounds;     // 父层级包围球
-    float    lodError;	       // 当前层级简化误差
     float4   lodBounds;        // 当前层级包围球
+    float    lodError;	       // 当前层级简化误差
     uint     lodLevel;         // 当前 LOD 层级（0 = 最精细）
+    float    padding1;
+    float    padding2;
 };
 
 StructuredBuffer<MeshletConstant> MeshletConstants : register(t20);
 
+// 实际是Instance级别
 struct MeshConstant
 {
     float4x4 WorldMatrix;

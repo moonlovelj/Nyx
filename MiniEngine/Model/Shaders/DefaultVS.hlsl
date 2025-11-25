@@ -20,8 +20,6 @@
 //#undef ENABLE_SKINNING
 #endif
 
-
-
 struct VSInput
 {
     uint vertexID : SV_VertexID;
@@ -91,7 +89,7 @@ VSOutput main(VSInput vsInput)
 
 #endif
 
-    MeshConstant meshConstant = MeshConstants[meshletConstant.MeshConstantsIndex];
+    MeshConstant meshConstant = MeshConstants[MeshConstantsIndex];
     float4x4 WorldMatrix = meshConstant.WorldMatrix;
     float4x3 WorldIT = meshConstant.WorldIT;
     vsOutput.worldPos = mul(WorldMatrix, position).xyz;

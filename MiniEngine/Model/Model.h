@@ -22,6 +22,7 @@
 #include "../Core/TextureManager.h"
 #include "../Core/Math/BoundingBox.h"
 #include "../Core/Math/BoundingSphere.h"
+#include "InstanceResourceManager.h"
 #include "GPUDriven/ExecuteIndirect.h"
 #include <cstdint>
 #include <map>
@@ -138,16 +139,21 @@ public:
     ~Model() { Destroy(); }
 
     void Render(Renderer::MeshSorter& sorter,
-		const GpuBuffer& meshConstants,
+		const D3D12_GPU_VIRTUAL_ADDRESS& meshConstants,
 		const GpuBuffer& meshletConstants,
         const Math::AffineTransform sphereTransforms[],
-        const GpuBuffer& meshJoints,
+        const D3D12_GPU_VIRTUAL_ADDRESS& meshJoints,
 		const IndirectArgsBuffer& indirectArgsBuffer) const;
+
+    void BuildMeshletConstantsBuffer();
+
+    uint32_t GetNumTotalDraws() const;
 
     Math::BoundingSphere m_BoundingSphere; // Object-space bounding sphere
     Math::AxisAlignedBox m_BoundingBox;
     ByteAddressBuffer m_DataBuffer;
     ByteAddressBuffer m_MaterialConstants;
+	ByteAddressBuffer m_MeshletConstants;
     uint32_t m_NumNodes;
     uint32_t m_NumMeshes;
     uint32_t m_NumAnimations;
@@ -173,9 +179,7 @@ public:
     ModelInstance() {}
     ~ModelInstance() {
         m_MeshConstantsCPU.Destroy();
-        m_MeshConstantsGPU.Destroy();
 		m_MeshJointsCPU.Destroy();
-        m_MeshJointsGPU.Destroy();
         DestroyMeshIndirectCommands();
     }
     ModelInstance( std::shared_ptr<const Model> sourceModel );
@@ -202,17 +206,19 @@ public:
     void UpdateAnimations(float deltaTime);
     void LoopAllAnimations(void);
 
+    void SetPosition(Math::Vector3 position);
+
     size_t GetNumCameras() const { return m_Cameras.size(); }
     std::vector<std::shared_ptr<Math::Camera>> GetCameras() const;
-    uint32_t GetNumTotalDraws() const;
 
 private:
     void CreateMeshIndirectCommands();
     void DestroyMeshIndirectCommands();
 
+    InstanceAllocation m_Alloc{};
+
     std::shared_ptr<const Model> m_Model;
     UploadBuffer m_MeshConstantsCPU;
-    ByteAddressBuffer m_MeshConstantsGPU;
     std::unique_ptr<Math::AffineTransform[]> m_BoundingSphereTransforms;
     Math::UniformTransform m_Locator;
 
@@ -220,11 +226,6 @@ private:
     std::vector<AnimationState> m_AnimState;    // Per-animation (not per-curve)
 
 	UploadBuffer m_MeshJointsCPU;
-	ByteAddressBuffer m_MeshJointsGPU;
-
-	UploadBuffer m_MeshletConstantsCPU;
-	ByteAddressBuffer m_MeshletConstantsGPU;
-	bool m_bMeshletConstantsDirty;
 
     std::map<uint32_t, std::shared_ptr<Math::Camera>> m_Cameras;
 

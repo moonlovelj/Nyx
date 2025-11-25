@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -57,5 +57,5 @@ namespace Lighting
     void RenderDeferredLighting(GraphicsContext& gfxContext,
         const GlobalConstants& globals);
 
-    void RenderLightShadows(GraphicsContext& gfxContext, const ModelInstance& modelInstance, const GlobalConstants& globals);
+    void RenderLightShadows(GraphicsContext& gfxContext, const GlobalConstants& globals);
 }

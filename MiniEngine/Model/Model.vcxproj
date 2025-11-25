@@ -91,17 +91,18 @@
   <ItemGroup>
     <ClInclude Include="Animation.h" />
     <ClInclude Include="ConstantBuffers.h" />
-    <ClInclude Include="DeferredRenderer.h" />
     <ClInclude Include="glTF.h" />
     <ClInclude Include="GPUDriven\CommandBucketer.h" />
     <ClInclude Include="GPUDriven\ExecuteIndirect.h" />
     <ClInclude Include="IndexOptimizePostTransform.h" />
+    <ClInclude Include="InstanceResourceManager.h" />
     <ClInclude Include="json.hpp" />
     <ClInclude Include="LightManager.h" />
     <ClInclude Include="MeshConvert.h" />
     <ClInclude Include="MeshletBuilder.h" />
     <ClInclude Include="MeshOptimizer\meshoptimizer.h" />
     <ClInclude Include="Model.h" />
+    <ClInclude Include="ModelInstanceManager.h" />
     <ClInclude Include="ModelLoader.h" />
     <ClInclude Include="ModelH3D.h" />
     <ClInclude Include="ParticleEffects.h" />
@@ -112,11 +113,11 @@
   <ItemGroup>
     <ClCompile Include="Animation.cpp" />
     <ClCompile Include="BuildH3D.cpp" />
-    <ClCompile Include="DeferredRenderer.cpp" />
     <ClCompile Include="glTF.cpp" />
     <ClCompile Include="GPUDriven\CommandBucketer.cpp" />
     <ClCompile Include="GPUDriven\ExecuteIndirect.cpp" />
     <ClCompile Include="IndexOptimizePostTransform.cpp" />
+    <ClCompile Include="InstanceResourceManager.cpp" />
     <ClCompile Include="LightManager.cpp" />
     <ClCompile Include="MeshConvert.cpp" />
     <ClCompile Include="MeshletBuilder.cpp" />
@@ -139,6 +140,7 @@
     <ClCompile Include="Model.cpp" />
     <ClCompile Include="ModelConvert.cpp" />
     <ClCompile Include="ModelH3D.cpp" />
+    <ClCompile Include="ModelInstanceManager.cpp" />
     <ClCompile Include="ModelLoader.cpp" />
     <ClCompile Include="ParticleEffects.cpp" />
     <ClCompile Include="Renderer.cpp" />

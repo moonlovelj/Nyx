@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -318,5 +318,6 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
         inFile.read((char*)model->m_Cameras.get(), header.numCameras * sizeof(CameraData));
     }
 
+	model->BuildMeshletConstantsBuffer();
     return model;
 }

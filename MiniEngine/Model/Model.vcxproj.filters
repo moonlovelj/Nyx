@@ -43,7 +43,6 @@
     <ClCompile Include="Animation.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="DeferredRenderer.cpp" />
     <ClCompile Include="GPUDriven\ExecuteIndirect.cpp">
       <Filter>GPUDriven</Filter>
     </ClCompile>
@@ -101,6 +100,8 @@
     <ClCompile Include="MeshletBuilder.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="InstanceResourceManager.cpp" />
+    <ClCompile Include="ModelInstanceManager.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
@@ -159,7 +160,6 @@
     <ClInclude Include="Animation.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="DeferredRenderer.h" />
     <ClInclude Include="GPUDriven\ExecuteIndirect.h">
       <Filter>GPUDriven</Filter>
     </ClInclude>
@@ -172,6 +172,8 @@
     <ClInclude Include="MeshletBuilder.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="InstanceResourceManager.h" />
+    <ClInclude Include="ModelInstanceManager.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Shaders\Common.hlsli">

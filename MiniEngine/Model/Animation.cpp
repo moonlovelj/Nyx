@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -187,6 +187,11 @@ void ModelInstance::LoopAllAnimations(void)
         anim.state = AnimationState::kLooping;
         anim.time = 0.0f;
     }
+}
+
+void ModelInstance::SetPosition(Math::Vector3 position)
+{
+    m_Locator.SetTranslation(position);
 }
 
 std::vector<std::shared_ptr<Math::Camera>> ModelInstance::GetCameras() const

@@ -23,6 +23,7 @@
 #include "TemporalEffects.h"
 #include "ConstantBuffers.h"
 #include "IBL.h"
+#include "ModelInstanceManager.h"
 
 #include "CompiledShaders/FillLightGridCS_8.h"
 #include "CompiledShaders/FillLightGridCS_16.h"
@@ -414,7 +415,7 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
     Context.Dispatch(groupCountX, groupCountY, 1);
 }
 
-void Lighting::RenderLightShadows(GraphicsContext& gfxContext, const ModelInstance& modelInstance, const GlobalConstants& globals)
+void Lighting::RenderLightShadows(GraphicsContext& gfxContext, const GlobalConstants& globals)
 {
     using namespace Renderer;
     ScopedTimer _prof(L"RenderLightShadows", gfxContext);
@@ -430,7 +431,7 @@ void Lighting::RenderLightShadows(GraphicsContext& gfxContext, const ModelInstan
             MeshSorter shadowSorter(MeshSorter::kShadows);
             shadowSorter.SetCamera(m_LightCamera[LightIndex]);
             shadowSorter.SetDepthStencilTarget(m_LightShadowTempBuffer);
-            modelInstance.Render(shadowSorter);
+            ModelInstanceManager::Get().Render(shadowSorter);
             shadowSorter.Sort();
             shadowSorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);
             

@@ -19,10 +19,11 @@ cbuffer CullConstants : register(b3)
 
 struct IndirectCommand
 {
+    uint MeshConstantsIndex;
     uint MeshletIndex;
     uint4 drawArgumentsLo;
     uint drawArgumentsHi;
-    uint2 paddings;
+    uint paddings;
 };
 
 StructuredBuffer<IndirectCommand> inputCommands : register(t30); // SRV: Indirect commands
@@ -119,7 +120,7 @@ void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
     {
         IndirectCommand inCommand = inputCommands[index + startCommand];
         MeshletConstant meshletConstant = MeshletConstants[inCommand.MeshletIndex];
-        MeshConstant meshConstant = MeshConstants[meshletConstant.MeshConstantsIndex];
+        MeshConstant meshConstant = MeshConstants[inCommand.MeshConstantsIndex];
         float4x4 WorldMatrix = meshConstant.WorldMatrix;
         
         float maxSiblingsError; // 当前层级简化误差
