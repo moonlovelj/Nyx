@@ -1,4 +1,6 @@
 ﻿#include "CommandBucketer.h"
+#include "../Renderer.h"
+#include "../Core/GraphicsCommon.h"
 
 using namespace GPUDriven;
 
@@ -77,6 +79,21 @@ void CommandBucketer::FinalizeShadow()
 	if (merged.empty())
 		return;
 
+	for (auto& psoRun : m_ShadowRuns)
+	{
+		if (psoRun.count > 0)
+		{
+			m_ArgsVisibleFlags[psoRun.psoIdx].Create(
+				L"Args Visible Flags Buffer",
+				psoRun.count,
+				sizeof(uint32_t));
+			m_CullingResultArgs[psoRun.psoIdx].Create(
+				L"Culling Result Args Buffer",
+				psoRun.count,
+				(uint32_t)sizeof(IndirectCommand));
+		}
+	}
+
 	m_ShadowArgs.Create(L"Shadow Prebucket Indirect Args", (uint32_t)merged.size(), (uint32_t)sizeof(IndirectCommand), merged.data());
 	m_ShadowFinalized = true;
 }
@@ -84,6 +101,17 @@ void CommandBucketer::FinalizeShadow()
 void CommandBucketer::ResetShadow()
 {
 	for (auto& b : m_ShadowBucketsCPU) b.clear();
+	for (auto& psoRun : m_ShadowRuns)
+	{
+		if (m_ArgsVisibleFlags.find(psoRun.psoIdx) != m_ArgsVisibleFlags.end())
+		{
+			m_ArgsVisibleFlags[psoRun.psoIdx].Destroy();
+		}
+		if (m_CullingResultArgs.find(psoRun.psoIdx) != m_CullingResultArgs.end())
+		{
+			m_CullingResultArgs[psoRun.psoIdx].Destroy();
+		}
+	}
 	m_ShadowRuns.clear();
 	m_ShadowArgs.Destroy();
 	m_ShadowFinalized = false;
@@ -111,6 +139,21 @@ void CommandBucketer::FinalizeDepth()
 	m_DepthArgs.Destroy();
 	if (merged.empty())
 		return;
+
+	for (auto& psoRun : m_DepthRuns)
+	{
+		if (psoRun.count > 0)
+		{
+			m_ArgsVisibleFlags[psoRun.psoIdx].Create(
+				L"Args Visible Flags Buffer",
+				psoRun.count,
+				sizeof(uint32_t));
+			m_CullingResultArgs[psoRun.psoIdx].Create(
+				L"Culling Result Args Buffer",
+				psoRun.count,
+				(uint32_t)sizeof(IndirectCommand));
+		}
+	}
 		
 	m_DepthArgs.Create(L"Depth Prebucket Indirect Args", (uint32_t)merged.size(), (uint32_t)sizeof(IndirectCommand), merged.data());
 	m_DepthFinalized = true;
@@ -119,6 +162,17 @@ void CommandBucketer::FinalizeDepth()
 void CommandBucketer::ResetDepth()
 {
 	for (auto& b : m_DepthBucketsCPU) b.clear();
+	for (auto& psoRun : m_DepthRuns)
+	{
+		if (m_ArgsVisibleFlags.find(psoRun.psoIdx) != m_ArgsVisibleFlags.end())
+		{
+			m_ArgsVisibleFlags[psoRun.psoIdx].Destroy();
+		}
+		if (m_CullingResultArgs.find(psoRun.psoIdx) != m_CullingResultArgs.end())
+		{
+			m_CullingResultArgs[psoRun.psoIdx].Destroy();
+		}
+	}
 	m_DepthRuns.clear();
 	m_DepthArgs.Destroy();
 	m_DepthFinalized = false;
@@ -147,6 +201,36 @@ void CommandBucketer::FinalizeColor()
 	if (total == 0)
 		return;
 
+	for (auto& psoRun : m_ColorRunsRW)
+	{
+		if (psoRun.count > 0)
+		{
+			m_ArgsVisibleFlags[psoRun.psoIdx].Create(
+				L"Args Visible Flags Buffer",
+				psoRun.count,
+				sizeof(uint32_t)); 
+			m_CullingResultArgs[psoRun.psoIdx].Create(
+				L"Culling Result Args Buffer",
+				psoRun.count,
+				(uint32_t)sizeof(IndirectCommand));
+		}
+	}
+
+	for (auto& psoRun : m_ColorRunsEQ)
+	{
+		if (psoRun.count > 0)
+		{
+			m_ArgsVisibleFlags[psoRun.psoIdx].Create(
+				L"Args Visible Flags Buffer",
+				psoRun.count,
+				sizeof(uint32_t));
+			m_CullingResultArgs[psoRun.psoIdx].Create(
+				L"Culling Result Args Buffer",
+				psoRun.count,
+				(uint32_t)sizeof(IndirectCommand));
+		}
+	}
+
 	// 拼接并调整 EQ 的 startCmd 基址
 	std::vector<IndirectCommand> mergedAll;
 	mergedAll.reserve(total);
@@ -163,6 +247,28 @@ void CommandBucketer::ResetColor()
 {
 	m_ColorBucketsCPU_RW.clear();
 	m_ColorBucketsCPU_EQ.clear();
+	for (auto& psoRun : m_ColorRunsRW)
+	{
+		if (m_ArgsVisibleFlags.find(psoRun.psoIdx) != m_ArgsVisibleFlags.end())
+		{
+			m_ArgsVisibleFlags[psoRun.psoIdx].Destroy();
+		}
+		if (m_CullingResultArgs.find(psoRun.psoIdx) != m_CullingResultArgs.end())
+		{
+			m_CullingResultArgs[psoRun.psoIdx].Destroy();
+		}
+	}
+	for (auto& psoRun : m_ColorRunsEQ)
+	{
+		if (m_ArgsVisibleFlags.find(psoRun.psoIdx) != m_ArgsVisibleFlags.end())
+		{
+			m_ArgsVisibleFlags[psoRun.psoIdx].Destroy();
+		}
+		if (m_CullingResultArgs.find(psoRun.psoIdx) != m_CullingResultArgs.end())
+		{
+			m_CullingResultArgs[psoRun.psoIdx].Destroy();
+		}
+	}
 	m_ColorRunsRW.clear();
 	m_ColorRunsEQ.clear();
 	m_ColorArgs.Destroy();
@@ -174,9 +280,90 @@ size_t CommandBucketer::CalculateMaxIndirectArgsBufferSize()
 	return std::max({ m_ShadowArgs.GetBufferSize(), m_DepthArgs.GetBufferSize(), m_ColorArgs.GetBufferSize() });
 }
 
+uint16_t CommandBucketer::GetPsoIdxToContinuousIdx(uint16_t psoIdx) const
+{
+	ASSERT(m_PsoIdxMap.find(psoIdx) != m_PsoIdxMap.end());
+	return m_PsoIdxMap.at(psoIdx);
+}
+
+ByteAddressBuffer& CommandBucketer::GetArgsVisibleFlagsBuffer(uint16_t psoIdx)
+{
+	ASSERT(m_ArgsVisibleFlags.find(psoIdx) != m_ArgsVisibleFlags.end());
+	return m_ArgsVisibleFlags.at(psoIdx);
+}
+
+StructuredBuffer& CommandBucketer::GetCullingResultArgsBuffer(uint16_t psoIdx)
+{
+	ASSERT(m_CullingResultArgs.find(psoIdx) != m_CullingResultArgs.end());
+	return m_CullingResultArgs.at(psoIdx);
+}
+
 void CommandBucketer::ResetAll() 
 {
 	ResetShadow(); 
 	ResetDepth(); 
 	ResetColor();
+	m_PsoIdxMap.clear();
+	m_ArgsVisibleFlags.clear();
+	m_CullingResultArgs.clear();
+}
+
+void CommandBucketer::FinalizeAll()
+{ 
+	FinalizeShadow(); 
+	FinalizeDepth(); 
+	FinalizeColor();
+
+	std::vector<uint16_t> sortedKeys;
+	sortedKeys.reserve(m_ArgsVisibleFlags.size());
+	for (const auto& kv : m_ArgsVisibleFlags)
+	{
+		if (kv.second.GetResource())
+		{
+			auto it = m_CullingResultArgs.find(kv.first);
+			if (it != m_CullingResultArgs.end() && it->second.GetResource())
+				sortedKeys.push_back(kv.first);
+		}
+	}
+	std::sort(sortedKeys.begin(), sortedKeys.end());
+
+	const uint32_t DestCount = static_cast<uint32_t>(sortedKeys.size());
+	if (DestCount == 0)
+		return;
+
+	m_PsoIdxMap.clear();
+	std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> SourceVisibleFlags(DestCount);
+	std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> SourceCullingResults(DestCount);
+	std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> SourceVisibleFlagsSRVs(DestCount);
+	std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> SourceCullingResultsSRVs(DestCount);
+	std::vector<uint32_t> SourceCounts(DestCount, 1u);
+
+	for (uint32_t i = 0; i < DestCount; i++)
+	{
+		const uint16_t key = sortedKeys[i];
+		m_PsoIdxMap[key] = static_cast<uint16_t>(i);
+		SourceVisibleFlags[i] = m_ArgsVisibleFlags.at(key).GetUAV();
+		SourceCullingResults[i] = m_CullingResultArgs.at(key).GetUAV();
+		SourceVisibleFlagsSRVs[i] = m_ArgsVisibleFlags.at(key).GetSRV();
+		SourceCullingResultsSRVs[i] = m_CullingResultArgs.at(key).GetSRV();
+	}
+
+	if (DestCount > 0)
+	{
+		DescriptorHandle visibleFlagsDest = Renderer::m_BindlessUAVs + 
+			uint32_t(Renderer::BindlessUAVsOffsets::kArgsVisibleFlagsBufferUAV) * Renderer::s_TextureHeap.GetDescriptorSize();
+		DescriptorHandle cullingResultsDest = Renderer::m_BindlessUAVs +
+			uint32_t(Renderer::BindlessUAVsOffsets::kCullingResultArgsBufferUAV) * Renderer::s_TextureHeap.GetDescriptorSize();
+
+		Graphics::g_Device->CopyDescriptors(1, &visibleFlagsDest, &DestCount, DestCount, SourceVisibleFlags.data(), SourceCounts.data(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		Graphics::g_Device->CopyDescriptors(1, &cullingResultsDest, &DestCount, DestCount, SourceCullingResults.data(), SourceCounts.data(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+		DescriptorHandle visibleFlagsDestSRV = Renderer::m_BindlessSRVs +
+			uint32_t(Renderer::BindlessSRVsOffsets::kArgsVisibleFlagsBufferSRV) * Renderer::s_TextureHeap.GetDescriptorSize();
+		DescriptorHandle cullingResultsDestSRV = Renderer::m_BindlessSRVs +
+			uint32_t(Renderer::BindlessSRVsOffsets::kCullingResultArgsBufferSRV) * Renderer::s_TextureHeap.GetDescriptorSize();
+
+		Graphics::g_Device->CopyDescriptors(1, &visibleFlagsDestSRV, &DestCount, DestCount, SourceVisibleFlagsSRVs.data(), SourceCounts.data(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		Graphics::g_Device->CopyDescriptors(1, &cullingResultsDestSRV, &DestCount, DestCount, SourceCullingResultsSRVs.data(), SourceCounts.data(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	}
 }

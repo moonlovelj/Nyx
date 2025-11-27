@@ -3,31 +3,9 @@
 
 #include "Common.hlsli"
 #include "CommonResources.hlsli"
+#include "CullingCommon.hlsli"
 
-#define threadBlockSize 128
 #define PIXEL_ERROR_THRESHOLD 1.0
-
-cbuffer CullConstants : register(b3)
-{
-    uint startCommand;
-    uint maxCommands;
-    
-    // 计算meshlet屏幕误差时使用的提前计算的常量
-    // (cotHalfFov * screenHeight) / 2.0;
-    float screenErrorConstant; 
-};
-
-struct IndirectCommand
-{
-    uint MeshConstantsIndex;
-    uint MeshletIndex;
-    uint4 drawArgumentsLo;
-    uint drawArgumentsHi;
-    uint paddings;
-};
-
-StructuredBuffer<IndirectCommand> inputCommands : register(t30); // SRV: Indirect commands
-AppendStructuredBuffer<IndirectCommand> outputCommands : register(u5); // UAV: Processed indirect commands
 
 bool nearlyGreater(float a, float b, float rel = 1e-4, float abse = 1e-6)
 {
@@ -112,12 +90,13 @@ bool IsSphereInFrustum(float4x4 WorldMatrix, float4 sphereLS)
 }
 
 [RootSignature(Renderer_RootSig)]
-[numthreads(threadBlockSize, 1, 1)]
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
 {
-    uint index = (groupId.x * threadBlockSize) + groupIndex;
+    uint index = (groupId.x * THREAD_GROUP_SIZE) + groupIndex;
     if (index < maxCommands)
     {
+        RWByteAddressBuffer visibleFlagUAV = ResourceDescriptorHeap[GetVisibleFlagUAVIndexInDescriptorHeap()];
         IndirectCommand inCommand = inputCommands[index + startCommand];
         MeshletConstant meshletConstant = MeshletConstants[inCommand.MeshletIndex];
         MeshConstant meshConstant = MeshConstants[inCommand.MeshConstantsIndex];
@@ -130,7 +109,11 @@ void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
             meshletConstant.lodError, meshletConstant.lodBounds,
             meshletConstant.parentError, meshletConstant.parentBounds))
         {
-            outputCommands.Append(inCommand);
+            visibleFlagUAV.Store(index * 4, CULLING_FRUSTUM_VISIBLE);
+        }
+        else
+        {
+            visibleFlagUAV.Store(index * 4, 0);
         }
     }
 }

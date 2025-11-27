@@ -12,10 +12,6 @@ Texture2D<float4> gBufferC : register(t12);
 Texture2D<float4> gBufferD : register(t13);
 Texture2D<float> gSceneDepth : register(t14);
 
-//SamplerState defaultSampler : register(s0);
-//SamplerComparisonState shadowSampler : register(s1);
-//SamplerState cubeMapSampler : register(s2);
-
 RWTexture2D<float4> sceneColor : register(u0);
 
 float3 ConvertPixelToWorldPos(uint2 Pixel)
@@ -28,32 +24,7 @@ float3 ConvertPixelToWorldPos(uint2 Pixel)
     return Result.xyz / Result.w;
 }
 
-#define _RootSig \
-    "RootFlags(0), " \
-    "CBV(b1), " \
-    "DescriptorTable(SRV(t0, numDescriptors = 10))," \
-    "DescriptorTable(SRV(t10, numDescriptors = 10))," \
-    "DescriptorTable(UAV(u0, numDescriptors = 1))," \
-    "StaticSampler(s10, maxAnisotropy = 8)," \
-    "StaticSampler(s11," \
-        "addressU = TEXTURE_ADDRESS_CLAMP," \
-        "addressV = TEXTURE_ADDRESS_CLAMP," \
-        "addressW = TEXTURE_ADDRESS_CLAMP," \
-        "comparisonFunc = COMPARISON_GREATER_EQUAL," \
-        "filter = FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT)," \
-    "StaticSampler(s12, maxAnisotropy = 8)," \
-    "StaticSampler(s13," \
-        "addressU = TEXTURE_ADDRESS_CLAMP," \
-        "addressV = TEXTURE_ADDRESS_CLAMP," \
-        "addressW = TEXTURE_ADDRESS_CLAMP," \
-        "filter = FILTER_MIN_MAG_MIP_LINEAR)," \
-    "StaticSampler(s14," \
-        "addressU = TEXTURE_ADDRESS_CLAMP," \
-        "addressV = TEXTURE_ADDRESS_CLAMP," \
-        "addressW = TEXTURE_ADDRESS_CLAMP," \
-        "filter = FILTER_MIN_MAG_MIP_POINT)"
-
-[RootSignature(_RootSig)]
+[RootSignature(Renderer_RootSig)]
 [numthreads(8, 8, 1)]
 void main(
     uint2 Gid : SV_GroupID,

@@ -22,7 +22,6 @@ namespace GPUDriven
 
 		// Shadow（4 桶：skin×alphaTest），使用 ZPass 命令
 		void AppendShadow(uint32_t bucketId, const IndirectCommand& cmd);
-		void FinalizeShadow();
 		bool HasShadow() const { return m_ShadowFinalized; }
 		const std::vector<PSORun>& GetShadowRuns() const { return m_ShadowRuns; }
 		IndirectArgsBuffer& GetShadowArgsBuffer() { return m_ShadowArgs; }
@@ -30,7 +29,6 @@ namespace GPUDriven
 
 		// Depth（ZPass 非阴影）（4 桶：skin×alphaTest）
 		void AppendDepth(uint32_t bucketId, const IndirectCommand& cmd);
-		void FinalizeDepth();
 		bool HasDepth() const { return m_DepthFinalized; }
 		const std::vector<PSORun>& GetDepthRuns() const { return m_DepthRuns; }
 		IndirectArgsBuffer& GetDepthArgsBuffer() { return m_DepthArgs; }
@@ -38,21 +36,28 @@ namespace GPUDriven
 
 		// Color（Opaque/GBuffer）：按基础 PSO 分桶；区分是否等深（EqualDepth）
 		void AppendColor(uint16_t basePsoIdx, const IndirectCommand& cmd, bool equalDepth);
-		void FinalizeColor();
 		bool HasColor() const { return m_ColorFinalized; }
 		const std::vector<PSORun>& GetColorRunsRW() const { return m_ColorRunsRW; }   // 常规深度
 		const std::vector<PSORun>& GetColorRunsEQ() const { return m_ColorRunsEQ; }   // 等深
 		IndirectArgsBuffer& GetColorArgsBuffer() { return m_ColorArgs; }
 		void ResetColor();
 
-		// 如需重建（场景切换、渲染模式切换）
 		void ResetAll();
 
-		void FinalizeAll() { FinalizeShadow(); FinalizeDepth(); FinalizeColor(); }
+		void FinalizeAll();
 
 		size_t CalculateMaxIndirectArgsBufferSize();
 
+		uint16_t GetPsoIdxToContinuousIdx(uint16_t psoIdx) const;
+
+		ByteAddressBuffer& GetArgsVisibleFlagsBuffer(uint16_t psoIdx);
+		StructuredBuffer& GetCullingResultArgsBuffer(uint16_t psoIdx);
+
 	private:
+		void FinalizeShadow();
+		void FinalizeDepth();
+		void FinalizeColor();
+
 		CommandBucketer() = default;
 
 		// shadow/depth：固定4桶
@@ -62,6 +67,7 @@ namespace GPUDriven
 		// color：基础 PSO -> 命令列表（区分等深/常规）
 		std::unordered_map<uint16_t, std::vector<IndirectCommand>> m_ColorBucketsCPU_RW;
 		std::unordered_map<uint16_t, std::vector<IndirectCommand>> m_ColorBucketsCPU_EQ;
+		std::unordered_map<uint16_t, uint16_t> m_PsoIdxMap; // 把离散的PSOIdx映射成连续的从0开始的数值
 
 		// 合并后的结果
 		std::vector<PSORun> m_ShadowRuns;
@@ -72,6 +78,9 @@ namespace GPUDriven
 		IndirectArgsBuffer m_ShadowArgs;
 		IndirectArgsBuffer m_DepthArgs;
 		IndirectArgsBuffer m_ColorArgs;
+
+		std::unordered_map<uint16_t, ByteAddressBuffer> m_ArgsVisibleFlags; // 用于剔除的中间数据
+		std::unordered_map<uint16_t, StructuredBuffer> m_CullingResultArgs;
 
 		bool m_ShadowFinalized = false;
 		bool m_DepthFinalized = false;

@@ -50,6 +50,7 @@
 #include "CompiledShaders/GBufferNoTangentPS.h"
 #include "CompiledShaders/GBufferNoTangentNoUV1PS.h"
 #include "CompiledShaders/FrustumCullCS.h"
+#include "CompiledShaders/FillCullingResultCS.h"
 
 #pragma warning(disable:4319) // '~': zero extending 'uint32_t' to 'uint64_t' of greater size
 
@@ -61,6 +62,7 @@ namespace Renderer
 {
     BoolVar SeparateZPass("Renderer/Separate Z Pass", true);
     BoolVar DeferredRendering("Renderer/Deferred Rendering", true);
+    BoolVar UseCull("Renderer/Use Cull", true);
 	BoolVar UseGPUFrustumCull("Renderer/Use GPU Frustum Cull", true);
     
 	const char* ViewModeLabels[] = { "Lit", "MeshletLOD", "MeshletID", "MeshletTriangle"};
@@ -85,11 +87,13 @@ namespace Renderer
 
     DescriptorHandle m_CommonTextures;
     DescriptorHandle m_GPUDrivenBuffers;
-    DescriptorHandle m_CommonUAVs;
+	DescriptorHandle m_CommonUAVs;
+	DescriptorHandle m_BindlessSRVs;
+	DescriptorHandle m_BindlessUAVs;
 
-    StructuredBuffer m_IndirectArgsBuffer;
     UploadBuffer m_IndirectArgsCounterBufferReset;
 	ComputePSO m_FrustrumCullPSO(L"Renderer: Frustum Cull PSO");
+	ComputePSO m_FillCullingResultPSO(L"Renderer: Fill Culling Result PSO");
 }
 
 void Renderer::Initialize(void)
@@ -122,7 +126,7 @@ void Renderer::Initialize(void)
     m_RootSig[kCommonSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 20);
 	m_RootSig[kCommonCBV].InitAsConstantBuffer(1);
 	m_RootSig[kRootConstants].InitAsConstants(2, 4);
-	m_RootSig[kRootConstants1].InitAsConstants(3, 4);
+	m_RootSig[kRootConstants1].InitAsConstants(3, 12);
 	m_RootSig[kViewModeConstants].InitAsConstants(4, 4);
 	m_RootSig[kGPUDrivenSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 20, 10);
     m_RootSig[kCommonSRV].InitAsBufferSRV(30);
@@ -276,6 +280,8 @@ void Renderer::Initialize(void)
 
     g_Device->CopyDescriptors(1, &m_CommonTextures, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
+	m_BindlessSRVs = s_TextureHeap.Alloc(256);
+	m_BindlessUAVs = s_TextureHeap.Alloc(256);
     m_CommonUAVs = s_TextureHeap.Alloc(10);
 
     g_SSAOFullScreenID = g_SSAOFullScreen.GetVersionID();
@@ -293,6 +299,10 @@ void Renderer::Initialize(void)
     m_FrustrumCullPSO.SetRootSignature(m_RootSig);
     m_FrustrumCullPSO.SetComputeShader(g_pFrustumCullCS, sizeof(g_pFrustumCullCS));
     m_FrustrumCullPSO.Finalize();
+
+	m_FillCullingResultPSO.SetRootSignature(m_RootSig);
+    m_FillCullingResultPSO.SetComputeShader(g_pFillCullingResultCS, sizeof(g_pFillCullingResultCS));
+    m_FillCullingResultPSO.Finalize();
 
     s_Initialized = true;
 }
@@ -551,7 +561,7 @@ uint8_t Renderer::GetPSO(uint16_t psoFlags)
 #endif
     sm_PSOs.push_back(ColorPSO);
 
-    ASSERT(sm_PSOs.size() <= 256, "Ran out of room for unique PSOs");
+    ASSERT(sm_PSOs.size() <= 64, "Ran out of room for unique PSOs");
 
     return (uint8_t)sm_PSOs.size() - 2;
 }
@@ -590,33 +600,18 @@ void Renderer::DrawSkybox( GraphicsContext& gfxContext, const Camera& Camera, co
     gfxContext.Draw(3);
 }
 
-void Renderer::FrustrumCulling(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, const BaseCamera* camera,
-    const D3D12_VIEWPORT& viewport, IndirectArgsBuffer& inArgsBuffer, uint32_t startCommandOffset, uint32_t maxCommands)
+void Renderer::FrustrumCulling(GraphicsContext& gfxContext, 
+    const GlobalConstants& inGlobals, const BaseCamera* camera,
+    const D3D12_VIEWPORT& viewport, IndirectArgsBuffer& inArgsBuffer,
+    ByteAddressBuffer& outputVisibleBuffer, uint32_t startCommandOffset, 
+    uint32_t maxCommands, uint16_t psoIdx)
 {
     ScopedTimer _prof(L"Renderer::FrustrumCulling", gfxContext);
 
     ComputeContext& context = gfxContext.GetComputeContext();
-
 	auto& bucketer = GPUDriven::CommandBucketer::Get();
-	const size_t bufferSize = bucketer.CalculateMaxIndirectArgsBufferSize();
-	if (m_IndirectArgsBuffer.GetBufferSize() < bufferSize)
-	{
-		m_IndirectArgsBuffer.Destroy();
-		m_IndirectArgsBuffer.Create(L"IndirectArgsBuffer", Math::DivideByMultiple((uint32_t)bufferSize, (uint32_t)sizeof(GPUDriven::IndirectCommand)), (uint32_t)sizeof(GPUDriven::IndirectCommand));
-		uint32_t DestCount = 1;
-		uint32_t SourceCounts[] = { 1 };
-		D3D12_CPU_DESCRIPTOR_HANDLE SourceBuffers[] =
-		{
-			m_IndirectArgsBuffer.GetUAV()
-		};
-		DescriptorHandle dest = Renderer::m_CommonUAVs + 5 * Renderer::s_TextureHeap.GetDescriptorSize();
-		g_Device->CopyDescriptors(1, &dest, &DestCount, DestCount, SourceBuffers, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-	}
 
-	context.TransitionResource(m_IndirectArgsBuffer.GetCounterBuffer(), D3D12_RESOURCE_STATE_COPY_DEST);
-	context.CopyBufferRegion(m_IndirectArgsBuffer.GetCounterBuffer(), 0, m_IndirectArgsCounterBufferReset, 0, sizeof(UINT));
-
-    context.TransitionResource(m_IndirectArgsBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    context.TransitionResource(outputVisibleBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource(inArgsBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
 	context.SetRootSignature(m_RootSig);
@@ -636,13 +631,58 @@ void Renderer::FrustrumCulling(GraphicsContext& gfxContext, const GlobalConstant
 		float cotHalfFov = 1.0f / std::tanf(0.5f * cameraProj->GetFOV());
         screenErrorConstant = cotHalfFov * viewport.Height * 0.5f;
     }
-	context.SetConstants(kRootConstants1, startCommandOffset, maxCommands, screenErrorConstant);
 
-	const uint32_t groupCountX = Math::DivideByMultiple(maxCommands, 128);
-	context.Dispatch(groupCountX, 1, 1);
+	uint32_t BindlessSRVDescriptorTable = Renderer::s_TextureHeap.GetOffsetOfHandle(m_BindlessSRVs);
+	uint32_t BindlessUAVDescriptorTable = Renderer::s_TextureHeap.GetOffsetOfHandle(m_BindlessUAVs);
 
-	context.TransitionResource(m_IndirectArgsBuffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-	context.TransitionResource(m_IndirectArgsBuffer.GetCounterBuffer(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+	context.SetConstants(kRootConstants1, startCommandOffset, maxCommands, 
+        screenErrorConstant, bucketer.GetPsoIdxToContinuousIdx(psoIdx));
+	context.SetConstant(kRootConstants1, 4, (uint32_t)BindlessSRVsOffsets::kArgsVisibleFlagsBufferSRV + BindlessSRVDescriptorTable);
+	context.SetConstant(kRootConstants1, 5, (uint32_t)BindlessSRVsOffsets::kCullingResultArgsBufferSRV + BindlessSRVDescriptorTable);
+	context.SetConstant(kRootConstants1, 6, (uint32_t)BindlessUAVsOffsets::kArgsVisibleFlagsBufferUAV + BindlessUAVDescriptorTable);
+	context.SetConstant(kRootConstants1, 7, (uint32_t)BindlessUAVsOffsets::kCullingResultArgsBufferUAV + BindlessUAVDescriptorTable);
+
+	context.Dispatch1D(maxCommands);
+}
+
+void Renderer::FillCullingResult(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, 
+    IndirectArgsBuffer& inArgsBuffer, ByteAddressBuffer& visibleBuffer, StructuredBuffer& ResultBuffer,
+    uint32_t startCommandOffset, uint32_t maxCommands, uint16_t psoIdx, CullingStage cullingStage)
+{
+	ScopedTimer _prof(L"Renderer::FillCullingResult", gfxContext);
+	ComputeContext& context = gfxContext.GetComputeContext();
+	auto& bucketer = GPUDriven::CommandBucketer::Get();
+
+	context.TransitionResource(ResultBuffer.GetCounterBuffer(), D3D12_RESOURCE_STATE_COPY_DEST);
+    context.CopyBufferRegion(ResultBuffer.GetCounterBuffer(), 0, m_IndirectArgsCounterBufferReset, 0, sizeof(UINT));
+    context.TransitionResource(visibleBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    context.TransitionResource(inArgsBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    context.TransitionResource(ResultBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+	context.SetRootSignature(m_RootSig);
+	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+	context.SetPipelineState(m_FillCullingResultPSO);
+
+	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
+	context.SetDescriptorTable(kGPUDrivenSRVs, m_GPUDrivenBuffers);
+	context.SetBufferSRV(kCommonSRV, inArgsBuffer);
+	context.SetDescriptorTable(kCommonUAVs, m_CommonUAVs);
+
+	uint32_t BindlessSRVDescriptorTable = Renderer::s_TextureHeap.GetOffsetOfHandle(m_BindlessSRVs);
+	uint32_t BindlessUAVDescriptorTable = Renderer::s_TextureHeap.GetOffsetOfHandle(m_BindlessUAVs);
+
+	context.SetConstants(kRootConstants1, startCommandOffset, maxCommands,
+		0.f, bucketer.GetPsoIdxToContinuousIdx(psoIdx));
+	context.SetConstant(kRootConstants1, 4, (uint32_t)BindlessSRVsOffsets::kArgsVisibleFlagsBufferSRV + BindlessSRVDescriptorTable);
+	context.SetConstant(kRootConstants1, 5, (uint32_t)BindlessSRVsOffsets::kCullingResultArgsBufferSRV + BindlessSRVDescriptorTable);
+	context.SetConstant(kRootConstants1, 6, (uint32_t)BindlessUAVsOffsets::kArgsVisibleFlagsBufferUAV + BindlessUAVDescriptorTable);
+	context.SetConstant(kRootConstants1, 7, (uint32_t)BindlessUAVsOffsets::kCullingResultArgsBufferUAV + BindlessUAVDescriptorTable);
+    context.SetConstant(kRootConstants1, 8, (uint32_t)cullingStage);
+
+    context.Dispatch1D(maxCommands);
+
+	context.TransitionResource(ResultBuffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+    context.TransitionResource(ResultBuffer.GetCounterBuffer(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
 }
 
 void MeshSorter::AddMesh( const Mesh& mesh, float distance,
@@ -940,46 +980,93 @@ void MeshSorter::RenderMeshes(
                         if (bucketer.HasShadow())
                         {
 							auto& args = bucketer.GetShadowArgsBuffer();
-							context.TransitionResource(args, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-
-							for (const auto& run : bucketer.GetShadowRuns())
-							{
-								if (UseGPUFrustumCull)
-								{
-                                    // TODO 重构，裁剪应该应该在设置管线状态前进行
-									FrustrumCulling(context, globals, m_Camera, m_Viewport, args, (uint32_t)run.startCmd, run.count);
-									context.SetPipelineState(sm_PSOs[run.psoIdx]);
-									GPUDriven::DrawIndirect(context, m_IndirectArgsBuffer, run.count, 0, &m_IndirectArgsBuffer.GetCounterBuffer(), 0);
-								}
-                                else
+                            if (UseCull)
+                            {
+                                CullingStage cullingStage = CullingStage::kNoCulled;
+                                if (UseGPUFrustumCull)
                                 {
-                                    context.SetPipelineState(sm_PSOs[run.psoIdx]);
-                                    GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
+									cullingStage = CullingStage::kFrustrumCulled;
                                 }
-							}
+
+								for (const auto& run : bucketer.GetShadowRuns())
+								{
+									if (UseGPUFrustumCull)
+									{
+										FrustrumCulling(context, globals, m_Camera, m_Viewport, args, 
+                                            bucketer.GetArgsVisibleFlagsBuffer(run.psoIdx),
+                                            (uint32_t)run.startCmd, run.count, run.psoIdx);
+									}
+								}
+
+								for (const auto& run : bucketer.GetShadowRuns())
+								{
+									FillCullingResult(context, globals, args,
+										bucketer.GetArgsVisibleFlagsBuffer(run.psoIdx),
+                                        bucketer.GetCullingResultArgsBuffer(run.psoIdx),
+										(uint32_t)run.startCmd, run.count, run.psoIdx, cullingStage);
+								}
+
+								for (const auto& run : bucketer.GetShadowRuns())
+								{
+									context.SetPipelineState(sm_PSOs[run.psoIdx]);
+									GPUDriven::DrawIndirect(context, bucketer.GetCullingResultArgsBuffer(run.psoIdx), run.count, 0, &bucketer.GetCullingResultArgsBuffer(run.psoIdx).GetCounterBuffer(), 0);
+								}
+                            }
+                            else
+                            {
+								for (const auto& run : bucketer.GetShadowRuns())
+								{
+									context.SetPipelineState(sm_PSOs[run.psoIdx]);
+									GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
+								}
+                            }
                         }
                     }
                     else
                     {
                         if (bucketer.HasDepth())
                         {
-                            auto& args = bucketer.GetDepthArgsBuffer();
-                            context.TransitionResource(args, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-
-                            for (const auto& run : bucketer.GetDepthRuns())
-                            {
+							auto& args = bucketer.GetDepthArgsBuffer();
+							if (UseCull)
+							{
+								CullingStage cullingStage = CullingStage::kNoCulled;
 								if (UseGPUFrustumCull)
 								{
-									FrustrumCulling(context, globals, m_Camera, m_Viewport, args, (uint32_t)run.startCmd, run.count);
-									context.SetPipelineState(sm_PSOs[run.psoIdx]);
-									GPUDriven::DrawIndirect(context, m_IndirectArgsBuffer, run.count, 0, &m_IndirectArgsBuffer.GetCounterBuffer(), 0);
+									cullingStage = CullingStage::kFrustrumCulled;
 								}
-                                else
-                                {
-                                    context.SetPipelineState(sm_PSOs[run.psoIdx]);
-                                    GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
-                                }
-                            }
+
+								for (const auto& run : bucketer.GetDepthRuns())
+								{
+									if (UseGPUFrustumCull)
+									{
+										FrustrumCulling(context, globals, m_Camera, m_Viewport, args,
+											bucketer.GetArgsVisibleFlagsBuffer(run.psoIdx),
+											(uint32_t)run.startCmd, run.count, run.psoIdx);
+									}
+								}
+
+								for (const auto& run : bucketer.GetDepthRuns())
+								{
+									FillCullingResult(context, globals, args,
+										bucketer.GetArgsVisibleFlagsBuffer(run.psoIdx),
+										bucketer.GetCullingResultArgsBuffer(run.psoIdx),
+										(uint32_t)run.startCmd, run.count, run.psoIdx, cullingStage);
+								}
+
+								for (const auto& run : bucketer.GetDepthRuns())
+								{
+									context.SetPipelineState(sm_PSOs[run.psoIdx]);
+									GPUDriven::DrawIndirect(context, bucketer.GetCullingResultArgsBuffer(run.psoIdx), run.count, 0, &bucketer.GetCullingResultArgsBuffer(run.psoIdx).GetCounterBuffer(), 0);
+								}
+							}
+							else
+							{
+								for (const auto& run : bucketer.GetDepthRuns())
+								{
+									context.SetPipelineState(sm_PSOs[run.psoIdx]);
+									GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
+								}
+							}
                         }
                     }	
 				}
@@ -988,44 +1075,91 @@ void MeshSorter::RenderMeshes(
                     if (bucketer.HasColor())
                     {
                         auto& args = bucketer.GetColorArgsBuffer();
-                        context.TransitionResource(args, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+
                         if (!SeparateZPass)
                         {
-                            const auto& runs = bucketer.GetColorRunsRW();
-							for (const auto& run : runs)
+							if (UseCull)
 							{
-								const uint16_t psoToUse = run.psoIdx;
+								CullingStage cullingStage = CullingStage::kNoCulled;
 								if (UseGPUFrustumCull)
 								{
-									FrustrumCulling(context, globals, m_Camera, m_Viewport, args, (uint32_t)run.startCmd, run.count);
-									context.SetPipelineState(sm_PSOs[psoToUse]);
-									GPUDriven::DrawIndirect(context, m_IndirectArgsBuffer, run.count, 0, &m_IndirectArgsBuffer.GetCounterBuffer(), 0);
+									cullingStage = CullingStage::kFrustrumCulled;
 								}
-                                else
-                                {
-                                    context.SetPipelineState(sm_PSOs[psoToUse]);
-                                    GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
-                                }
+
+								for (const auto& run : bucketer.GetColorRunsRW())
+								{
+									if (UseGPUFrustumCull)
+									{
+										FrustrumCulling(context, globals, m_Camera, m_Viewport, args,
+											bucketer.GetArgsVisibleFlagsBuffer(run.psoIdx),
+											(uint32_t)run.startCmd, run.count, run.psoIdx);
+									}
+								}
+
+								for (const auto& run : bucketer.GetColorRunsRW())
+								{
+									FillCullingResult(context, globals, args,
+										bucketer.GetArgsVisibleFlagsBuffer(run.psoIdx),
+										bucketer.GetCullingResultArgsBuffer(run.psoIdx),
+										(uint32_t)run.startCmd, run.count, run.psoIdx, cullingStage);
+								}
+
+								for (const auto& run : bucketer.GetColorRunsRW())
+								{
+									context.SetPipelineState(sm_PSOs[run.psoIdx]);
+									GPUDriven::DrawIndirect(context, bucketer.GetCullingResultArgsBuffer(run.psoIdx), run.count, 0, &bucketer.GetCullingResultArgsBuffer(run.psoIdx).GetCounterBuffer(), 0);
+								}
+							}
+							else
+							{
+								for (const auto& run : bucketer.GetColorRunsRW())
+								{
+									context.SetPipelineState(sm_PSOs[run.psoIdx]);
+									GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
+								}
 							}
                         }
                         
-						const auto& runs = bucketer.GetColorRunsEQ();
-						for (const auto& run : runs)
+						if (UseCull)
 						{
-                            const uint16_t psoToUse = run.psoIdx + 1;
-                            if (UseGPUFrustumCull)
-                            {
-								FrustrumCulling(context, globals, m_Camera, m_Viewport, args, (uint32_t)run.startCmd, run.count);
-                                context.SetPipelineState(sm_PSOs[psoToUse]);
-                                GPUDriven::DrawIndirect(context, m_IndirectArgsBuffer, run.count, 0, &m_IndirectArgsBuffer.GetCounterBuffer(), 0);
-                            }
-                            else
-                            {
-								
-								context.SetPipelineState(sm_PSOs[psoToUse]);
+							CullingStage cullingStage = CullingStage::kNoCulled;
+							if (UseGPUFrustumCull)
+							{
+								cullingStage = CullingStage::kFrustrumCulled;
+							}
+
+							for (const auto& run : bucketer.GetColorRunsEQ())
+							{
+								if (UseGPUFrustumCull)
+								{
+									FrustrumCulling(context, globals, m_Camera, m_Viewport, args,
+										bucketer.GetArgsVisibleFlagsBuffer(run.psoIdx),
+										(uint32_t)run.startCmd, run.count, run.psoIdx);
+								}
+							}
+
+							for (const auto& run : bucketer.GetColorRunsEQ())
+							{
+								FillCullingResult(context, globals, args,
+									bucketer.GetArgsVisibleFlagsBuffer(run.psoIdx),
+									bucketer.GetCullingResultArgsBuffer(run.psoIdx),
+									(uint32_t)run.startCmd, run.count, run.psoIdx, cullingStage);
+							}
+
+							for (const auto& run : bucketer.GetColorRunsEQ())
+							{
+								context.SetPipelineState(sm_PSOs[run.psoIdx]);
+								GPUDriven::DrawIndirect(context, bucketer.GetCullingResultArgsBuffer(run.psoIdx), run.count, 0, &bucketer.GetCullingResultArgsBuffer(run.psoIdx).GetCounterBuffer(), 0);
+							}
+						}
+						else
+						{
+							for (const auto& run : bucketer.GetColorRunsEQ())
+							{
+								context.SetPipelineState(sm_PSOs[run.psoIdx]);
 								GPUDriven::DrawIndirect(context, args, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
-                            }
-						}  
+							}
+						}
                     }
 				}
 

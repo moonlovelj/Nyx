@@ -210,6 +210,9 @@
     <None Include="Shaders\ViewMode.hlsli">
       <Filter>Shaders</Filter>
     </None>
+    <None Include="Shaders\CullingCommon.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Shaders\DefaultVS.hlsl">
@@ -309,6 +312,9 @@
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\FrustumCullCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\FillCullingResultCS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>

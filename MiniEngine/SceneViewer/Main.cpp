@@ -1,4 +1,4 @@
-#include "GameCore.h"
+﻿#include "GameCore.h"
 #include "CameraController.h"
 #include "BufferManager.h"
 #include "Camera.h"
@@ -23,6 +23,7 @@
 #include "SponzaRenderer.h"
 #include "IBL.h"
 #include "TextureConvert.h"
+#include "ModelInstanceManager.h"
 
 extern "C" {
 	__declspec(dllexport) extern const UINT D3D12SDKVersion = 616; // 对应Agility SDK版本
@@ -56,7 +57,6 @@ private:
     D3D12_VIEWPORT m_MainViewport;
     D3D12_RECT m_MainScissor;
 
-    ModelInstance m_ModelInst;
     ShadowCamera m_SunShadowCamera;
 };
 
@@ -67,12 +67,13 @@ NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0
 NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f);
 NumVar g_SunLightSize("Viewer/Lighting/Sun Light Size", 0.5f, 0.0f, 2.0f, 0.1f);
 NumVar g_SunShadowBias("Viewer/Lighting/Sun Shadow Bias", 4.f, 1.0f, 20.0f, 1.f );
+BoolVar g_SunShadow("Viewer/Lighting/Sun Shadow", false);
 BoolVar g_UseglTFCamera("Viewer/Camera/Use glTF Camera", false);
 
 void ChangeIBLSet(EngineVar::ActionType);
 void ChangeIBLBias(EngineVar::ActionType);
 
-//DynamicEnumVar g_IBLSet("Viewer/Lighting/Environment", ChangeIBLSet);
+//DynamicEnumVar g_IBLSet("Viewer/Lighting/Environment", ChangeIBLSet)ModelInstanceManager;
 std::vector<std::pair<TextureRef, TextureRef>> g_IBLTextures;
 //NumVar g_IBLBias("Viewer/Lighting/Gloss Reduction", 2.0f, 0.0f, 10.0f, 1.0f, ChangeIBLBias);
 
@@ -242,41 +243,43 @@ void SceneViewer::Startup( void )
 
     if (CommandLineArgs::GetString(L"model", gltfFileName) == false)
     {
-        m_ModelInst = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
+		//m_ModelInst = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
+		//m_ModelInst = Renderer::LoadModel(L"Assets/old_federal_building/scene.gltf", forceRebuild);
 		//m_ModelInst = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
-		//m_ModelInst = Renderer::LoadModel(L"Assets/DamagedHelmet/glTF/DamagedHelmet.gltf", forceRebuild);
-        //m_ModelInst = Renderer::LoadModel(L"Assets/Test/test.gltf", forceRebuild);
+		//auto model = Renderer::LoadModel(L"Assets/DamagedHelmet/glTF/DamagedHelmet.gltf", forceRebuild);
+        //auto model = Renderer::LoadModel(L"Assets/AnimTest/AnimTest.gltf", forceRebuild);
+        //auto model = Renderer::LoadModel(L"Assets/lumber_mill_wood_factory_gltf/scene.gltf", forceRebuild);
+		auto model = Renderer::LoadModel(L"Assets/jinx/scene.gltf", forceRebuild);
         //m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
-        OrientedBox obb = m_ModelInst.GetBoundingBox();
+
+        ModelInstanceManager::Get().Initialize(model, 6400);
+        OrientedBox obb = ModelInstanceManager::Get().GetModelInstance(0).GetBoundingBox();
         float modelRadius = Length(obb.GetDimensions()) * 0.5f;
         const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 0.5f, 0.0f, 0.0f);
         m_Camera.SetEyeAtUp( eye, obb.GetCenter(), Vector3(kYUnitVector) );
-        m_ModelInst.LoopAllAnimations();
     }
     else
     {
-        m_ModelInst = Renderer::LoadModel(gltfFileName, forceRebuild);
-        m_ModelInst.LoopAllAnimations();
-        //m_ModelInst.Resize(10.0f);
-
+        auto model = Renderer::LoadModel(gltfFileName, forceRebuild);
+        ModelInstanceManager::Get().Initialize(model);
         MotionBlur::Enable = false;
     }
 
-    m_Camera.SetZRange(0.01f, 1000.0f);
+    m_Camera.SetZRange(0.01f, 10000.0f);
 	if (gltfFileName.size() == 0)
 		m_CameraController.reset(new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector)));
 	else
-        m_CameraController.reset(new OrbitCamera(m_Camera, m_ModelInst.GetBoundingSphere(), Vector3(kYUnitVector)));
+        m_CameraController.reset(new OrbitCamera(m_Camera, ModelInstanceManager::Get().GetModelInstance(0).GetBoundingSphere(), Vector3(kYUnitVector)));
 
-    const Vector3 BoxCenter = m_ModelInst.GetBoundingBox().GetCenter();
-    const Vector3 BoxDimensions = m_ModelInst.GetBoundingBox().GetDimensions();
+    //const Vector3 BoxCenter = m_ModelInst.GetBoundingBox().GetCenter();
+    //const Vector3 BoxDimensions = m_ModelInst.GetBoundingBox().GetDimensions();
     //Lighting::CreateRandomLights(BoxCenter - BoxDimensions * 0.5f, BoxCenter + BoxDimensions * 0.5f);
 }
 
 void SceneViewer::Cleanup( void )
 {
     // Free up resources in an orderly fashion
-    m_ModelInst = nullptr;
+	ModelInstanceManager::Get().Cleanup();
 
     g_IBLTextures.clear();
 
@@ -301,7 +304,7 @@ void SceneViewer::Update( float deltaT )
     else if (GameInput::IsFirstPressed(GameInput::kRShoulder))
         DebugZoom.Increment();
 
-    const size_t NumCameras = m_ModelInst.GetNumCameras();
+    const size_t NumCameras = ModelInstanceManager::Get().GetModelInstance(0).GetNumCameras();
     const bool bUseglTFCamera = NumCameras > 0 && g_UseglTFCamera;
 
     if (!bUseglTFCamera)
@@ -309,14 +312,14 @@ void SceneViewer::Update( float deltaT )
 
     GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Update");
 
-    m_ModelInst.Update(gfxContext, deltaT);
+    ModelInstanceManager::Get().Update(gfxContext, deltaT);
 
     gfxContext.Finish();
     
     //m_Camera.SetAspectRatio((float)g_DisplayHeight / g_DisplayWidth);
 	if (bUseglTFCamera)
 	{
-		std::shared_ptr<Math::Camera> Camera = m_ModelInst.GetCameras()[0];
+		std::shared_ptr<Math::Camera> Camera = ModelInstanceManager::Get().GetModelInstance(0).GetCameras()[0];
 		m_Camera.SetFOV(Camera->GetFOV());
 		m_Camera.SetZRange(Camera->GetNearClip(), Camera->GetFarClip());
 		m_Camera.SetPosition(Camera->GetPosition());
@@ -361,7 +364,7 @@ void SceneViewer::RenderScene( void )
     // gfxContext.SetViewportAndScissor(0, 0, g_SceneColorBuffer.GetWidth(), g_SceneColorBuffer.GetHeight());
 
     // Rendering something
-    if (!m_ModelInst.IsNull())
+    if (ModelInstanceManager::Get().GetNumModelInstances() > 0)
     {
         IBL::Precompute(gfxContext);
         
@@ -372,7 +375,7 @@ void SceneViewer::RenderScene( void )
         float sinphi = sinf(g_SunInclination * 3.14159f * 0.5f);
 
         Vector3 SunDirection = Normalize(Vector3( costheta * cosphi, sinphi, sintheta * cosphi ));
-        Vector3 ShadowBounds = Vector3(m_ModelInst.GetRadius());
+        Vector3 ShadowBounds = Vector3(ModelInstanceManager::Get().GetModelInstance(0).GetRadius());
         //m_SunShadowCamera.UpdateMatrix(-SunDirection, m_ModelInst.GetCenter(), ShadowBounds,
         m_SunShadowCamera.UpdateMatrix(-SunDirection, Vector3(0, -5.0f, 0), Vector3(50, 30, 30),
             (uint32_t)g_ShadowBuffer.GetWidth(), (uint32_t)g_ShadowBuffer.GetHeight(), 16);
@@ -416,7 +419,7 @@ void SceneViewer::RenderScene( void )
 		sorter.SetDepthStencilTarget(g_SceneDepthBuffer);
 		sorter.AddRenderTarget(g_SceneColorBuffer);
 
-        m_ModelInst.Render(sorter);
+        ModelInstanceManager::Get().Render(sorter);
 
         sorter.Sort();
 
@@ -433,6 +436,7 @@ void SceneViewer::RenderScene( void )
             
             ScopedTimer _outerprof(L"Main Render", gfxContext);
 
+            if (g_SunShadow)
             {
                 ScopedTimer _prof(L"Sun Shadow Map", gfxContext);
 
@@ -440,14 +444,14 @@ void SceneViewer::RenderScene( void )
 				shadowSorter.SetCamera(m_SunShadowCamera);
 				shadowSorter.SetDepthStencilTarget(g_ShadowBuffer);
 
-                m_ModelInst.Render(shadowSorter);
+                ModelInstanceManager::Get().Render(shadowSorter);
 
                 shadowSorter.Sort();
                 shadowSorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);
             }
 
             {
-                Lighting::RenderLightShadows(gfxContext, m_ModelInst, globals);
+                Lighting::RenderLightShadows(gfxContext, globals);
             }
 
             gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
@@ -493,6 +497,8 @@ void SceneViewer::RenderScene( void )
                 gfxContext.SetViewportAndScissor(viewport, scissor);
 
                 sorter.RenderMeshes(MeshSorter::kGBuffer, gfxContext, globals);
+
+				g_FurthestHZB.GenerateHZB(gfxContext, g_SceneDepthBuffer);
             }
 
             {

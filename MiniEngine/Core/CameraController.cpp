@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -27,8 +27,8 @@ FlyingFPSCamera::FlyingFPSCamera( Camera& camera, Vector3 worldUp ) : CameraCont
 
     m_HorizontalLookSensitivity = 2.0f;
     m_VerticalLookSensitivity = 2.0f;
-    m_MoveSpeed = 5.0f;
-    m_StrafeSpeed = 5.0f;
+    m_MoveSpeed = 15.0f;
+    m_StrafeSpeed = 15.0f;
     m_MouseSensitivityX = 1.0f;
     m_MouseSensitivityY = 1.0f;
 

@@ -26,7 +26,7 @@
     "DescriptorTable(SRV(t0, numDescriptors = 20))," \
     "CBV(b1), " \
     "RootConstants(b2, num32BitConstants = 4), " \
-    "RootConstants(b3, num32BitConstants = 4), " \
+    "RootConstants(b3, num32BitConstants = 12), " \
     "RootConstants(b4, num32BitConstants = 4), " \
     "DescriptorTable(SRV(t20, numDescriptors = 10))," \
     "SRV(t30), " \

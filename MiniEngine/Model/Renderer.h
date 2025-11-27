@@ -46,6 +46,8 @@ namespace Renderer
     extern DescriptorHeap s_SamplerHeap;
 	extern DescriptorHandle m_CommonTextures;
 	extern DescriptorHandle m_CommonUAVs;
+	extern DescriptorHandle m_BindlessSRVs;
+    extern DescriptorHandle m_BindlessUAVs;
 
 	extern float s_SpecularIBLRange;
 	extern float s_SpecularIBLBias;
@@ -63,10 +65,31 @@ namespace Renderer
 		kViewModeConstants,
 		kGPUDrivenSRVs,
 		kCommonSRV,
-		kCommonUAVs,
+        kCommonUAVs,
         kCommonUAV,
         kNumRootBindings
     };
+
+	enum BindlessSRVsOffsets
+	{
+		kArgsVisibleFlagsBufferSRV = 0,
+		kCullingResultArgsBufferSRV = 64
+	};
+
+    enum BindlessUAVsOffsets
+    {
+        kArgsVisibleFlagsBufferUAV = 0,
+        kCullingResultArgsBufferUAV = 64,
+        kSceneColorUAV = 128,
+	};
+
+	enum CullingStage
+	{
+		kNoCulled = 0,
+		kFrustrumCulled = 1,
+		kOcclusionPass1Culled = 2,
+		kOcclusionPass2Culled = 3
+	};
 
     void Initialize(void);
     void Shutdown(void);
@@ -77,7 +100,13 @@ namespace Renderer
     void UpdateGlobalDescriptors(void);
     void DrawSkybox( GraphicsContext& gfxContext, const Camera& camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor );
 	void FrustrumCulling(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, const BaseCamera* camera,
-        const D3D12_VIEWPORT& viewport, IndirectArgsBuffer& inArgsBuffer, uint32_t startCommandOffset, uint32_t maxCommands);
+        const D3D12_VIEWPORT& viewport, IndirectArgsBuffer& inArgsBuffer, ByteAddressBuffer& outputVisibleBuffer,
+        uint32_t startCommandOffset, uint32_t maxCommands, uint16_t psoIdx);
+
+	void FillCullingResult(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, 
+        IndirectArgsBuffer& inArgsBuffer, ByteAddressBuffer& visibleBuffer, 
+        StructuredBuffer& ResultBuffer, uint32_t startCommandOffset,
+        uint32_t maxCommands, uint16_t psoIdx, CullingStage cullingStage);
 
     class MeshSorter
     {
