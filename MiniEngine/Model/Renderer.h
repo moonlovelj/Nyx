@@ -20,6 +20,7 @@
 #include "../Core/UploadBuffer.h"
 #include "../Core/TextureManager.h"
 #include "GPUDriven/ExecuteIndirect.h"
+#include "Shaders/BindlessIndices.hlsli"
 #include <cstdint>
 #include <vector>
 
@@ -44,10 +45,7 @@ namespace Renderer
     extern RootSignature m_RootSig;
     extern DescriptorHeap s_TextureHeap;
     extern DescriptorHeap s_SamplerHeap;
-	extern DescriptorHandle m_CommonTextures;
-	extern DescriptorHandle m_CommonUAVs;
-	extern DescriptorHandle m_BindlessSRVs;
-    extern DescriptorHandle m_BindlessUAVs;
+    extern DescriptorHandle m_BindlessResources;
 
 	extern float s_SpecularIBLRange;
 	extern float s_SpecularIBLBias;
@@ -58,15 +56,11 @@ namespace Renderer
     {
         kMeshConstants,
         kMaterialConstants,
-        kCommonSRVs,
 		kCommonCBV,
 		kRootConstants,
 		kRootConstants1,
 		kViewModeConstants,
-		kGPUDrivenSRVs,
-		kCommonSRV,
-        kCommonUAVs,
-        kCommonUAV,
+        kStandbyCBV,
         kNumRootBindings
     };
 
@@ -100,13 +94,15 @@ namespace Renderer
     void UpdateGlobalDescriptors(void);
     void DrawSkybox( GraphicsContext& gfxContext, const Camera& camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor );
 	void FrustrumCulling(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, const BaseCamera* camera,
-        const D3D12_VIEWPORT& viewport, IndirectArgsBuffer& inArgsBuffer, ByteAddressBuffer& outputVisibleBuffer,
+        const D3D12_VIEWPORT& viewport, uint32_t inArgsBufferOffset,
         uint32_t startCommandOffset, uint32_t maxCommands, uint16_t psoIdx);
 
 	void FillCullingResult(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, 
-        IndirectArgsBuffer& inArgsBuffer, ByteAddressBuffer& visibleBuffer, 
-        StructuredBuffer& ResultBuffer, uint32_t startCommandOffset,
+        uint32_t inArgsBufferOffset, uint32_t startCommandOffset,
         uint32_t maxCommands, uint16_t psoIdx, CullingStage cullingStage);
+
+    uint32_t GetBindlessResourcesBaseOffset();
+	void SetBindlessResourceDescriptor(uint32_t bindlessIndex, const D3D12_CPU_DESCRIPTOR_HANDLE& handle);
 
     class MeshSorter
     {

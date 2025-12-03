@@ -45,7 +45,7 @@ float4 main(VSOutput vsOutput) : SV_Target0
     float2 ScreenUV = (float2(0.5, 0.5) + pixelPos) / float2(ViewportWidth, ViewportHeight);
     float4 shadowCoord = mul(SunShadowMatrix, float4(vsOutput.worldPos, 1.0));
     shadowCoord.xyz *= rcp(shadowCoord.w);
-    float sunShadow = GetDirectionalShadow(ScreenUV, shadowCoord.xyz, texShadow);
+    float sunShadow = GetDirectionalShadow(ScreenUV, shadowCoord.xyz);
     colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunIntensity);
 
     ShadeLights(colorAccum.rgb, Surface, pixelPos, vsOutput.worldPos);

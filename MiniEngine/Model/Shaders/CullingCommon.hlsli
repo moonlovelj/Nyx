@@ -18,43 +18,9 @@ cbuffer CullConstants : register(b3)
     uint startCommand;
     uint maxCommands;
     float screenErrorConstant; // 计算meshlet屏幕误差时使用的提前计算的常量 (cotHalfFov * screenHeight) / 2.0
-    uint psoContinuousIdx;
-    uint visibleFlagSRVBase;
-    uint cullingResultSRVBase;
-    uint visibleFlagUAVBase;
-    uint cullingResultUAVBase;
+    uint psoIdx;
+    uint indirectBufferOffset;
     uint cullingStage;
 };
-
-struct IndirectCommand
-{
-    uint MeshConstantsIndex;
-    uint MeshletIndex;
-    uint4 drawArgumentsLo;
-    uint drawArgumentsHi;
-    uint paddings;
-};
-
-StructuredBuffer<IndirectCommand> inputCommands : register(t30); // SRV: Indirect commands
-
-uint GetVisibleFlagSRVIndexInDescriptorHeap()
-{
-	return visibleFlagSRVBase + psoContinuousIdx;
-}
-
-uint GetCullingResultSRVIndexInDescriptorHeap()
-{
-    return cullingResultSRVBase + psoContinuousIdx;
-}
-
-uint GetVisibleFlagUAVIndexInDescriptorHeap()
-{
-    return visibleFlagUAVBase + psoContinuousIdx;
-}
-
-uint GetCullingResultUAVIndexInDescriptorHeap()
-{
-    return cullingResultUAVBase + psoContinuousIdx;
-}
 
 #endif

@@ -104,6 +104,7 @@ struct GraphNode // 96 bytes
     uint32_t skeletonRoot : 1;
 };
 
+// instance 粒度
 struct Joint
 {
     Math::Matrix4 posXform;
@@ -210,6 +211,8 @@ public:
 
     size_t GetNumCameras() const { return m_Cameras.size(); }
     std::vector<std::shared_ptr<Math::Camera>> GetCameras() const;
+
+	const InstanceAllocation& GetInstanceAllocation() const { return m_Alloc; }
 
 private:
     void CreateMeshIndirectCommands();

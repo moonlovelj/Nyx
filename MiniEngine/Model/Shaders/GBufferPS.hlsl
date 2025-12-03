@@ -25,7 +25,7 @@ MRT main(VSOutput vsOutput, uint primID : SV_PrimitiveID)
     
     if (ViewMode == VIEW_MODE_SHOW_MESHLET_LOD)
     {
-        MeshletConstant meshletConstant = MeshletConstants[MeshletIndex];
+        MeshletConstant meshletConstant = GetMeshletConstantSRV(MeshletIndex);
         mrt.GBufferD.rgb = Uint32ToColorR16G16B16(meshletConstant.lodLevel);
     }
     else if (ViewMode == VIEW_MODE_SHOW_MESHLET_ID)

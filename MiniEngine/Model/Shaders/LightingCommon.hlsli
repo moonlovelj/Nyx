@@ -13,19 +13,6 @@
 
 static const float3 kDielectricSpecular = float3(0.04, 0.04, 0.04);
 
-
-// Common textures
-TextureCube<float3> IBLDiffuseLDMap      : register(t0);
-TextureCube<float3> IBLSpecularLDMap    : register(t1);
-Texture2D<float4> IBLLut : register(t2);
-Texture2D<float> texSSAO : register(t3);
-Texture2D<float> texShadow : register(t4);
-StructuredBuffer<LightData> lightBuffer : register(t5);
-Texture2DArray<float> lightShadowArrayTex : register(t6);
-ByteAddressBuffer lightGrid : register(t7);
-ByteAddressBuffer lightGridBitMask : register(t8);
-
-
 struct SurfaceProperties
 {
     float3 N;
@@ -83,6 +70,8 @@ float3 GetDiffuseDominantDir(float3 N, float3 V, float NdotV, float Roughness)
 
 float3 EvaluateIBLDiffuse(SurfaceProperties Surface)
 {
+	Texture2D<float4> IBLLut = GetIBLLutSRV();
+	TextureCube<float3> IBLDiffuseLDMap = GetIBLDiffuseLDSRV();
     float3 DominantN = GetDiffuseDominantDir(Surface.N, Surface.V, Surface.NdotV, Surface.roughness);
     float3 DiffuseLighting = IBLDiffuseLDMap.SampleLevel(cubeMapSampler, DominantN, 0);
     float DiffF = IBLLut.SampleLevel(linearSampler, float2(Surface.NdotV, Surface.roughness), 0).z;
@@ -96,6 +85,8 @@ float3 EvaluateIBLDiffuse(SurfaceProperties Surface)
 
 float3 EvaluateIBLSpecular(SurfaceProperties Surface)
 {
+    TextureCube<float3> IBLSpecularLDMap = GetIBLSpecularLDSRV();
+    Texture2D<float4> IBLLut = GetIBLLutSRV();
     float3 R = reflect(-Surface.V, Surface.N);
     R = GetOffSpecularPeakReflectionDir(Surface.N, R, Surface.roughness);
 
@@ -114,8 +105,9 @@ float3 EvaluateIBLSpecular(SurfaceProperties Surface)
     return PreLD * (Surface.c_spec * PreDFG.x + saturate(50.0f * Surface.c_spec.g) * PreDFG.y);
 }
 
-float GetDirectionalShadow(float2 ScreenUV, float3 ShadowCoord, Texture2D<float> texShadow )
+float GetDirectionalShadow(float2 ScreenUV, float3 ShadowCoord)
 {
+    Texture2D<float> texShadow = GetShadowMapSRV();
 #ifdef SINGLE_SAMPLE
     float result = texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy, ShadowCoord.z );
 #elif PCSS_SHADOW
@@ -145,6 +137,7 @@ float GetDirectionalShadow(float2 ScreenUV, float3 ShadowCoord, Texture2D<float>
 
 float GetShadowConeLight(uint lightIndex, float3 shadowCoord)
 {
+    Texture2DArray<float> lightShadowArrayTex = GetLightShadowArraySRV();
     float result = lightShadowArrayTex.SampleCmpLevelZero(
         shadowSampler, float3(shadowCoord.xy, lightIndex), shadowCoord.z);
     return result * result;
@@ -289,6 +282,7 @@ void ShadeLights(inout float3 colorSum,
     float3 worldPos
     )
 {
+    ByteAddressBuffer lightGrid = GetLightGridSRV();
     uint2 tilePos = GetTilePos(pixelPos, InvTileDim.xy);
     uint tileIndex = GetTileIndex(tilePos, TileCount.x);
     uint tileOffset = GetTileOffset(tileIndex);
@@ -316,6 +310,7 @@ void ShadeLights(inout float3 colorSum,
     lightData.shadowTextureMatrix, \
     lightIndex
         
+    StructuredBuffer<LightData> lightBuffer = GetLightBufferSRV();
     // sphere
     uint n;
     for (n = 0; n < tileLightCountSphere; n++, tileLightLoadOffset += 4)

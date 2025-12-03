@@ -30,9 +30,12 @@ VSOutput main(VSInput vsInput)
 {
     VSOutput vsOutput;
     
-    MeshletConstant meshletConstant = MeshletConstants[MeshletIndex];
+    InstanceConstant instanceConstant = GetInstanceConstantSRV(InstanceIndex);
+    
+    MeshletConstant meshletConstant = GetMeshletConstantSRV(MeshletIndex);
     uint VertexLoadOffset = meshletConstant.VertexBufferOffset + vsInput.vertexID * meshletConstant.VertexStride;
     
+    ByteAddressBuffer VertexBuffer = GetVertexBufferSRV();
     uint3 PackedPos = VertexBuffer.Load3(VertexLoadOffset);
     float4 position = float4(asfloat(PackedPos), 1.0);
     VertexLoadOffset += 12;
@@ -69,18 +72,18 @@ VSOutput main(VSInput vsInput)
     float4 weights = jointWeights / dot(jointWeights, 1);
 
     float4x4 skinPosMat =
-        Joints[meshletConstant.MeshJointsIndexOffset + jointIndices.x].PosMatrix * weights.x +
-        Joints[meshletConstant.MeshJointsIndexOffset + jointIndices.y].PosMatrix * weights.y +
-        Joints[meshletConstant.MeshJointsIndexOffset + jointIndices.z].PosMatrix * weights.z +
-        Joints[meshletConstant.MeshJointsIndexOffset + jointIndices.w].PosMatrix * weights.w;
+        GetJointBufferSRV(instanceConstant.JointBase + meshletConstant.MeshJointsIndexOffset + jointIndices.x).PosMatrix * weights.x +
+        GetJointBufferSRV(instanceConstant.JointBase + meshletConstant.MeshJointsIndexOffset + jointIndices.y).PosMatrix * weights.y +
+        GetJointBufferSRV(instanceConstant.JointBase + meshletConstant.MeshJointsIndexOffset + jointIndices.z).PosMatrix * weights.z +
+        GetJointBufferSRV(instanceConstant.JointBase + meshletConstant.MeshJointsIndexOffset + jointIndices.w).PosMatrix * weights.w;
 
     position = mul(skinPosMat, position);
 
     float4x3 skinNrmMat =
-        Joints[meshletConstant.MeshJointsIndexOffset + jointIndices.x].NrmMatrix * weights.x +
-        Joints[meshletConstant.MeshJointsIndexOffset + jointIndices.y].NrmMatrix * weights.y +
-        Joints[meshletConstant.MeshJointsIndexOffset + jointIndices.z].NrmMatrix * weights.z +
-        Joints[meshletConstant.MeshJointsIndexOffset + jointIndices.w].NrmMatrix * weights.w;
+        GetJointBufferSRV(instanceConstant.JointBase + meshletConstant.MeshJointsIndexOffset + jointIndices.x).NrmMatrix * weights.x +
+        GetJointBufferSRV(instanceConstant.JointBase + meshletConstant.MeshJointsIndexOffset + jointIndices.y).NrmMatrix * weights.y +
+        GetJointBufferSRV(instanceConstant.JointBase + meshletConstant.MeshJointsIndexOffset + jointIndices.z).NrmMatrix * weights.z +
+        GetJointBufferSRV(instanceConstant.JointBase + meshletConstant.MeshJointsIndexOffset + jointIndices.w).NrmMatrix * weights.w;
 
     normal = mul(skinNrmMat, normal).xyz;
 #ifndef NO_TANGENT_FRAME
@@ -89,7 +92,7 @@ VSOutput main(VSInput vsInput)
 
 #endif
 
-    MeshConstant meshConstant = MeshConstants[MeshConstantsIndex];
+    MeshConstant meshConstant = GetMeshConstantSRV(instanceConstant.MeshConstantsBase + meshletConstant.MeshConstantsIndexOffset);
     float4x4 WorldMatrix = meshConstant.WorldMatrix;
     float4x3 WorldIT = meshConstant.WorldIT;
     vsOutput.worldPos = mul(WorldMatrix, position).xyz;

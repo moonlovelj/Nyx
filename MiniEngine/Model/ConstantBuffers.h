@@ -17,6 +17,13 @@
 #include "../Core/Math/Matrix4.h"
 #include <cstdint>
 
+struct InstanceConstants
+{
+    uint32_t MeshConstantsBase;
+    uint32_t JointBase;
+};
+
+// instance 粒度
 struct MeshConstants
 {
     Math::Matrix4 World;         // Object to world
@@ -26,6 +33,7 @@ struct MeshConstants
 // The order of textures for PBR materials
 enum { kBaseColor, kMetallicRoughness, kOcclusion, kEmissive, kNormal, kNumTextures };
 
+// model 粒度
 struct MaterialConstants
 {
     float baseColorFactor[4]; // default=[1,1,1,1]
@@ -79,6 +87,7 @@ __declspec(align(256)) struct GlobalConstants
     uint32_t FrameIndexMod2;
     uint32_t IBLLutTextureSize;
     uint32_t IBLSpecularLDMapMipCount;
+    uint32_t BindlessResourcesBaseIndex;
 };
 
 __declspec(align(16))
@@ -89,7 +98,7 @@ struct MeshletConstants
     uint32_t VertexStride;
 	uint32_t VertexBufferDepthOffset;
 	uint32_t VertexDepthStride;
-	uint32_t MeshConstantsIndex;
+	uint32_t MeshConstantsIndexOffset;
 	uint32_t MaterialConstantsIndex;
     uint32_t MeshJointsIndexOffset;
 

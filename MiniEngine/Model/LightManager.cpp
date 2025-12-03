@@ -55,7 +55,6 @@ namespace Lighting
 {
     IntVar LightGridDim("Application/Forward+/Light Grid Dim", 16, kMinLightGridDim, 32, 8 );
 
-    RootSignature m_FillLightRootSig;
     ComputePSO m_FillLightGridCS_8(L"Fill Light Grid 8 CS");
     ComputePSO m_FillLightGridCS_16(L"Fill Light Grid 16 CS");
     ComputePSO m_FillLightGridCS_24(L"Fill Light Grid 24 CS");
@@ -85,25 +84,19 @@ namespace Lighting
 
 void Lighting::InitializeResources( void )
 {
-    m_FillLightRootSig.Reset(3, 0);
-    m_FillLightRootSig[0].InitAsConstantBuffer(0);
-    m_FillLightRootSig[1].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 2);
-    m_FillLightRootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 2);
-    m_FillLightRootSig.Finalize(L"FillLightRS");
-
-    m_FillLightGridCS_8.SetRootSignature(m_FillLightRootSig);
+    m_FillLightGridCS_8.SetRootSignature(Renderer::m_RootSig);
     m_FillLightGridCS_8.SetComputeShader(g_pFillLightGridCS_8, sizeof(g_pFillLightGridCS_8));
     m_FillLightGridCS_8.Finalize();
 
-    m_FillLightGridCS_16.SetRootSignature(m_FillLightRootSig);
+    m_FillLightGridCS_16.SetRootSignature(Renderer::m_RootSig);
     m_FillLightGridCS_16.SetComputeShader(g_pFillLightGridCS_16, sizeof(g_pFillLightGridCS_16));
     m_FillLightGridCS_16.Finalize();
 
-    m_FillLightGridCS_24.SetRootSignature(m_FillLightRootSig);
+    m_FillLightGridCS_24.SetRootSignature(Renderer::m_RootSig);
     m_FillLightGridCS_24.SetComputeShader(g_pFillLightGridCS_24, sizeof(g_pFillLightGridCS_24));
     m_FillLightGridCS_24.Finalize();
 
-    m_FillLightGridCS_32.SetRootSignature(m_FillLightRootSig);
+    m_FillLightGridCS_32.SetRootSignature(Renderer::m_RootSig);
     m_FillLightGridCS_32.SetComputeShader(g_pFillLightGridCS_32, sizeof(g_pFillLightGridCS_32));
     m_FillLightGridCS_32.Finalize();
 
@@ -123,6 +116,16 @@ void Lighting::InitializeResources( void )
 	m_DeferredLightingPSO.SetRootSignature(Renderer::m_RootSig);
     m_DeferredLightingPSO.SetComputeShader(g_pDeferredLightingCS, sizeof(g_pDeferredLightingCS));
     m_DeferredLightingPSO.Finalize();
+    
+    {
+		Renderer::SetBindlessResourceDescriptor(SRV_LIGHT_BUFFER, m_LightBuffer.GetSRV());
+		Renderer::SetBindlessResourceDescriptor(SRV_LIGHT_SHADOW_ARRAY, m_LightShadowArray.GetSRV());
+		Renderer::SetBindlessResourceDescriptor(SRV_LIGHT_GRID, m_LightGrid.GetSRV());
+		Renderer::SetBindlessResourceDescriptor(SRV_LIGHT_GRID_MASK, m_LightGridBitMask.GetSRV());
+
+		Renderer::SetBindlessResourceDescriptor(UAV_LIGHT_GRID, m_LightGrid.GetUAV());
+		Renderer::SetBindlessResourceDescriptor(UAV_LIGHT_GRID_MASK, m_LightGridBitMask.GetUAV());
+    }
 }
 
 void Lighting::CreateRandomLights( const Vector3 minBound, const Vector3 maxBound )
@@ -290,7 +293,9 @@ void Lighting::FillLightGrid(GraphicsContext& gfxContext, const Camera& camera)
 
     ComputeContext& Context = gfxContext.GetComputeContext();
 
-    Context.SetRootSignature(m_FillLightRootSig);
+	Context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Renderer::s_TextureHeap.GetHeapPointer());
+    Context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
+    Context.SetRootSignature(Renderer::m_RootSig);
 
     switch ((int)LightGridDim)
     {
@@ -309,12 +314,6 @@ void Lighting::FillLightGrid(GraphicsContext& gfxContext, const Camera& camera)
     Context.TransitionResource(m_LightGrid, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     Context.TransitionResource(m_LightGridBitMask, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
-    Context.SetDynamicDescriptor(1, 0, m_LightBuffer.GetSRV());
-    Context.SetDynamicDescriptor(1, 1, LinearDepth.GetSRV());
-    //Context.SetDynamicDescriptor(1, 1, g_SceneDepthBuffer.GetDepthSRV());
-    Context.SetDynamicDescriptor(2, 0, m_LightGrid.GetUAV());
-    Context.SetDynamicDescriptor(2, 1, m_LightGridBitMask.GetUAV());
-
     // todo: assumes 1920x1080 resolution
     uint32_t tileCountX = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), LightGridDim);
     uint32_t tileCountY = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), LightGridDim);
@@ -329,6 +328,7 @@ void Lighting::FillLightGrid(GraphicsContext& gfxContext, const Camera& camera)
         float InvTileDim;
         float RcpZMagic;
         uint32_t TileCount;
+        uint32_t BindlessResourcesBaseIndex;
         Matrix4 ViewProjMatrix;
     } csConstants;
     // todo: assumes 1920x1080 resolution
@@ -337,8 +337,9 @@ void Lighting::FillLightGrid(GraphicsContext& gfxContext, const Camera& camera)
     csConstants.InvTileDim = 1.0f / LightGridDim;
     csConstants.RcpZMagic = RcpZMagic;
     csConstants.TileCount = tileCountX;
+	csConstants.BindlessResourcesBaseIndex = Renderer::GetBindlessResourcesBaseOffset();
     csConstants.ViewProjMatrix = camera.GetViewProjMatrix();
-    Context.SetDynamicConstantBufferView(0, sizeof(CSConstants), &csConstants);
+    Context.SetDynamicConstantBufferView(Renderer::kStandbyCBV, sizeof(CSConstants), &csConstants);
 
     Context.Dispatch(tileCountX, tileCountY, 1);
 
@@ -352,35 +353,10 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
 {
     ScopedTimer _prof(L"DeferredLighting", gfxContext);
 
-    {
-        uint32_t DestCount = 5;
-        uint32_t SourceCounts[] = { 1, 1, 1, 1, 1 };
-        D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
-        {
-            g_GBufferA.GetSRV(),
-            g_GBufferB.GetSRV(),
-            g_GBufferC.GetSRV(),
-            g_GBufferD.GetSRV(),
-            g_SceneDepthBuffer.GetDepthSRV(),
-        };
-
-        DescriptorHandle dest = Renderer::m_CommonTextures + 10 * Renderer::s_TextureHeap.GetDescriptorSize();
-        g_Device->CopyDescriptors(1, &dest, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    }
-
-	{
-		uint32_t DestCount = 1;
-		uint32_t SourceCounts[] = { 1 };
-		D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
-		{
-			g_SceneColorBuffer.GetUAV()
-		};
-
-		g_Device->CopyDescriptors(1, &Renderer::m_CommonUAVs, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-	}
-
     ComputeContext& Context = gfxContext.GetComputeContext();
 
+    Context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Renderer::s_TextureHeap.GetHeapPointer());
+    Context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
     Context.SetRootSignature(Renderer::m_RootSig);
 
     Context.SetPipelineState(m_DeferredLightingPSO);
@@ -404,10 +380,8 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
 
     Context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
-    Context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Renderer::s_TextureHeap.GetHeapPointer());
+   
     Context.SetDynamicConstantBufferView(Renderer::kCommonCBV, sizeof(GlobalConstants), &globals);
-    Context.SetDescriptorTable(Renderer::kCommonSRVs, Renderer::m_CommonTextures);
-    Context.SetDescriptorTable(Renderer::kCommonUAVs, Renderer::m_CommonUAVs);
 
     uint32_t groupCountX = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), 8);
     uint32_t groupCountY = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), 8);

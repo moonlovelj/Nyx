@@ -219,8 +219,6 @@ void SceneViewer::Startup( void )
     
     Renderer::Initialize();
 
-    //LoadIBLTextures();
-    
     LoadIBLHDRITextures();
 
     if (g_IBLHDRITextures.size() > 0)
@@ -248,11 +246,12 @@ void SceneViewer::Startup( void )
 		//m_ModelInst = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/DamagedHelmet/glTF/DamagedHelmet.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/AnimTest/AnimTest.gltf", forceRebuild);
-        //auto model = Renderer::LoadModel(L"Assets/lumber_mill_wood_factory_gltf/scene.gltf", forceRebuild);
-		auto model = Renderer::LoadModel(L"Assets/jinx/scene.gltf", forceRebuild);
+        auto model = Renderer::LoadModel(L"Assets/lumber_mill_wood_factory_gltf/scene.gltf", forceRebuild);
+		//auto model = Renderer::LoadModel(L"Assets/jinx/scene.gltf", forceRebuild);
+        //auto model = Renderer::LoadModel(L"Assets/TestMesh/test.gltf", forceRebuild);
         //m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
 
-        ModelInstanceManager::Get().Initialize(model, 6400);
+        ModelInstanceManager::Get().Initialize(model, 1);
         OrientedBox obb = ModelInstanceManager::Get().GetModelInstance(0).GetBoundingBox();
         float modelRadius = Length(obb.GetDimensions()) * 0.5f;
         const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 0.5f, 0.0f, 0.0f);
@@ -407,6 +406,8 @@ void SceneViewer::RenderScene( void )
         globals.FrameIndexMod2 = TemporalEffects::GetFrameIndexMod2();
         globals.IBLLutTextureSize = IBL::g_IBLLutSize;
         globals.IBLSpecularLDMapMipCount = Math::Log2(IBL::g_IBLSpecularLDMapSize) + 1;
+
+		globals.BindlessResourcesBaseIndex = Renderer::GetBindlessResourcesBaseOffset();
 
         // Begin rendering depth
         gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);

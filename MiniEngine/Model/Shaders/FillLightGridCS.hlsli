@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -11,7 +11,10 @@
 // Author(s):	Alex Nankervis
 //
 
+#include "Common.hlsli"
 #include "LightGrid.hlsli"
+#include "BindlessIndices.hlsli"
+#include "CommonResources.hlsli"
 
 // outdated warning about for-loop variable scope
 #pragma warning (disable: 3078)
@@ -21,19 +24,16 @@
 #define PI				3.1415926535f
 #define TWOPI			6.283185307f
 
-cbuffer CSConstants : register(b0)
+cbuffer CSConstants : register(b5)
 {
-    uint ViewportWidth, ViewportHeight;
-    float InvTileDim;
+    uint ViewWidth;
+    uint ViewHeight;
+    float InvTileDimf32;
     float RcpZMagic;
     uint TileCountX;
-    float4x4 ViewProjMatrix;
+    uint BindlessBaseIndex;
+    float4x4 vpMatrix;
 };
-
-StructuredBuffer<LightData> lightBuffer : register(t0);
-Texture2D<float> depthTex : register(t1);
-RWByteAddressBuffer lightGrid : register(u0);
-RWByteAddressBuffer lightGridBitMask : register(u1);
 
 groupshared uint minDepthUInt;
 groupshared uint maxDepthUInt;
@@ -48,13 +48,7 @@ groupshared uint tileLightIndicesConeShadowed[MAX_LIGHTS];
 
 groupshared uint4 tileLightBitMask;
 
-#define _RootSig \
-    "RootFlags(0), " \
-    "CBV(b0), " \
-    "DescriptorTable(SRV(t0, numDescriptors = 2))," \
-    "DescriptorTable(UAV(u0, numDescriptors = 2))"
-
-[RootSignature(_RootSig)]
+[RootSignature(Renderer_RootSig)]
 [numthreads(8, 8, 1)]
 void main(
     uint2 Gid : SV_GroupID,
@@ -73,6 +67,7 @@ void main(
     }
     GroupMemoryBarrierWithGroupSync();
 
+	Texture2D<float> depthTex = GetSceneDepthSRV();
     // Read all depth values for this tile and compute the tile min and max values
     for (uint dx = GTid.x; dx < WORK_GROUP_SIZE_X; dx += 8)
     {
@@ -81,7 +76,7 @@ void main(
             uint2 DTid = Gid * uint2(WORK_GROUP_SIZE_X, WORK_GROUP_SIZE_Y) + uint2(dx, dy);
 
             // If pixel coordinates are in bounds...
-            if (DTid.x < ViewportWidth && DTid.y < ViewportHeight)
+            if (DTid.x < ViewWidth && DTid.y < ViewHeight)
             {
                 // Load and compare depth
                 uint depthUInt = asuint(depthTex[DTid.xy]);
@@ -102,7 +97,7 @@ void main(
     // TODO: near/far clipping planes seem to be falling apart at or near the max depth with infinite projections
 
     // construct transform from world space to tile space (projection space constrained to tile area)
-    float2 invTileSize2X = float2(ViewportWidth, ViewportHeight) * InvTileDim;
+    float2 invTileSize2X = float2(ViewWidth, ViewHeight) * InvTileDimf32;
     // D3D-specific [0, 1] depth range ortho projection
     // (but without negation of Z, since we already have that from the projection matrix)
     float3 tileBias = float3(
@@ -115,7 +110,7 @@ void main(
         0, 0, invTileDepthRange, tileBias.z,
         0, 0, 0, 1
         );
-    float4x4 tileMVP = mul(projToTile, ViewProjMatrix);
+    float4x4 tileMVP = mul(projToTile, vpMatrix);
     
     // extract frustum planes (these will be in world space)
     float4 frustumPlanes[6];
@@ -135,6 +130,7 @@ void main(
 
     uint4 perThreadLightBitMask = 0;
 
+	StructuredBuffer<LightData> lightBuffer = GetLightBufferSRV();
     // find set of lights that overlap this tile
     for (uint lightIndex = GI; lightIndex < MAX_LIGHTS; lightIndex += 64)
     {
@@ -183,6 +179,7 @@ void main(
 
     if (GI == 0)
     {
+		RWByteAddressBuffer lightGrid = GetLightGridUAV();
         uint lightCount = 
             ((tileLightCountSphere & 0xff) << 0) |
             ((tileLightCountCone & 0xff) << 8) |
@@ -207,6 +204,7 @@ void main(
             storeOffset += 4;
         }
 
+		RWByteAddressBuffer lightGridBitMask = GetLightGridBitMaskUAV();
         lightGridBitMask.Store4(tileIndex * 16, tileLightBitMask);
     }
 }

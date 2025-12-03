@@ -96,14 +96,14 @@ void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
     uint index = (groupId.x * THREAD_GROUP_SIZE) + groupIndex;
     if (index < maxCommands)
     {
-        RWByteAddressBuffer visibleFlagUAV = ResourceDescriptorHeap[GetVisibleFlagUAVIndexInDescriptorHeap()];
-        IndirectCommand inCommand = inputCommands[index + startCommand];
-        MeshletConstant meshletConstant = MeshletConstants[inCommand.MeshletIndex];
-        MeshConstant meshConstant = MeshConstants[inCommand.MeshConstantsIndex];
+        RWByteAddressBuffer visibleFlagUAV = GetVisibleFlagUAV(psoIdx);
+        IndirectCommand inCommand = GetIndirectCommandBufferSRV(indirectBufferOffset, index + startCommand);
+
+        MeshletConstant meshletConstant = GetMeshletConstantSRV(inCommand.MeshletIndex);
+        InstanceConstant instanceConstant = GetInstanceConstantSRV(inCommand.InstanceIndex);
+        MeshConstant meshConstant = GetMeshConstantSRV(instanceConstant.MeshConstantsBase + meshletConstant.MeshConstantsIndexOffset);
         float4x4 WorldMatrix = meshConstant.WorldMatrix;
-        
-        float maxSiblingsError; // 当前层级简化误差
-        float4 shareSiblingsBounds; // 当前层级包围球
+
         if (IsSphereInFrustum(WorldMatrix, meshletConstant.BoundingSphere) &&
             ShouldMeshletLodVisible(WorldMatrix,
             meshletConstant.lodError, meshletConstant.lodBounds,

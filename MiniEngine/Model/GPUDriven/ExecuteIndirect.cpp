@@ -1,5 +1,5 @@
 ﻿#include "ExecuteIndirect.h"
-
+#include "../Renderer.h"
 #include "../Core/CommandContext.h"
 
 namespace GPUDriven
@@ -9,7 +9,7 @@ namespace GPUDriven
 	void Initialize(const RootSignature* RootSignature)
 	{
 		GPUDrivenDrawIndirectCommandSignature.Reset(2);
-		GPUDrivenDrawIndirectCommandSignature[0].Constant(4, 0, 2);
+		GPUDrivenDrawIndirectCommandSignature[0].Constant(Renderer::kRootConstants, 0, 2);
 		GPUDrivenDrawIndirectCommandSignature[1].DrawIndexed();
 		GPUDrivenDrawIndirectCommandSignature.Finalize(RootSignature, sizeof(IndirectCommand));
 	}

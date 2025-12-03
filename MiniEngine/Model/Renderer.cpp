@@ -85,11 +85,7 @@ namespace Renderer
     GraphicsPSO m_SkyboxPSO(L"Renderer: Skybox PSO");
     GraphicsPSO m_DefaultPSO(L"Renderer: Default PSO"); // Not finalized.  Used as a template.
 
-    DescriptorHandle m_CommonTextures;
-    DescriptorHandle m_GPUDrivenBuffers;
-	DescriptorHandle m_CommonUAVs;
-	DescriptorHandle m_BindlessSRVs;
-	DescriptorHandle m_BindlessUAVs;
+    DescriptorHandle m_BindlessResources;
 
     UploadBuffer m_IndirectArgsCounterBufferReset;
 	ComputePSO m_FrustrumCullPSO(L"Renderer: Frustum Cull PSO");
@@ -123,15 +119,11 @@ void Renderer::Initialize(void)
     m_RootSig.InitStaticSampler(14, PointSamplerDesc);
     m_RootSig[kMeshConstants].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_VERTEX);
     m_RootSig[kMaterialConstants].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL);
-    m_RootSig[kCommonSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 20);
 	m_RootSig[kCommonCBV].InitAsConstantBuffer(1);
 	m_RootSig[kRootConstants].InitAsConstants(2, 4);
-	m_RootSig[kRootConstants1].InitAsConstants(3, 12);
+	m_RootSig[kRootConstants1].InitAsConstants(3, 8);
 	m_RootSig[kViewModeConstants].InitAsConstants(4, 4);
-	m_RootSig[kGPUDrivenSRVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 20, 10);
-    m_RootSig[kCommonSRV].InitAsBufferSRV(30);
-	m_RootSig[kCommonUAVs].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 10);
-    m_RootSig[kCommonUAV].InitAsBufferUAV(10);
+    m_RootSig[kStandbyCBV].InitAsConstantBuffer(5);
     m_RootSig.Finalize(L"RootSig", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT 
         | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED
         | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED);
@@ -253,36 +245,12 @@ void Renderer::Initialize(void)
     TextureManager::Initialize(L"");
 
     s_TextureHeap.Create(L"Scene Texture Descriptors", D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 4096);
+    m_BindlessResources = s_TextureHeap.Alloc(BINDLESS_CAPACITY);
 
     // Maybe only need 2 for wrap vs. clamp?  Currently we allocate 1 for 1 with textures
     s_SamplerHeap.Create(L"Scene Sampler Descriptors", D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 2048);
 
     Lighting::InitializeResources();
-
-    // Allocate a descriptor table for the common textures
-    m_CommonTextures = s_TextureHeap.Alloc(20);
-
-    uint32_t DestCount = 9;
-    uint32_t SourceCounts[] = { 1, 1, 1, 1, 1, 1, 1, 1, 1 };
-
-    D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
-    {
-        GetDefaultTexture(kBlackCubeMap),
-        GetDefaultTexture(kBlackCubeMap),
-        GetDefaultTexture(kBlackOpaque2D),
-        g_SSAOFullScreen.GetSRV(),
-        g_ShadowBuffer.GetSRV(),
-        Lighting::m_LightBuffer.GetSRV(),
-        Lighting::m_LightShadowArray.GetSRV(),
-        Lighting::m_LightGrid.GetSRV(),
-        Lighting::m_LightGridBitMask.GetSRV(),
-    };
-
-    g_Device->CopyDescriptors(1, &m_CommonTextures, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
-	m_BindlessSRVs = s_TextureHeap.Alloc(256);
-	m_BindlessUAVs = s_TextureHeap.Alloc(256);
-    m_CommonUAVs = s_TextureHeap.Alloc(10);
 
     g_SSAOFullScreenID = g_SSAOFullScreen.GetVersionID();
     g_ShadowBufferID = g_ShadowBuffer.GetVersionID();
@@ -294,8 +262,6 @@ void Renderer::Initialize(void)
     pCounterBufferReset[0] = 0;
     m_IndirectArgsCounterBufferReset.Unmap();
 
-    m_GPUDrivenBuffers = s_TextureHeap.Alloc(10);
-
     m_FrustrumCullPSO.SetRootSignature(m_RootSig);
     m_FrustrumCullPSO.SetComputeShader(g_pFrustumCullCS, sizeof(g_pFrustumCullCS));
     m_FrustrumCullPSO.Finalize();
@@ -303,6 +269,27 @@ void Renderer::Initialize(void)
 	m_FillCullingResultPSO.SetRootSignature(m_RootSig);
     m_FillCullingResultPSO.SetComputeShader(g_pFillCullingResultCS, sizeof(g_pFillCullingResultCS));
     m_FillCullingResultPSO.Finalize();
+
+    // 初始化bindless资源描述符绑定
+    {
+        // srv
+        SetBindlessResourceDescriptor(SRV_SCENE_COLOR, g_SceneColorBuffer.GetSRV());
+		SetBindlessResourceDescriptor(SRV_SCENE_DEPTH, g_SceneDepthBuffer.GetDepthSRV());
+		//SetBindlessResourceDescriptor(SRV_SCENE_STENCIL, g_SceneDepthBuffer.GetStencilSRV());
+		SetBindlessResourceDescriptor(SRV_GBUFFER_A, g_GBufferA.GetSRV());
+		SetBindlessResourceDescriptor(SRV_GBUFFER_B, g_GBufferB.GetSRV());
+		SetBindlessResourceDescriptor(SRV_GBUFFER_C, g_GBufferC.GetSRV());
+		SetBindlessResourceDescriptor(SRV_GBUFFER_D, g_GBufferD.GetSRV());
+		SetBindlessResourceDescriptor(SRV_IBL_CUBE_MAP, GetDefaultTexture(kBlackCubeMap));
+		SetBindlessResourceDescriptor(SRV_IBL_DIFFUSE_LD, GetDefaultTexture(kBlackCubeMap));
+		SetBindlessResourceDescriptor(SRV_IBL_SPECULAR_LD, GetDefaultTexture(kBlackCubeMap));
+		SetBindlessResourceDescriptor(SRV_IBL_LUT, GetDefaultTexture(kBlackTransparent2D));
+        SetBindlessResourceDescriptor(SRV_SSAO, g_SSAOFullScreen.GetSRV());
+		SetBindlessResourceDescriptor(SRV_SHADOW_MAP, g_ShadowBuffer.GetSRV());
+
+        // uav
+		SetBindlessResourceDescriptor(UAV_SCENE_COLOR, g_SceneColorBuffer.GetUAV());
+    }
 
     s_Initialized = true;
 }
@@ -315,18 +302,8 @@ void Renderer::UpdateGlobalDescriptors(void)
         return;
     }
 
-    uint32_t DestCount = 2;
-    uint32_t SourceCounts[] = { 1, 1 };
-
-    D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
-    {
-        g_SSAOFullScreen.GetSRV(),
-        g_ShadowBuffer.GetSRV(),
-    };
-
-    DescriptorHandle dest = m_CommonTextures + 3 * s_TextureHeap.GetDescriptorSize();
-
-    g_Device->CopyDescriptors(1, &dest, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	SetBindlessResourceDescriptor(SRV_SSAO, g_SSAOFullScreen.GetSRV());
+	SetBindlessResourceDescriptor(SRV_SHADOW_MAP, g_ShadowBuffer.GetSRV());
 
     g_SSAOFullScreenID = g_SSAOFullScreen.GetVersionID();
     g_ShadowBufferID = g_ShadowBuffer.GetVersionID();
@@ -335,52 +312,18 @@ void Renderer::UpdateGlobalDescriptors(void)
 
 void Renderer::SetIBLTextures()
 {
-    //s_RadianceCubeMap = specularIBL;
-    //s_IrradianceCubeMap = diffuseIBL;
-
-    //s_SpecularIBLRange = 0.0f;
-    //if (s_RadianceCubeMap.IsValid())
-    //{
-    //    ID3D12Resource* texRes = const_cast<ID3D12Resource*>(s_RadianceCubeMap.Get()->GetResource());
-    //    const D3D12_RESOURCE_DESC& texDesc = texRes->GetDesc();
-    //    s_SpecularIBLRange = Max(0.0f, (float)texDesc.MipLevels - 1);
-    //    s_SpecularIBLBias = Min(s_SpecularIBLBias, s_SpecularIBLRange);
-    //}
-
-    //uint32_t DestCount = 2;
-    //uint32_t SourceCounts[] = { 1, 1 };
-
-    //D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
-    //{
-    //    specularIBL.IsValid() ? specularIBL.GetSRV() : GetDefaultTexture(kBlackCubeMap),
-    //    diffuseIBL.IsValid() ? diffuseIBL.GetSRV() : GetDefaultTexture(kBlackCubeMap)
-    //};
-
-    //g_Device->CopyDescriptors(1, &m_CommonTextures, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
-    uint32_t DestCount = 3;
-    uint32_t SourceCounts[] = { 1, 1, 1 };
     if (IBL::IsValid())
     {
-        D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
-        {
-            Graphics::g_IBLDiffuseLDMap.GetSRV(),
-            Graphics::g_IBLSpecularLDMap.GetSRV(),
-            Graphics::g_IBLLut.GetSRV()
-        };
-
-        g_Device->CopyDescriptors(1, &m_CommonTextures, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		SetBindlessResourceDescriptor(SRV_IBL_DIFFUSE_LD, Graphics::g_IBLDiffuseLDMap.GetSRV());
+		SetBindlessResourceDescriptor(SRV_IBL_SPECULAR_LD, Graphics::g_IBLSpecularLDMap.GetSRV());
+		SetBindlessResourceDescriptor(SRV_IBL_LUT, Graphics::g_IBLLut.GetSRV());
+        SetBindlessResourceDescriptor(SRV_IBL_CUBE_MAP, Graphics::g_IBLCubeMap.GetSRV());
     }
     else
     {
-        D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[] =
-        {
-            Graphics::GetDefaultTexture(Graphics::kBlackCubeMap),
-            Graphics::GetDefaultTexture(Graphics::kBlackCubeMap),
-            Graphics::GetDefaultTexture(Graphics::kBlackTransparent2D)
-        };
-
-        g_Device->CopyDescriptors(1, &m_CommonTextures, &DestCount, DestCount, SourceTextures, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		SetBindlessResourceDescriptor(SRV_IBL_DIFFUSE_LD, GetDefaultTexture(Graphics::kBlackCubeMap));
+		SetBindlessResourceDescriptor(SRV_IBL_SPECULAR_LD, GetDefaultTexture(Graphics::kBlackCubeMap));
+		SetBindlessResourceDescriptor(SRV_IBL_LUT, Graphics::GetDefaultTexture(Graphics::kBlackTransparent2D));
     }
 }
 
@@ -561,7 +504,7 @@ uint8_t Renderer::GetPSO(uint16_t psoFlags)
 #endif
     sm_PSOs.push_back(ColorPSO);
 
-    ASSERT(sm_PSOs.size() <= 64, "Ran out of room for unique PSOs");
+    ASSERT(sm_PSOs.size() <= 32, "Ran out of room for unique PSOs");
 
     return (uint8_t)sm_PSOs.size() - 2;
 }
@@ -581,9 +524,13 @@ void Renderer::DrawSkybox( GraphicsContext& gfxContext, const Camera& Camera, co
     __declspec(align(16)) struct SkyboxPSCB
     {
         float TextureLevel;
+        uint32_t BindlessResourcesBaseIndex;
     } skyPSCB;
     skyPSCB.TextureLevel = s_SpecularIBLBias;
+    skyPSCB.BindlessResourcesBaseIndex = GetBindlessResourcesBaseOffset();
 
+    gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+    gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
     gfxContext.SetRootSignature(m_RootSig);
     gfxContext.SetPipelineState(m_SkyboxPSO);
 
@@ -592,36 +539,48 @@ void Renderer::DrawSkybox( GraphicsContext& gfxContext, const Camera& Camera, co
     gfxContext.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV_DepthReadOnly());
     gfxContext.SetViewportAndScissor(viewport, scissor);
 
-    gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+   
     gfxContext.SetDynamicConstantBufferView(kMeshConstants, sizeof(SkyboxVSCB), &skyVSCB);
     gfxContext.SetDynamicConstantBufferView(kMaterialConstants, sizeof(SkyboxPSCB), &skyPSCB);
-    gfxContext.SetDescriptorTable(kCommonSRVs, m_CommonTextures);
-    gfxContext.SetDynamicDescriptor(kCommonSRVs, 0, IBL::IsValid() ? Graphics::g_IBLCubeMap.GetSRV() : GetDefaultTexture(kBlackOpaque2D));
     gfxContext.Draw(3);
 }
 
 void Renderer::FrustrumCulling(GraphicsContext& gfxContext, 
     const GlobalConstants& inGlobals, const BaseCamera* camera,
-    const D3D12_VIEWPORT& viewport, IndirectArgsBuffer& inArgsBuffer,
-    ByteAddressBuffer& outputVisibleBuffer, uint32_t startCommandOffset, 
+    const D3D12_VIEWPORT& viewport, uint32_t inArgsBufferOffset, uint32_t startCommandOffset, 
     uint32_t maxCommands, uint16_t psoIdx)
 {
+    ASSERT(inArgsBufferOffset == SRV_INDIRECT_SHADOW_BUFFER ||
+        inArgsBufferOffset == SRV_INDIRECT_DEPTH_BUFFER ||
+		inArgsBufferOffset == SRV_INDIRECT_COLOR_BUFFER);
+
     ScopedTimer _prof(L"Renderer::FrustrumCulling", gfxContext);
 
     ComputeContext& context = gfxContext.GetComputeContext();
 	auto& bucketer = GPUDriven::CommandBucketer::Get();
 
-    context.TransitionResource(outputVisibleBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    context.TransitionResource(inArgsBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    context.TransitionResource(bucketer.GetArgsVisibleFlagsBuffer(psoIdx), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
+    if (inArgsBufferOffset == SRV_INDIRECT_SHADOW_BUFFER)
+    {
+        context.TransitionResource(bucketer.GetShadowArgsBuffer(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    }
+    else if (inArgsBufferOffset == SRV_INDIRECT_DEPTH_BUFFER)
+    {
+        context.TransitionResource(bucketer.GetDepthArgsBuffer(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+	}
+    else if (inArgsBufferOffset == SRV_INDIRECT_COLOR_BUFFER)
+    {
+        context.TransitionResource(bucketer.GetColorArgsBuffer(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    }
+
+    context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+    context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
 	context.SetRootSignature(m_RootSig);
-	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+	
 	context.SetPipelineState(m_FrustrumCullPSO);
 
 	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-	context.SetDescriptorTable(kGPUDrivenSRVs, m_GPUDrivenBuffers);
-    context.SetBufferSRV(kCommonSRV, inArgsBuffer);
-	context.SetDescriptorTable(kCommonUAVs, m_CommonUAVs);
 
     float screenErrorConstant = 1.f;
 	auto* cameraProj = static_cast<const Camera*>(camera);
@@ -631,58 +590,78 @@ void Renderer::FrustrumCulling(GraphicsContext& gfxContext,
 		float cotHalfFov = 1.0f / std::tanf(0.5f * cameraProj->GetFOV());
         screenErrorConstant = cotHalfFov * viewport.Height * 0.5f;
     }
-
-	uint32_t BindlessSRVDescriptorTable = Renderer::s_TextureHeap.GetOffsetOfHandle(m_BindlessSRVs);
-	uint32_t BindlessUAVDescriptorTable = Renderer::s_TextureHeap.GetOffsetOfHandle(m_BindlessUAVs);
-
 	context.SetConstants(kRootConstants1, startCommandOffset, maxCommands, 
-        screenErrorConstant, bucketer.GetPsoIdxToContinuousIdx(psoIdx));
-	context.SetConstant(kRootConstants1, 4, (uint32_t)BindlessSRVsOffsets::kArgsVisibleFlagsBufferSRV + BindlessSRVDescriptorTable);
-	context.SetConstant(kRootConstants1, 5, (uint32_t)BindlessSRVsOffsets::kCullingResultArgsBufferSRV + BindlessSRVDescriptorTable);
-	context.SetConstant(kRootConstants1, 6, (uint32_t)BindlessUAVsOffsets::kArgsVisibleFlagsBufferUAV + BindlessUAVDescriptorTable);
-	context.SetConstant(kRootConstants1, 7, (uint32_t)BindlessUAVsOffsets::kCullingResultArgsBufferUAV + BindlessUAVDescriptorTable);
-
+        screenErrorConstant, psoIdx);
+	context.SetConstant(kRootConstants1, 4, inArgsBufferOffset);
 	context.Dispatch1D(maxCommands);
 }
 
 void Renderer::FillCullingResult(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, 
-    IndirectArgsBuffer& inArgsBuffer, ByteAddressBuffer& visibleBuffer, StructuredBuffer& ResultBuffer,
+    uint32_t inArgsBufferOffset,
     uint32_t startCommandOffset, uint32_t maxCommands, uint16_t psoIdx, CullingStage cullingStage)
 {
+	ASSERT(inArgsBufferOffset == SRV_INDIRECT_SHADOW_BUFFER ||
+		inArgsBufferOffset == SRV_INDIRECT_DEPTH_BUFFER ||
+		inArgsBufferOffset == SRV_INDIRECT_COLOR_BUFFER);
+
 	ScopedTimer _prof(L"Renderer::FillCullingResult", gfxContext);
 	ComputeContext& context = gfxContext.GetComputeContext();
 	auto& bucketer = GPUDriven::CommandBucketer::Get();
 
-	context.TransitionResource(ResultBuffer.GetCounterBuffer(), D3D12_RESOURCE_STATE_COPY_DEST);
-    context.CopyBufferRegion(ResultBuffer.GetCounterBuffer(), 0, m_IndirectArgsCounterBufferReset, 0, sizeof(UINT));
-    context.TransitionResource(visibleBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    context.TransitionResource(inArgsBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    context.TransitionResource(ResultBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	context.TransitionResource(bucketer.GetCullingResultArgsBuffer(psoIdx).GetCounterBuffer(), D3D12_RESOURCE_STATE_COPY_DEST);
+    context.CopyBufferRegion(bucketer.GetCullingResultArgsBuffer(psoIdx).GetCounterBuffer(), 0, m_IndirectArgsCounterBufferReset, 0, sizeof(UINT));
+	context.TransitionResource(bucketer.GetArgsVisibleFlagsBuffer(psoIdx), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+	context.TransitionResource(bucketer.GetCullingResultArgsBuffer(psoIdx), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	context.TransitionResource(bucketer.GetCullingResultArgsBuffer(psoIdx).GetCounterBuffer(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
+	if (inArgsBufferOffset == SRV_INDIRECT_SHADOW_BUFFER)
+	{
+		context.TransitionResource(bucketer.GetShadowArgsBuffer(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+	}
+	else if (inArgsBufferOffset == SRV_INDIRECT_DEPTH_BUFFER)
+	{
+		context.TransitionResource(bucketer.GetDepthArgsBuffer(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+	}
+	else if (inArgsBufferOffset == SRV_INDIRECT_COLOR_BUFFER)
+	{
+		context.TransitionResource(bucketer.GetColorArgsBuffer(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+	}
+
+    context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+    context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
 	context.SetRootSignature(m_RootSig);
-	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+	
 	context.SetPipelineState(m_FillCullingResultPSO);
 
 	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-	context.SetDescriptorTable(kGPUDrivenSRVs, m_GPUDrivenBuffers);
-	context.SetBufferSRV(kCommonSRV, inArgsBuffer);
-	context.SetDescriptorTable(kCommonUAVs, m_CommonUAVs);
-
-	uint32_t BindlessSRVDescriptorTable = Renderer::s_TextureHeap.GetOffsetOfHandle(m_BindlessSRVs);
-	uint32_t BindlessUAVDescriptorTable = Renderer::s_TextureHeap.GetOffsetOfHandle(m_BindlessUAVs);
 
 	context.SetConstants(kRootConstants1, startCommandOffset, maxCommands,
-		0.f, bucketer.GetPsoIdxToContinuousIdx(psoIdx));
-	context.SetConstant(kRootConstants1, 4, (uint32_t)BindlessSRVsOffsets::kArgsVisibleFlagsBufferSRV + BindlessSRVDescriptorTable);
-	context.SetConstant(kRootConstants1, 5, (uint32_t)BindlessSRVsOffsets::kCullingResultArgsBufferSRV + BindlessSRVDescriptorTable);
-	context.SetConstant(kRootConstants1, 6, (uint32_t)BindlessUAVsOffsets::kArgsVisibleFlagsBufferUAV + BindlessUAVDescriptorTable);
-	context.SetConstant(kRootConstants1, 7, (uint32_t)BindlessUAVsOffsets::kCullingResultArgsBufferUAV + BindlessUAVDescriptorTable);
-    context.SetConstant(kRootConstants1, 8, (uint32_t)cullingStage);
+		0.f, psoIdx);
+    context.SetConstant(kRootConstants1, 4, inArgsBufferOffset);
+    context.SetConstant(kRootConstants1, 5, (uint32_t)cullingStage);
 
     context.Dispatch1D(maxCommands);
 
-	context.TransitionResource(ResultBuffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-    context.TransitionResource(ResultBuffer.GetCounterBuffer(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+    gfxContext.TransitionResource(bucketer.GetCullingResultArgsBuffer(psoIdx), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, true);
+    gfxContext.TransitionResource(bucketer.GetCullingResultArgsBuffer(psoIdx).GetCounterBuffer(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, true);
+}
+
+uint32_t Renderer::GetBindlessResourcesBaseOffset()
+{
+    return s_TextureHeap.GetOffsetOfHandle(m_BindlessResources);
+}
+
+void Renderer::SetBindlessResourceDescriptor(uint32_t bindlessIndex, const D3D12_CPU_DESCRIPTOR_HANDLE& handle)
+{
+	ASSERT(handle.ptr != D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN, "Trying to set an invalid descriptor handle in bindless resources, bindlessIndex: %d", bindlessIndex);
+	uint32_t DestCount = 1;
+	uint32_t SourceCounts[] = { 1 };
+	D3D12_CPU_DESCRIPTOR_HANDLE SourceBuffers[] =
+	{
+        handle
+	};
+	DescriptorHandle dest = m_BindlessResources + bindlessIndex * Renderer::s_TextureHeap.GetDescriptorSize();
+	g_Device->CopyDescriptors(1, &dest, &DestCount, DestCount, SourceBuffers, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 }
 
 void MeshSorter::AddMesh( const Mesh& mesh, float distance,
@@ -805,31 +784,14 @@ void MeshSorter::RenderMeshes(
 
     Renderer::UpdateGlobalDescriptors();
 
-	uint32_t DestCount = 5;
-	uint32_t SourceCounts[] = { 1, 1, 1, 1, 1};
-	D3D12_CPU_DESCRIPTOR_HANDLE SourceBuffers[] =
-	{
-        m_MeshletConstantsBufferSRV,
-        m_MeshConstantsBufferSRV,
-        m_MaterialConstantsBufferSRV,
-        m_VertexBufferSRV,
-        m_JointsBufferSRV
-	};
-	g_Device->CopyDescriptors(1, &m_GPUDrivenBuffers, &DestCount, DestCount, SourceBuffers, SourceCounts, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
-
-    //context.SetRootSignature(m_RootSig);
     context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
     context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, s_SamplerHeap.GetHeapPointer());
 
 	// Must set the Graphics / Compute root signature only * after * setting your descriptor heaps, as the correct heap pointers must be available when root signature is set.
     context.SetRootSignature(m_RootSig);
-    // Set common textures
-    context.SetDescriptorTable(kCommonSRVs, m_CommonTextures);
 
 	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &globals);
-    context.SetDescriptorTable(kGPUDrivenSRVs, m_GPUDrivenBuffers);
     context.SetConstants(kViewModeConstants, (uint32_t)ViewMode);
 
 	if (m_BatchType == kShadows)
@@ -992,17 +954,14 @@ void MeshSorter::RenderMeshes(
 								{
 									if (UseGPUFrustumCull)
 									{
-										FrustrumCulling(context, globals, m_Camera, m_Viewport, args, 
-                                            bucketer.GetArgsVisibleFlagsBuffer(run.psoIdx),
+										FrustrumCulling(context, globals, m_Camera, m_Viewport, SRV_INDIRECT_SHADOW_BUFFER,
                                             (uint32_t)run.startCmd, run.count, run.psoIdx);
 									}
 								}
 
 								for (const auto& run : bucketer.GetShadowRuns())
 								{
-									FillCullingResult(context, globals, args,
-										bucketer.GetArgsVisibleFlagsBuffer(run.psoIdx),
-                                        bucketer.GetCullingResultArgsBuffer(run.psoIdx),
+									FillCullingResult(context, globals, SRV_INDIRECT_SHADOW_BUFFER,
 										(uint32_t)run.startCmd, run.count, run.psoIdx, cullingStage);
 								}
 
@@ -1039,17 +998,14 @@ void MeshSorter::RenderMeshes(
 								{
 									if (UseGPUFrustumCull)
 									{
-										FrustrumCulling(context, globals, m_Camera, m_Viewport, args,
-											bucketer.GetArgsVisibleFlagsBuffer(run.psoIdx),
+										FrustrumCulling(context, globals, m_Camera, m_Viewport, SRV_INDIRECT_DEPTH_BUFFER,
 											(uint32_t)run.startCmd, run.count, run.psoIdx);
 									}
 								}
 
 								for (const auto& run : bucketer.GetDepthRuns())
 								{
-									FillCullingResult(context, globals, args,
-										bucketer.GetArgsVisibleFlagsBuffer(run.psoIdx),
-										bucketer.GetCullingResultArgsBuffer(run.psoIdx),
+									FillCullingResult(context, globals, SRV_INDIRECT_DEPTH_BUFFER,
 										(uint32_t)run.startCmd, run.count, run.psoIdx, cullingStage);
 								}
 
@@ -1090,17 +1046,14 @@ void MeshSorter::RenderMeshes(
 								{
 									if (UseGPUFrustumCull)
 									{
-										FrustrumCulling(context, globals, m_Camera, m_Viewport, args,
-											bucketer.GetArgsVisibleFlagsBuffer(run.psoIdx),
+										FrustrumCulling(context, globals, m_Camera, m_Viewport, SRV_INDIRECT_COLOR_BUFFER,
 											(uint32_t)run.startCmd, run.count, run.psoIdx);
 									}
 								}
 
 								for (const auto& run : bucketer.GetColorRunsRW())
 								{
-									FillCullingResult(context, globals, args,
-										bucketer.GetArgsVisibleFlagsBuffer(run.psoIdx),
-										bucketer.GetCullingResultArgsBuffer(run.psoIdx),
+									FillCullingResult(context, globals, SRV_INDIRECT_COLOR_BUFFER,
 										(uint32_t)run.startCmd, run.count, run.psoIdx, cullingStage);
 								}
 
@@ -1132,17 +1085,14 @@ void MeshSorter::RenderMeshes(
 							{
 								if (UseGPUFrustumCull)
 								{
-									FrustrumCulling(context, globals, m_Camera, m_Viewport, args,
-										bucketer.GetArgsVisibleFlagsBuffer(run.psoIdx),
+									FrustrumCulling(context, globals, m_Camera, m_Viewport, SRV_INDIRECT_COLOR_BUFFER,
 										(uint32_t)run.startCmd, run.count, run.psoIdx);
 								}
 							}
 
 							for (const auto& run : bucketer.GetColorRunsEQ())
 							{
-								FillCullingResult(context, globals, args,
-									bucketer.GetArgsVisibleFlagsBuffer(run.psoIdx),
-									bucketer.GetCullingResultArgsBuffer(run.psoIdx),
+								FillCullingResult(context, globals, SRV_INDIRECT_COLOR_BUFFER,
 									(uint32_t)run.startCmd, run.count, run.psoIdx, cullingStage);
 							}
 

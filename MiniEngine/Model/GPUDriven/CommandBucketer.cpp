@@ -95,6 +95,7 @@ void CommandBucketer::FinalizeShadow()
 	}
 
 	m_ShadowArgs.Create(L"Shadow Prebucket Indirect Args", (uint32_t)merged.size(), (uint32_t)sizeof(IndirectCommand), merged.data());
+	Renderer::SetBindlessResourceDescriptor(SRV_INDIRECT_SHADOW_BUFFER, m_ShadowArgs.GetSRV());
 	m_ShadowFinalized = true;
 }
 
@@ -156,6 +157,7 @@ void CommandBucketer::FinalizeDepth()
 	}
 		
 	m_DepthArgs.Create(L"Depth Prebucket Indirect Args", (uint32_t)merged.size(), (uint32_t)sizeof(IndirectCommand), merged.data());
+	Renderer::SetBindlessResourceDescriptor(SRV_INDIRECT_DEPTH_BUFFER, m_DepthArgs.GetSRV());
 	m_DepthFinalized = true;
 }
 
@@ -240,6 +242,7 @@ void CommandBucketer::FinalizeColor()
 	mergedAll.insert(mergedAll.end(), mergedEQ.begin(), mergedEQ.end());
 
 	m_ColorArgs.Create(L"Color Prebucket Indirect Args", total, (uint32_t)sizeof(IndirectCommand), mergedAll.data());
+	Renderer::SetBindlessResourceDescriptor(SRV_INDIRECT_COLOR_BUFFER, m_ColorArgs.GetSRV());
 	m_ColorFinalized = true;
 }
 
@@ -280,12 +283,6 @@ size_t CommandBucketer::CalculateMaxIndirectArgsBufferSize()
 	return std::max({ m_ShadowArgs.GetBufferSize(), m_DepthArgs.GetBufferSize(), m_ColorArgs.GetBufferSize() });
 }
 
-uint16_t CommandBucketer::GetPsoIdxToContinuousIdx(uint16_t psoIdx) const
-{
-	ASSERT(m_PsoIdxMap.find(psoIdx) != m_PsoIdxMap.end());
-	return m_PsoIdxMap.at(psoIdx);
-}
-
 ByteAddressBuffer& CommandBucketer::GetArgsVisibleFlagsBuffer(uint16_t psoIdx)
 {
 	ASSERT(m_ArgsVisibleFlags.find(psoIdx) != m_ArgsVisibleFlags.end());
@@ -303,7 +300,6 @@ void CommandBucketer::ResetAll()
 	ResetShadow(); 
 	ResetDepth(); 
 	ResetColor();
-	m_PsoIdxMap.clear();
 	m_ArgsVisibleFlags.clear();
 	m_CullingResultArgs.clear();
 }
@@ -331,7 +327,6 @@ void CommandBucketer::FinalizeAll()
 	if (DestCount == 0)
 		return;
 
-	m_PsoIdxMap.clear();
 	std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> SourceVisibleFlags(DestCount);
 	std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> SourceCullingResults(DestCount);
 	std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> SourceVisibleFlagsSRVs(DestCount);
@@ -340,30 +335,10 @@ void CommandBucketer::FinalizeAll()
 
 	for (uint32_t i = 0; i < DestCount; i++)
 	{
-		const uint16_t key = sortedKeys[i];
-		m_PsoIdxMap[key] = static_cast<uint16_t>(i);
-		SourceVisibleFlags[i] = m_ArgsVisibleFlags.at(key).GetUAV();
-		SourceCullingResults[i] = m_CullingResultArgs.at(key).GetUAV();
-		SourceVisibleFlagsSRVs[i] = m_ArgsVisibleFlags.at(key).GetSRV();
-		SourceCullingResultsSRVs[i] = m_CullingResultArgs.at(key).GetSRV();
-	}
-
-	if (DestCount > 0)
-	{
-		DescriptorHandle visibleFlagsDest = Renderer::m_BindlessUAVs + 
-			uint32_t(Renderer::BindlessUAVsOffsets::kArgsVisibleFlagsBufferUAV) * Renderer::s_TextureHeap.GetDescriptorSize();
-		DescriptorHandle cullingResultsDest = Renderer::m_BindlessUAVs +
-			uint32_t(Renderer::BindlessUAVsOffsets::kCullingResultArgsBufferUAV) * Renderer::s_TextureHeap.GetDescriptorSize();
-
-		Graphics::g_Device->CopyDescriptors(1, &visibleFlagsDest, &DestCount, DestCount, SourceVisibleFlags.data(), SourceCounts.data(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-		Graphics::g_Device->CopyDescriptors(1, &cullingResultsDest, &DestCount, DestCount, SourceCullingResults.data(), SourceCounts.data(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
-		DescriptorHandle visibleFlagsDestSRV = Renderer::m_BindlessSRVs +
-			uint32_t(Renderer::BindlessSRVsOffsets::kArgsVisibleFlagsBufferSRV) * Renderer::s_TextureHeap.GetDescriptorSize();
-		DescriptorHandle cullingResultsDestSRV = Renderer::m_BindlessSRVs +
-			uint32_t(Renderer::BindlessSRVsOffsets::kCullingResultArgsBufferSRV) * Renderer::s_TextureHeap.GetDescriptorSize();
-
-		Graphics::g_Device->CopyDescriptors(1, &visibleFlagsDestSRV, &DestCount, DestCount, SourceVisibleFlagsSRVs.data(), SourceCounts.data(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-		Graphics::g_Device->CopyDescriptors(1, &cullingResultsDestSRV, &DestCount, DestCount, SourceCullingResultsSRVs.data(), SourceCounts.data(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		const uint16_t psoIdx = sortedKeys[i];
+		Renderer::SetBindlessResourceDescriptor(SRV_VISIBLE_FLAGS_BASE + psoIdx, m_ArgsVisibleFlags.at(psoIdx).GetSRV());
+		Renderer::SetBindlessResourceDescriptor(SRV_CULLING_RESULT_BASE + psoIdx, m_CullingResultArgs.at(psoIdx).GetSRV());
+		Renderer::SetBindlessResourceDescriptor(UAV_VISIBLE_FLAGS_BASE + psoIdx, m_ArgsVisibleFlags.at(psoIdx).GetUAV());
+		Renderer::SetBindlessResourceDescriptor(UAV_CULLING_RESULT_BASE + psoIdx, m_CullingResultArgs.at(psoIdx).GetUAV());
 	}
 }

@@ -77,16 +77,14 @@ void InstanceResourceManager::ScheduleMeshConstantsUpdate(const InstanceAllocati
 	uint32_t first, uint32_t count)
 {
 	std::lock_guard<std::mutex> lock(m_Mutex);
-	for (uint32_t i = 0; i < count; ++i)
-	{
-		CopyJob job;
-		job.src = &srcUpload;
-		job.dstBuffer = &m_MeshConstantsGPU;
-		job.srcOffset = size_t(first + i) * m_MeshConstantStride;
-		job.dstOffset = size_t(a.meshConstantBase + first + i) * m_MeshConstantStride;
-		job.size = m_MeshConstantStride;
-		m_CopyJobs.push_back(job);
-	}
+	if (count == 0) return;
+	CopyJob job;
+	job.src = &srcUpload;
+	job.dstBuffer = &m_MeshConstantsGPU;
+	job.srcOffset = size_t(first) * m_MeshConstantStride;
+	job.dstOffset = size_t(a.meshConstantBase + first) * m_MeshConstantStride;
+	job.size = size_t(count) * m_MeshConstantStride;
+	m_CopyJobs.push_back(job);
 }
 
 void InstanceResourceManager::ScheduleJointsUpdate(const InstanceAllocation& a,
@@ -94,16 +92,14 @@ void InstanceResourceManager::ScheduleJointsUpdate(const InstanceAllocation& a,
 	uint32_t first, uint32_t count)
 {
 	std::lock_guard<std::mutex> lock(m_Mutex);
-	for (uint32_t i = 0; i < count; ++i)
-	{
-		CopyJob job;
-		job.src = &srcUpload;
-		job.dstBuffer = &m_JointsGPU;
-		job.srcOffset = size_t(first + i) * m_JointStride;
-		job.dstOffset = size_t(a.jointBase + first + i) * m_JointStride;
-		job.size = m_JointStride;
-		m_CopyJobs.push_back(job);
-	}
+	if (count == 0) return;
+	CopyJob job;
+	job.src = &srcUpload;
+	job.dstBuffer = &m_JointsGPU;
+	job.srcOffset = size_t(first) * m_JointStride;
+	job.dstOffset = size_t(a.jointBase + first) * m_JointStride;
+	job.size = size_t(count) * m_JointStride;
+	m_CopyJobs.push_back(job);
 }
 
 void InstanceResourceManager::ScheduleIndirectUpdate(const InstanceAllocation& a,
@@ -133,7 +129,7 @@ void InstanceResourceManager::FlushScheduledUpdates(GraphicsContext& ctx)
 		ctx.TransitionResource(*job.dstBuffer, D3D12_RESOURCE_STATE_COPY_DEST, true);
 		ctx.GetCommandList()->CopyBufferRegion(job.dstBuffer->GetResource(), job.dstOffset,
 			job.src->GetResource(), job.srcOffset, job.size);
-		ctx.TransitionResource(*job.src, D3D12_RESOURCE_STATE_GENERIC_READ);
+		ctx.TransitionResource(*job.dstBuffer, D3D12_RESOURCE_STATE_GENERIC_READ);
 	}
 	ctx.FlushResourceBarriers();
 	m_CopyJobs.clear();

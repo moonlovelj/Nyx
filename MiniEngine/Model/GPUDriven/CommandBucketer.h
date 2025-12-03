@@ -48,8 +48,6 @@ namespace GPUDriven
 
 		size_t CalculateMaxIndirectArgsBufferSize();
 
-		uint16_t GetPsoIdxToContinuousIdx(uint16_t psoIdx) const;
-
 		ByteAddressBuffer& GetArgsVisibleFlagsBuffer(uint16_t psoIdx);
 		StructuredBuffer& GetCullingResultArgsBuffer(uint16_t psoIdx);
 
@@ -67,7 +65,6 @@ namespace GPUDriven
 		// color：基础 PSO -> 命令列表（区分等深/常规）
 		std::unordered_map<uint16_t, std::vector<IndirectCommand>> m_ColorBucketsCPU_RW;
 		std::unordered_map<uint16_t, std::vector<IndirectCommand>> m_ColorBucketsCPU_EQ;
-		std::unordered_map<uint16_t, uint16_t> m_PsoIdxMap; // 把离散的PSOIdx映射成连续的从0开始的数值
 
 		// 合并后的结果
 		std::vector<PSORun> m_ShadowRuns;

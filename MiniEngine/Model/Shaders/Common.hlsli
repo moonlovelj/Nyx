@@ -23,22 +23,18 @@
     "RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED | SAMPLER_HEAP_DIRECTLY_INDEXED), " \
     "CBV(b0, visibility = SHADER_VISIBILITY_VERTEX), " \
     "CBV(b0, visibility = SHADER_VISIBILITY_PIXEL), " \
-    "DescriptorTable(SRV(t0, numDescriptors = 20))," \
     "CBV(b1), " \
     "RootConstants(b2, num32BitConstants = 4), " \
-    "RootConstants(b3, num32BitConstants = 12), " \
+    "RootConstants(b3, num32BitConstants = 8), " \
     "RootConstants(b4, num32BitConstants = 4), " \
-    "DescriptorTable(SRV(t20, numDescriptors = 10))," \
-    "SRV(t30), " \
-    "DescriptorTable(UAV(u0, numDescriptors = 10))," \
-    "UAV(u10), " \
+    "CBV(b5), " \
     "StaticSampler(s10, maxAnisotropy = 8)," \
     "StaticSampler(s11," \
         "addressU = TEXTURE_ADDRESS_CLAMP," \
         "addressV = TEXTURE_ADDRESS_CLAMP," \
         "addressW = TEXTURE_ADDRESS_CLAMP," \
         "comparisonFunc = COMPARISON_GREATER_EQUAL," \
-        "filter = FILTER_MIN_MAG_LINEAR_MIP_POINT)," \
+        "filter = FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT)," \
     "StaticSampler(s12, maxAnisotropy = 8)," \
     "StaticSampler(s13," \
         "addressU = TEXTURE_ADDRESS_CLAMP," \

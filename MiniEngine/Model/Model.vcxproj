@@ -149,6 +149,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
+    <None Include="Shaders\BindlessIndices.hlsli" />
     <None Include="Shaders\Common.hlsli" />
     <None Include="Shaders\CullingCommon.hlsli" />
     <None Include="Shaders\DataCodec.hlsli" />
@@ -207,11 +208,8 @@
     </FxCompile>
     <FxCompile Include="Shaders\DeferredLightingCS.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compute</ShaderType>
-      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">6.2</ShaderModel>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">Compute</ShaderType>
-      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">6.2</ShaderModel>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compute</ShaderType>
-      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">6.2</ShaderModel>
     </FxCompile>
     <FxCompile Include="Shaders\DepthOnlySkinVS.hlsl">
       <ShaderType>Vertex</ShaderType>

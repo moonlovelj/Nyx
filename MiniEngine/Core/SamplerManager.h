@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -30,7 +30,8 @@ public:
         AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
         MipLODBias = 0.0f;
         MaxAnisotropy = 16;
-        ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+        //ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+        ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
         BorderColor[0] = 1.0f;
         BorderColor[1] = 1.0f;
         BorderColor[2] = 1.0f;

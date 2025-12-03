@@ -1,4 +1,4 @@
-#ifndef __PCSS_H__
+﻿#ifndef __PCSS_H__
 #define __PCSS_H__
 
 static const float2 POISSON_SAMPLES[16] = {

@@ -6,19 +6,11 @@
 // outdated warning about for-loop variable scope
 #pragma warning (disable: 3078)
 
-Texture2D<float4> gBufferA : register(t10);
-Texture2D<float4> gBufferB : register(t11);
-Texture2D<float4> gBufferC : register(t12);
-Texture2D<float4> gBufferD : register(t13);
-Texture2D<float> gSceneDepth : register(t14);
-
-RWTexture2D<float4> sceneColor : register(u0);
-
-float3 ConvertPixelToWorldPos(uint2 Pixel)
+float3 ConvertPixelToWorldPos(uint2 Pixel, Texture2D<float> sceneDepth)
 {
     float NDCX = (Pixel.x + 0.5) / ViewportWidth * 2.0 - 1.0;
     float NDCY = 1.0 - (Pixel.y + 0.5) / ViewportHeight * 2.0;
-    float SceneDepth = gSceneDepth[Pixel];
+    float SceneDepth = sceneDepth[Pixel];
     float4 Result = mul(InverseViewProjMatrix, float4(NDCX, NDCY, SceneDepth, 1.0));
 
     return Result.xyz / Result.w;
@@ -34,15 +26,22 @@ void main(
     uint2 DTid = Gid * uint2(8, 8) + GTid;
     if (DTid.x < ViewportWidth && DTid.y < ViewportHeight)
     {
+        RWTexture2D<float4> sceneColor = GetSceneColorUAV();
+        Texture2D<float4> gBufferD = GetGBufferDSRV();
         uint viewMode = gBufferD[DTid].a;
         if (viewMode == VIEW_MODE_LIT)
         {
+            Texture2D<float4> gBufferA = GetGBufferASRV();
+            Texture2D<float4> gBufferB = GetGBufferBSRV();
+            Texture2D<float4> gBufferC = GetGBufferCSRV();
+            Texture2D<float> gSceneDepth = GetSceneDepthSRV();
+
             float bShading = gBufferA[DTid].w;
             if (bShading > 1e-6)
             {
                 float2 ScreenUV = (float2(0.5, 0.5) + DTid) / float2(ViewportWidth, ViewportHeight);
                 float4 colorAccum = sceneColor[DTid];
-                float3 posW = ConvertPixelToWorldPos(DTid);
+                float3 posW = ConvertPixelToWorldPos(DTid, gSceneDepth);
                 float3 normal = gBufferA[DTid].xyz;
                 float3 baseColor = gBufferB[DTid].xyz;
                 float3 metallicRoughnessOcclusion = gBufferC[DTid].xyz;
@@ -60,7 +59,7 @@ void main(
                 float4 shadowCoord = mul(SunShadowMatrix, float4(posW, 1.0));
                 shadowCoord.xyz *= rcp(shadowCoord.w);
             // TODO 阴影有瑕疵
-                float sunShadow = GetDirectionalShadow(ScreenUV, shadowCoord.xyz, texShadow);
+                float sunShadow = GetDirectionalShadow(ScreenUV, shadowCoord.xyz);
             // TODO 高光有锯齿，尤其是粗糙度接近0时
                 colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunIntensity);
 

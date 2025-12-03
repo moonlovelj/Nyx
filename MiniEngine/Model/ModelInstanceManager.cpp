@@ -26,6 +26,8 @@ void ModelInstanceManager::Initialize(std::shared_ptr<Model> sourceModel, uint32
 	const uint32_t gridSide = static_cast<uint32_t>(std::ceil(std::sqrt(static_cast<double>(instanceCount))));
 	const float half = (gridSide > 0) ? (static_cast<float>(gridSide - 1) * 0.5f) : 0.0f;
 
+	m_InstanceConstantsCPU.Create(L"Model Instance Constants CPU", instanceCount * sizeof(InstanceConstants));
+	InstanceConstants* instanceConstantsCPU = (InstanceConstants*)m_InstanceConstantsCPU.Map();
 	for (uint32_t i = 0; i < instanceCount; ++i)
 	{
 		m_ModelInstances.emplace_back(sourceModel);
@@ -38,8 +40,27 @@ void ModelInstanceManager::Initialize(std::shared_ptr<Model> sourceModel, uint32
 		const float z = (static_cast<float>(row) - half) * spacing;
 
 		m_ModelInstances[i].SetPosition(Math::Vector3(x, 0.0f, z));
-	}
 
+		instanceConstantsCPU[i].MeshConstantsBase = m_ModelInstances[i].GetInstanceAllocation().meshConstantBase;
+		instanceConstantsCPU[i].JointBase = m_ModelInstances[i].GetInstanceAllocation().jointBase;
+	}
+	m_InstanceConstantsCPU.Unmap();
+
+	m_InstanceConstantsGPU.Create(
+		L"Model Instance Constants GPU",
+		instanceCount,
+		sizeof(InstanceConstants),
+		m_InstanceConstantsCPU
+	);
+
+	{
+		Renderer::SetBindlessResourceDescriptor(SRV_MESH_CONSTANTS_BUFFER, InstanceResourceManager::Get().GetMeshConstantsBuffer().GetSRV());
+		Renderer::SetBindlessResourceDescriptor(SRV_JOINTS_BUFFER, InstanceResourceManager::Get().GetJointsBuffer().GetSRV());
+		Renderer::SetBindlessResourceDescriptor(SRV_VERTEX_BUFFER, sourceModel->m_DataBuffer.GetSRV());
+		Renderer::SetBindlessResourceDescriptor(SRV_MESHLET_BUFFER, sourceModel->m_MeshletConstants.GetSRV());
+		Renderer::SetBindlessResourceDescriptor(SRV_MATERIAL_CONSTANTS_BUFFER, sourceModel->m_MaterialConstants.GetSRV());
+		Renderer::SetBindlessResourceDescriptor(SRV_INSTANCE_CONSTANTS_BUFFER, m_InstanceConstantsGPU.GetSRV());
+	}
 
 	GPUDriven::CommandBucketer::Get().FinalizeAll();
 }
@@ -70,6 +91,8 @@ void ModelInstanceManager::Cleanup()
 	m_ModelInstances.clear();
 	InstanceResourceManager::Get().Cleanup();
 	GPUDriven::CommandBucketer::Get().ResetAll();
+	m_InstanceConstantsCPU.Destroy();
+	m_InstanceConstantsGPU.Destroy();
 }
 
 ModelInstance& ModelInstanceManager::GetModelInstance(uint32_t index)

@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -104,10 +104,8 @@ public:
 		{
 		case D3D12_DESCRIPTOR_RANGE_TYPE_CBV:
 		case D3D12_DESCRIPTOR_RANGE_TYPE_SRV:
-            Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
-			break;
-		case D3D12_DESCRIPTOR_RANGE_TYPE_UAV:
-            Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE;
+        case D3D12_DESCRIPTOR_RANGE_TYPE_UAV:
+            Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
 			break;
 		case D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER:
             Flags = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;

@@ -27,4 +27,6 @@ public:
 
 private:
 	std::vector<ModelInstance> m_ModelInstances;
+	UploadBuffer m_InstanceConstantsCPU;
+	ByteAddressBuffer m_InstanceConstantsGPU;
 };

@@ -125,7 +125,7 @@ void Model::BuildMeshletConstantsBuffer()
             meshletConstant.VertexBufferDepthOffset = mesh.vbDepthOffset;
             meshletConstant.VertexDepthStride = stride;
             meshletConstant.MeshJointsIndexOffset = mesh.startJoint;
-            meshletConstant.MeshConstantsIndex = 0;//mesh.meshCBV;
+            meshletConstant.MeshConstantsIndexOffset = mesh.meshCBV;
             meshletConstant.MaterialConstantsIndex = mesh.materialCBV;
             meshletConstant.parentError = mesh.draw[j].parentError;
 			memcpy(meshletConstant.parentBounds, mesh.draw[j].parentBounds, 16);
@@ -466,7 +466,7 @@ void ModelInstance::CreateMeshIndirectCommands()
                 GPUDriven::IndirectCommand cmd;
 
                 ASSERT(mesh.ibOffset%4 == 0, "Index buffer error.");
-                cmd.MeshConstantsIndex = mesh.meshCBV + m_Alloc.meshConstantBase;
+                cmd.InstanceIndex = m_Alloc.instanceID;
                 cmd.MeshletIndex = cmdIdx;
                 cmd.drawArguments.IndexCountPerInstance = mesh.draw[j].primCount;
                 cmd.drawArguments.InstanceCount = 1;
@@ -498,7 +498,7 @@ void ModelInstance::CreateMeshIndirectCommands()
 				if (!alphaBlend)
 				{
 					bool equalDepth = (SeparateZPass || alphaTest);
-					GPUDriven::CommandBucketer::Get().AppendColor(mesh.pso, cmd, equalDepth);
+					GPUDriven::CommandBucketer::Get().AppendColor(equalDepth ? mesh.pso + 1 : mesh.pso, cmd, equalDepth);
 				}
 
                 ++cmdIdx;
