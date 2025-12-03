@@ -72,6 +72,8 @@ void Model::Render(
     for (uint32_t i = 0; i < m_NumMeshes; ++i)
     {
         const Mesh& mesh = *(const Mesh*)pMesh;
+		bool alphaBlend = (mesh.psoFlags & PSOFlags::kAlphaBlend) == PSOFlags::kAlphaBlend;
+		if (!alphaBlend) continue;
 
         const AffineTransform& sphereXform = sphereTransforms[mesh.meshCBV];
         Scalar scaleXSqr = LengthSquare((Vector3)sphereXform.GetX());
