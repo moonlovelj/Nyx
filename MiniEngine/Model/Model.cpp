@@ -175,8 +175,7 @@ ModelInstance::ModelInstance( std::shared_ptr<const Model> sourceModel )
     {
 		m_Alloc = InstanceResourceManager::Get().Allocate(
 			m_Model->m_NumNodes,
-			m_Model->m_NumJoints,
-            m_Model->GetNumTotalDraws()
+			m_Model->m_NumJoints
 		);
 
         m_MeshConstantsCPU.Create(L"Mesh Constant Upload Buffer", sourceModel->m_NumNodes * sizeof(MeshConstants));
@@ -242,8 +241,7 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
     {
 		m_Alloc = InstanceResourceManager::Get().Allocate(
 			m_Model->m_NumNodes,
-			m_Model->m_NumJoints,
-            m_Model->GetNumTotalDraws()
+			m_Model->m_NumJoints
 		);
 
         m_MeshConstantsCPU.Create(L"Mesh Constant Upload Buffer", sourceModel->m_NumNodes * sizeof(MeshConstants));
@@ -285,8 +283,11 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
     return *this;
 }
 
-void ModelInstance::Update(GraphicsContext& gfxContext, float deltaTime)
+void ModelInstance::Update(float deltaTime, MeshConstants* meshConstantsCPU, Joint* jointCPU)
 {
+	ASSERT(meshConstantsCPU != nullptr, "Must provide a CPU-side mesh constants buffer");
+	ASSERT(jointCPU != nullptr, "Must provide a CPU-side joint buffer");
+
     if (m_Model == nullptr)
         return;
 
@@ -296,7 +297,7 @@ void ModelInstance::Update(GraphicsContext& gfxContext, float deltaTime)
     Matrix4 matrixStack[kMaxStackDepth];
     Matrix4 ParentMatrix = Matrix4((AffineTransform)m_Locator);
 
-    MeshConstants* cb = (MeshConstants*)m_MeshConstantsCPU.Map();
+    MeshConstants* cb = meshConstantsCPU;//(MeshConstants*)m_MeshConstantsCPU.Map();
 
     if (m_AnimGraph)
     {
@@ -369,36 +370,13 @@ void ModelInstance::Update(GraphicsContext& gfxContext, float deltaTime)
 	}
 
     // Update skeletal joints
-    Joint* jb = (Joint*)m_MeshJointsCPU.Map();
+    Joint* jb = (Joint*)jointCPU;//m_MeshJointsCPU.Map();
     for (uint32_t i = 0; i < m_Model->m_NumJoints; ++i)
     {
         Joint& joint = jb[i];
         joint.posXform = cb[m_Model->m_JointIndices[i]].World * m_Model->m_JointIBMs[i];
         joint.nrmXform = InverseTranspose(joint.posXform.Get3x3());
     }
-    m_MeshJointsCPU.Unmap();
-
-    m_MeshConstantsCPU.Unmap();
-
-    InstanceResourceManager::Get().ScheduleMeshConstantsUpdate(
-        m_Alloc,
-        m_MeshConstantsCPU,
-        0,
-		m_Model->m_NumNodes);
-
-    InstanceResourceManager::Get().ScheduleJointsUpdate(
-        m_Alloc,
-        m_MeshJointsCPU,
-        0,
-        m_Model->m_NumJoints);
-
-	//gfxContext.TransitionResource(m_MeshConstantsGPU, D3D12_RESOURCE_STATE_COPY_DEST, true);
-	//gfxContext.GetCommandList()->CopyBufferRegion(m_MeshConstantsGPU.GetResource(), 0, m_MeshConstantsCPU.GetResource(), 0, m_MeshConstantsCPU.GetBufferSize());
-	//gfxContext.TransitionResource(m_MeshConstantsGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
-
-	//gfxContext.TransitionResource(m_MeshJointsGPU, D3D12_RESOURCE_STATE_COPY_DEST, true);
-	//gfxContext.GetCommandList()->CopyBufferRegion(m_MeshJointsGPU.GetResource(), 0, m_MeshJointsCPU.GetResource(), 0, m_MeshJointsCPU.GetBufferSize());
-	//gfxContext.TransitionResource(m_MeshJointsGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
 }
 
 void ModelInstance::Resize( float newRadius )

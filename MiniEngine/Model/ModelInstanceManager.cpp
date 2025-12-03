@@ -12,11 +12,8 @@ void ModelInstanceManager::Initialize(std::shared_ptr<Model> sourceModel, uint32
 	InstanceResourceManager::Get().Initialize(
 		std::max(sourceModel->m_NumNodes * instanceCount, 1u),
 		std::max(sourceModel->m_NumJoints * instanceCount, 1u),
-		std::max(sourceModel->GetNumTotalDraws() * instanceCount, 1u),
 		sizeof(MeshConstants),
-		sizeof(Joint),
-		sizeof(GPUDriven::IndirectCommand)
-	);
+		sizeof(Joint));
 
 	m_ModelInstances.clear();
 	m_ModelInstances.reserve(instanceCount);
@@ -78,12 +75,22 @@ void ModelInstanceManager::Render(Renderer::MeshSorter& sorter) const
 
 void ModelInstanceManager::Update(GraphicsContext& gfxContext, float deltaTime)
 {
+	MeshConstants* meshConstantsCPU = (MeshConstants*)InstanceResourceManager::Get().GetMeshConstantsCPU().Map();
+	Joint* jointCPU = (Joint*)InstanceResourceManager::Get().GetJointsCPU().Map();
+
+	uint32_t meshConstOffset = 0;
+	uint32_t jointOffset = 0;
 	for (auto& instance : m_ModelInstances)
 	{
-		instance.Update(gfxContext, deltaTime);
+		instance.Update(deltaTime, meshConstantsCPU + meshConstOffset, jointCPU + jointOffset);
+		meshConstOffset += instance.GetInstanceAllocation().meshConstantCount;
+		jointOffset += instance.GetInstanceAllocation().jointCount;
 	}
 
-	InstanceResourceManager::Get().FlushScheduledUpdates(gfxContext);
+	InstanceResourceManager::Get().GetMeshConstantsCPU().Unmap();
+	InstanceResourceManager::Get().GetJointsCPU().Unmap();
+
+	InstanceResourceManager::Get().FlushBufferUpdate(gfxContext);
 }
 
 void ModelInstanceManager::Cleanup()

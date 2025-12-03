@@ -22,6 +22,7 @@
 #include "../Core/TextureManager.h"
 #include "../Core/Math/BoundingBox.h"
 #include "../Core/Math/BoundingSphere.h"
+#include "ConstantBuffers.h"
 #include "InstanceResourceManager.h"
 #include "GPUDriven/ExecuteIndirect.h"
 #include <cstdint>
@@ -190,7 +191,7 @@ public:
 
     bool IsNull(void) const { return m_Model == nullptr; }
 
-    void Update(GraphicsContext& gfxContext, float deltaTime);
+    void Update(float deltaTime, MeshConstants* meshConstantsCPU, Joint* jointCPU);
     void Render(Renderer::MeshSorter& sorter) const;
 
     void Resize(float newRadius);
