@@ -20,6 +20,7 @@
 #include "../Core/UploadBuffer.h"
 #include "../Core/TextureManager.h"
 #include "GPUDriven/ExecuteIndirect.h"
+#include "GPUDriven/CommandBucketer.h"
 #include "Shaders/BindlessIndices.hlsli"
 #include <cstdint>
 #include <vector>
@@ -164,6 +165,11 @@ namespace Renderer
         void RenderMeshes(DrawPass pass, GraphicsContext& context, const GlobalConstants& inGlobals);
 
     private:
+		void RenderMeshedInternal(GraphicsContext& context, 
+            const GlobalConstants& inGlobals, 
+            const std::vector<GPUDriven::PSORun>& psoRuns, 
+            IndirectArgsBuffer& indirectArgsBuffer,
+            uint32_t indirectArgsOffset);
 
         struct SortKey
         {
