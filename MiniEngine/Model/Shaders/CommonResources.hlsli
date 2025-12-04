@@ -14,6 +14,7 @@ cbuffer GlobalConstants : register(b1)
     float4 ViewSpaceFrustumPlanes5;
     float4x4 ViewProjMatrix;
     float4x4 InverseViewProjMatrix;
+    float4x4 PrevViewProjMatrix;
     float4x4 SunShadowMatrix;
     float3 ViewerPos;
     float3 SunDirection;

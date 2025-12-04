@@ -124,20 +124,10 @@ namespace Renderer
 			std::memset(m_PassCounts, 0, sizeof(m_PassCounts));
 			//m_CurrentPass = kZPass;
 			m_CurrentDraw = 0;
-			m_VertexBufferSRV.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
-			m_JointsBufferSRV.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
-			m_MeshConstantsBufferSRV.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
-			m_MaterialConstantsBufferSRV.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
-			m_MeshletConstantsBufferSRV.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
 			m_IBV = {};
 		}
 
 		void SetIndexBuffer(const D3D12_INDEX_BUFFER_VIEW& ibv) { m_IBV = ibv; }
-		void SetMeshConstantsBuffer(D3D12_CPU_DESCRIPTOR_HANDLE mb) { m_MeshConstantsBufferSRV = mb; }
-		void SetMaterialConstantsBuffer(D3D12_CPU_DESCRIPTOR_HANDLE matb) { m_MaterialConstantsBufferSRV = matb; }
-		void SetMeshletConstantsBuffer(D3D12_CPU_DESCRIPTOR_HANDLE meshletConstantsBuffer) { m_MeshletConstantsBufferSRV = meshletConstantsBuffer; }
-		void SetVertexBuffer(D3D12_CPU_DESCRIPTOR_HANDLE vb) { m_VertexBufferSRV = vb; }
-		void SetJointsBuffer(D3D12_CPU_DESCRIPTOR_HANDLE jb) { m_JointsBufferSRV = jb; }
 		void SetCamera( const BaseCamera& camera ) { m_Camera = &camera; }
 		void SetViewport( const D3D12_VIEWPORT& viewport ) { m_Viewport = viewport; }
 		void SetScissor( const D3D12_RECT& scissor ) { m_Scissor = scissor; }
@@ -210,11 +200,6 @@ namespace Renderer
 		uint32_t m_NumRTVs;
 		ColorBuffer* m_RTV[8];
 		DepthBuffer* m_DSV;
-        D3D12_CPU_DESCRIPTOR_HANDLE m_MeshConstantsBufferSRV;
-        D3D12_CPU_DESCRIPTOR_HANDLE m_MaterialConstantsBufferSRV;
-        D3D12_CPU_DESCRIPTOR_HANDLE m_MeshletConstantsBufferSRV;
-        D3D12_CPU_DESCRIPTOR_HANDLE m_VertexBufferSRV;
-        D3D12_CPU_DESCRIPTOR_HANDLE m_JointsBufferSRV;
 		D3D12_INDEX_BUFFER_VIEW m_IBV;
 	};
 

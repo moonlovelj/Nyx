@@ -50,54 +50,46 @@ uint32_t Model::GetNumTotalDraws() const
 }
 
 void Model::Render(
-    MeshSorter& sorter,
-    const D3D12_GPU_VIRTUAL_ADDRESS& meshConstants,
-    const GpuBuffer& meshletConstants,
-    const AffineTransform sphereTransforms[],
-    const D3D12_GPU_VIRTUAL_ADDRESS& meshJoints,
-    const IndirectArgsBuffer& indirectArgsBuffer) const
+    MeshSorter& sorter) const
 {
-    sorter.SetMaterialConstantsBuffer(m_MaterialConstants.GetSRV());
-    sorter.SetMeshletConstantsBuffer(meshletConstants.GetSRV());
-	sorter.SetVertexBuffer(m_DataBuffer.GetSRV());
     sorter.SetIndexBuffer({m_DataBuffer.GetGpuVirtualAddress(), (uint32_t)m_DataBuffer.GetBufferSize(), DXGI_FORMAT_R32_UINT });
 
     // Pointer to current mesh
-    const uint8_t* pMesh = m_MeshData.get();
+  //  const uint8_t* pMesh = m_MeshData.get();
 
-    const Frustum& frustum = sorter.GetViewFrustum();
-    const AffineTransform& viewMat = (const AffineTransform&)sorter.GetViewMatrix();
+  //  const Frustum& frustum = sorter.GetViewFrustum();
+  //  const AffineTransform& viewMat = (const AffineTransform&)sorter.GetViewMatrix();
 
-    uint32_t indirectArgsOffset = 0;
-    for (uint32_t i = 0; i < m_NumMeshes; ++i)
-    {
-        const Mesh& mesh = *(const Mesh*)pMesh;
-		bool alphaBlend = (mesh.psoFlags & PSOFlags::kAlphaBlend) == PSOFlags::kAlphaBlend;
-		if (!alphaBlend) continue;
+  //  uint32_t indirectArgsOffset = 0;
+  //  for (uint32_t i = 0; i < m_NumMeshes; ++i)
+  //  {
+  //      const Mesh& mesh = *(const Mesh*)pMesh;
+		//bool alphaBlend = (mesh.psoFlags & PSOFlags::kAlphaBlend) == PSOFlags::kAlphaBlend;
+		//if (!alphaBlend) continue;
 
-        const AffineTransform& sphereXform = sphereTransforms[mesh.meshCBV];
-        Scalar scaleXSqr = LengthSquare((Vector3)sphereXform.GetX());
-        Scalar scaleYSqr = LengthSquare((Vector3)sphereXform.GetY());
-        Scalar scaleZSqr = LengthSquare((Vector3)sphereXform.GetZ());
-        Scalar sphereScale = Sqrt(Max(Max(scaleXSqr, scaleYSqr), scaleZSqr));
+  //      const AffineTransform& sphereXform = sphereTransforms[mesh.meshCBV];
+  //      Scalar scaleXSqr = LengthSquare((Vector3)sphereXform.GetX());
+  //      Scalar scaleYSqr = LengthSquare((Vector3)sphereXform.GetY());
+  //      Scalar scaleZSqr = LengthSquare((Vector3)sphereXform.GetZ());
+  //      Scalar sphereScale = Sqrt(Max(Max(scaleXSqr, scaleYSqr), scaleZSqr));
 
-		BoundingSphere sphereLS((const XMFLOAT4*)mesh.bounds);
-		BoundingSphere sphereWS = BoundingSphere(sphereXform * sphereLS.GetCenter(), sphereScale * sphereLS.GetRadius());
-        BoundingSphere sphereVS = BoundingSphere(viewMat * sphereWS.GetCenter(), sphereWS.GetRadius());
+		//BoundingSphere sphereLS((const XMFLOAT4*)mesh.bounds);
+		//BoundingSphere sphereWS = BoundingSphere(sphereXform * sphereLS.GetCenter(), sphereScale * sphereLS.GetRadius());
+  //      BoundingSphere sphereVS = BoundingSphere(viewMat * sphereWS.GetCenter(), sphereWS.GetRadius());
 
-        if (frustum.IntersectSphere(sphereVS))
-        {
-            float distance = -sphereVS.GetCenter().GetZ() - sphereVS.GetRadius();
-            sorter.AddMesh(mesh, distance,
-                meshConstants + sizeof(MeshConstants) * mesh.meshCBV,
-                m_MaterialConstants.GetGpuVirtualAddress() + sizeof(MaterialConstants) * mesh.materialCBV,
-                m_DataBuffer.GetGpuVirtualAddress(), mesh.numJoints > 0 ? meshJoints + sizeof(Joint) * mesh.startJoint : D3D12_GPU_VIRTUAL_ADDRESS_NULL,
-                indirectArgsBuffer, indirectArgsOffset * sizeof(GPUDriven::IndirectCommand));
-        }
+  //      if (frustum.IntersectSphere(sphereVS))
+  //      {
+  //          float distance = -sphereVS.GetCenter().GetZ() - sphereVS.GetRadius();
+  //          sorter.AddMesh(mesh, distance,
+  //              meshConstants + sizeof(MeshConstants) * mesh.meshCBV,
+  //              m_MaterialConstants.GetGpuVirtualAddress() + sizeof(MaterialConstants) * mesh.materialCBV,
+  //              m_DataBuffer.GetGpuVirtualAddress(), mesh.numJoints > 0 ? meshJoints + sizeof(Joint) * mesh.startJoint : D3D12_GPU_VIRTUAL_ADDRESS_NULL,
+  //              indirectArgsBuffer, indirectArgsOffset * sizeof(GPUDriven::IndirectCommand));
+  //      }
 
-        indirectArgsOffset += mesh.numDraws;
-        pMesh += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
-    }
+  //      indirectArgsOffset += mesh.numDraws;
+  //      pMesh += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
+  //  }
 }
 
 void Model::BuildMeshletConstantsBuffer()
@@ -147,13 +139,7 @@ void ModelInstance::Render(MeshSorter& sorter) const
 {
     if (m_Model != nullptr)
     {
-        //const Frustum& frustum = sorter.GetWorldFrustum();
-        m_Model->Render(sorter, 
-			InstanceResourceManager::Get().GetMeshConstantsBuffer(m_Alloc),
-            m_Model->m_MeshletConstants,
-            m_BoundingSphereTransforms.get(), 
-            InstanceResourceManager::Get().GetJointsBuffer(m_Alloc),
-            *m_IndirectArgsBuffer);
+        m_Model->Render(sorter);
     }
 }
 
@@ -166,12 +152,10 @@ ModelInstance::ModelInstance( std::shared_ptr<const Model> sourceModel )
 
     if (sourceModel == nullptr)
     {
-        m_MeshConstantsCPU.Destroy();
         m_BoundingSphereTransforms = nullptr;
         m_AnimGraph = nullptr;
         m_AnimState.clear();
         m_Cameras.clear();
-		m_MeshJointsCPU.Destroy();
     }
     else
     {
@@ -180,11 +164,7 @@ ModelInstance::ModelInstance( std::shared_ptr<const Model> sourceModel )
 			m_Model->m_NumJoints
 		);
 
-        m_MeshConstantsCPU.Create(L"Mesh Constant Upload Buffer", sourceModel->m_NumNodes * sizeof(MeshConstants));
-
         m_BoundingSphereTransforms.reset(new AffineTransform[sourceModel->m_NumNodes]);
-
-        m_MeshJointsCPU.Create(L"Mesh Joints Upload Buffer", std::max(sourceModel->m_NumJoints, 1u) * sizeof(Joint));
 
         if (sourceModel->m_NumAnimations > 0)
         {
@@ -232,12 +212,10 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
 
     if (sourceModel == nullptr)
     {
-        m_MeshConstantsCPU.Destroy();
         m_BoundingSphereTransforms = nullptr;
         m_AnimGraph = nullptr;
         m_AnimState.clear();
         m_Cameras.clear();
-		m_MeshJointsCPU.Destroy();
     }
     else
     {
@@ -246,11 +224,7 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
 			m_Model->m_NumJoints
 		);
 
-        m_MeshConstantsCPU.Create(L"Mesh Constant Upload Buffer", sourceModel->m_NumNodes * sizeof(MeshConstants));
-
         m_BoundingSphereTransforms.reset(new AffineTransform[sourceModel->m_NumNodes]);
-
-		m_MeshJointsCPU.Create(L"Mesh Joints Upload Buffer", std::max(sourceModel->m_NumJoints, 1u) * sizeof(Joint));
 
         if (sourceModel->m_NumAnimations > 0)
         {
@@ -486,8 +460,8 @@ void ModelInstance::CreateMeshIndirectCommands()
             pMesh += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
         }
 
-		m_IndirectArgsBuffer = std::make_shared<IndirectArgsBuffer>();
-        m_IndirectArgsBuffer->Create(L"Model Indirect Command", totalDraws, sizeof(GPUDriven::IndirectCommand), cmds.data());
+		//m_IndirectArgsBuffer = std::make_shared<IndirectArgsBuffer>();
+        //m_IndirectArgsBuffer->Create(L"Model Indirect Command", totalDraws, sizeof(GPUDriven::IndirectCommand), cmds.data());
     }
 }
 

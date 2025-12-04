@@ -1,0 +1,6 @@
+﻿#ifndef __SHARED_HEADER_HLSLI__
+#define __SHARED_HEADER_HLSLI__
+
+#define CULLING_THREAD_GROUP_SIZE 256
+
+#endif

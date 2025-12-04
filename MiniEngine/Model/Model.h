@@ -140,12 +140,7 @@ public:
 
     ~Model() { Destroy(); }
 
-    void Render(Renderer::MeshSorter& sorter,
-		const D3D12_GPU_VIRTUAL_ADDRESS& meshConstants,
-		const GpuBuffer& meshletConstants,
-        const Math::AffineTransform sphereTransforms[],
-        const D3D12_GPU_VIRTUAL_ADDRESS& meshJoints,
-		const IndirectArgsBuffer& indirectArgsBuffer) const;
+    void Render(Renderer::MeshSorter& sorter) const;
 
     void BuildMeshletConstantsBuffer();
 
@@ -180,8 +175,6 @@ class ModelInstance
 public:
     ModelInstance() {}
     ~ModelInstance() {
-        m_MeshConstantsCPU.Destroy();
-		m_MeshJointsCPU.Destroy();
         DestroyMeshIndirectCommands();
     }
     ModelInstance( std::shared_ptr<const Model> sourceModel );
@@ -222,14 +215,11 @@ private:
     InstanceAllocation m_Alloc{};
 
     std::shared_ptr<const Model> m_Model;
-    UploadBuffer m_MeshConstantsCPU;
     std::unique_ptr<Math::AffineTransform[]> m_BoundingSphereTransforms;
     Math::UniformTransform m_Locator;
 
     std::unique_ptr<GraphNode[]> m_AnimGraph;   // A copy of the scene graph when instancing animation
     std::vector<AnimationState> m_AnimState;    // Per-animation (not per-curve)
-
-	UploadBuffer m_MeshJointsCPU;
 
     std::map<uint32_t, std::shared_ptr<Math::Camera>> m_Cameras;
 

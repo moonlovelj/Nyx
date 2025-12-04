@@ -74,6 +74,7 @@ __declspec(align(256)) struct GlobalConstants
     Math::Vector4 ViewSpaceFrustumPlanes[6];
     Math::Matrix4 ViewProjMatrix;
     Math::Matrix4 InverseViewProjMatrix;
+    Math::Matrix4 PrevViewProjMatrix;
     Math::Matrix4 SunShadowMatrix;
     Math::Vector3 ViewerPos;
     Math::Vector3 SunDirection;

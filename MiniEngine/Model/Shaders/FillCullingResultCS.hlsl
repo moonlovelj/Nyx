@@ -5,10 +5,10 @@
 #include "CommonResources.hlsli"
 #include "CullingCommon.hlsli"
 
-[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+[numthreads(CULLING_THREAD_GROUP_SIZE, 1, 1)]
 void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
 {
-    uint index = (groupId.x * THREAD_GROUP_SIZE) + groupIndex;
+    uint index = (groupId.x * CULLING_THREAD_GROUP_SIZE) + groupIndex;
     if (index < maxCommands)
     {
         ByteAddressBuffer visibleFlags = GetVisibleFlagSRV(psoIdx);

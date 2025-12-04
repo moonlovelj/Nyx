@@ -1,7 +1,7 @@
 ﻿#ifndef __CULLING_COMMON_HLSLI__
 #define __CULLING_COMMON_HLSLI__
 
-#define THREAD_GROUP_SIZE 64
+#include "SharedHeader.hlsli"
 
 #define CULLING_RESULT_NO_CULLED		    0x0
 #define CULLING_RESULT_OF_FRUSTUM			0x1

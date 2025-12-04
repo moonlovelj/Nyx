@@ -51,6 +51,7 @@ public:
     virtual void RenderScene( void ) override;
 
 private:
+    Math::Matrix4 m_PrevViewProjMatrix;
     Camera m_Camera;
     unique_ptr<CameraController> m_CameraController;
 
@@ -246,12 +247,12 @@ void SceneViewer::Startup( void )
 		//m_ModelInst = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/DamagedHelmet/glTF/DamagedHelmet.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/AnimTest/AnimTest.gltf", forceRebuild);
-        auto model = Renderer::LoadModel(L"Assets/lumber_mill_wood_factory_gltf/scene.gltf", forceRebuild);
-		//auto model = Renderer::LoadModel(L"Assets/jinx/scene.gltf", forceRebuild);
+        //auto model = Renderer::LoadModel(L"Assets/lumber_mill_wood_factory_gltf/scene.gltf", forceRebuild);
+		auto model = Renderer::LoadModel(L"Assets/jinx/scene.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/TestMesh/test.gltf", forceRebuild);
         //m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
 
-        ModelInstanceManager::Get().Initialize(model, 1);
+        ModelInstanceManager::Get().Initialize(model, 120 * 120);
         OrientedBox obb = ModelInstanceManager::Get().GetModelInstance(0).GetBoundingBox();
         float modelRadius = Length(obb.GetDimensions()) * 0.5f;
         const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 0.5f, 0.0f, 0.0f);
@@ -382,6 +383,7 @@ void SceneViewer::RenderScene( void )
         GlobalConstants globals;
         globals.ViewProjMatrix = m_Camera.GetViewProjMatrix();
 		globals.InverseViewProjMatrix = Invert(m_Camera.GetViewProjMatrix());
+		globals.PrevViewProjMatrix = m_PrevViewProjMatrix;
         globals.SunShadowMatrix = m_SunShadowCamera.GetShadowMatrix();
         globals.ViewerPos = m_Camera.GetPosition();
         globals.SunDirection = SunDirection;
@@ -530,5 +532,7 @@ void SceneViewer::RenderScene( void )
     else
         MotionBlur::RenderObjectBlur(gfxContext, g_VelocityBuffer);
 
+
+	m_PrevViewProjMatrix = m_Camera.GetViewProjMatrix();
     gfxContext.Finish();
 }

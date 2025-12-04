@@ -26,6 +26,8 @@
 #include "GPUDriven/ExecuteIndirect.h"
 #include "GPUDriven/CommandBucketer.h"
 
+#include "Shaders/SharedHeader.hlsli"
+
 #include "CompiledShaders/DefaultVS.h"
 #include "CompiledShaders/DefaultSkinVS.h"
 #include "CompiledShaders/DefaultPS.h"
@@ -593,7 +595,7 @@ void Renderer::FrustrumCulling(GraphicsContext& gfxContext,
 	context.SetConstants(kRootConstants1, startCommandOffset, maxCommands, 
         screenErrorConstant, psoIdx);
 	context.SetConstant(kRootConstants1, 4, inArgsBufferOffset);
-	context.Dispatch1D(maxCommands);
+	context.Dispatch1D(maxCommands, CULLING_THREAD_GROUP_SIZE);
 }
 
 void Renderer::FillCullingResult(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, 
@@ -640,7 +642,7 @@ void Renderer::FillCullingResult(GraphicsContext& gfxContext, const GlobalConsta
     context.SetConstant(kRootConstants1, 4, inArgsBufferOffset);
     context.SetConstant(kRootConstants1, 5, (uint32_t)cullingStage);
 
-    context.Dispatch1D(maxCommands);
+    context.Dispatch1D(maxCommands, CULLING_THREAD_GROUP_SIZE);
 
     gfxContext.TransitionResource(bucketer.GetCullingResultArgsBuffer(psoIdx), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, true);
     gfxContext.TransitionResource(bucketer.GetCullingResultArgsBuffer(psoIdx).GetCounterBuffer(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, true);
@@ -965,6 +967,7 @@ void MeshSorter::RenderMeshes(
         const uint32_t lastDraw = m_CurrentDraw + passCount;
 		if (pass == kTransparent)
 		{
+            // TODO 目前meshlet渲染还不支持半透物体，程序不会运行到这里
 			while (m_CurrentDraw < lastDraw)
 			{
 				SortKey key;

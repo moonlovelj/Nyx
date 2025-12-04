@@ -64,9 +64,6 @@ void ModelInstanceManager::Initialize(std::shared_ptr<Model> sourceModel, uint32
 
 void ModelInstanceManager::Render(Renderer::MeshSorter& sorter) const
 {
-	sorter.SetMeshConstantsBuffer(InstanceResourceManager::Get().GetMeshConstantsBuffer().GetSRV());
-	sorter.SetJointsBuffer(InstanceResourceManager::Get().GetJointsBuffer().GetSRV());
-
 	for (auto& instance : m_ModelInstances)
 	{
 		instance.Render(sorter);

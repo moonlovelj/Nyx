@@ -216,6 +216,9 @@
     <None Include="Shaders\BindlessIndices.hlsli">
       <Filter>Shaders</Filter>
     </None>
+    <None Include="Shaders\SharedHeader.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Shaders\DefaultVS.hlsl">
