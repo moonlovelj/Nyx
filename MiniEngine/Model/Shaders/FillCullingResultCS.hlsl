@@ -45,6 +45,14 @@ void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
                 OutputCommands.Append(GetIndirectCommandBufferSRV(indirectBufferOffset, index + startCommand));
             }
         }
+        else if (cullingStage == CULLING_RESULT_OF_FREEZE_CULL)
+        {
+            uint visible = visibleFlags.Load(index * 4);
+            if (visible & (CULLING_FRUSTUM_VISIBLE | CULLING_OCCLUSION_PASS1_VISIBLE | CULLING_OCCLUSION_PASS2_VISIBLE))
+            {
+                OutputCommands.Append(GetIndirectCommandBufferSRV(indirectBufferOffset, index + startCommand));
+            }
+        }
     }
 }
 #endif

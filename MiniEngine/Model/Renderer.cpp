@@ -67,9 +67,8 @@ namespace Renderer
 {
     BoolVar SeparateZPass("Renderer/Separate Z Pass", false);
     BoolVar DeferredRendering("Renderer/Deferred Rendering", true);
-    BoolVar UseCull("Renderer/Use Cull", true);
-	BoolVar UseGPUFrustumCull("Renderer/Use GPU Frustum Cull", true);
-    BoolVar UseOcclusionCull("Renderer/Occlusion Cull", true);
+	BoolVar UseOcclusionCull("Renderer/Occlusion Cull", true);
+	BoolVar FreezeCull("Renderer/Freeze Cull", false);
     
 	const char* ViewModeLabels[] = { "Lit", "MeshletLOD", "MeshletID", "MeshletTriangle"};
 	EnumVar ViewMode("View/View Mode", 0, _countof(ViewModeLabels), ViewModeLabels);
@@ -682,7 +681,6 @@ void Renderer::FillCullingResult(GraphicsContext& gfxContext, const GlobalConsta
 	ComputeContext& context = gfxContext.GetComputeContext();
 	auto& bucketer = GPUDriven::CommandBucketer::Get();
 
-	context.TransitionResource(bucketer.GetCullingResultArgsBuffer(psoIdx).GetCounterBuffer(), D3D12_RESOURCE_STATE_COPY_DEST);
     context.CopyBufferRegion(bucketer.GetCullingResultArgsBuffer(psoIdx).GetCounterBuffer(), 0, m_IndirectArgsCounterBufferReset, 0, sizeof(UINT));
 	context.TransitionResource(bucketer.GetArgsVisibleFlagsBuffer(psoIdx), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 	context.TransitionResource(bucketer.GetCullingResultArgsBuffer(psoIdx), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -844,32 +842,23 @@ void MeshSorter::Sort()
 void MeshSorter::RenderMeshedInternal(GraphicsContext& context,
     const GlobalConstants& inGlobals,
     const std::vector<GPUDriven::PSORun>& psoRuns,
-    IndirectArgsBuffer& indirectArgsBuffer,
     uint32_t indirectArgsOffset,
     bool bOcclusionCull)
 {
     auto& bucketer = GPUDriven::CommandBucketer::Get();
-	if (UseCull)
+	if (!FreezeCull)
 	{
 		CullingStage cullingStage = CullingStage::kNoCulled;
-		if (UseGPUFrustumCull)
-		{
-			cullingStage = CullingStage::kFrustrumCulled;
-		}
-
 		for (const auto& run : psoRuns)
 		{
-			if (UseGPUFrustumCull)
-			{
-				FrustrumCulling(context, inGlobals, m_Camera, m_Viewport, indirectArgsOffset,
-					(uint32_t)run.startCmd, run.count, run.psoIdx);
-			}
+			FrustrumCulling(context, inGlobals, m_Camera, m_Viewport, indirectArgsOffset,
+				(uint32_t)run.startCmd, run.count, run.psoIdx);
 		}
+        cullingStage = CullingStage::kFrustrumCulled;
 
         // 第一帧不执行
         if (UseOcclusionCull && bOcclusionCull && TemporalEffects::GetFrameIndex() > 1)
         {
-            
 			for (const auto& run : psoRuns)
 			{
 				OcclusionCulling(context, inGlobals, indirectArgsOffset,
@@ -912,8 +901,15 @@ void MeshSorter::RenderMeshedInternal(GraphicsContext& context,
 	{
 		for (const auto& run : psoRuns)
 		{
+			FillCullingResult(context, inGlobals, indirectArgsOffset,
+				(uint32_t)run.startCmd, run.count, run.psoIdx, CullingStage::kFreezeCulled);
+		}
+
+		// 使用冻结剔除结果直接渲染
+		for (const auto& run : psoRuns)
+		{
 			context.SetPipelineState(sm_PSOs[run.psoIdx]);
-			GPUDriven::DrawIndirect(context, indirectArgsBuffer, run.count, (uint64_t)run.startCmd * sizeof(GPUDriven::IndirectCommand));
+			GPUDriven::DrawIndirect(context, bucketer.GetCullingResultArgsBuffer(run.psoIdx), run.count, 0, &bucketer.GetCullingResultArgsBuffer(run.psoIdx).GetCounterBuffer(), 0);
 		}
 	}
 }
@@ -1103,14 +1099,14 @@ void MeshSorter::RenderMeshes(
 				{
 					if (bucketer.HasShadow())
 					{
-                        RenderMeshedInternal(context, globals, bucketer.GetShadowRuns(), bucketer.GetShadowArgsBuffer(), SRV_INDIRECT_SHADOW_BUFFER);
+                        RenderMeshedInternal(context, globals, bucketer.GetShadowRuns(), SRV_INDIRECT_SHADOW_BUFFER);
 					}
 				}
 				else
 				{
 					if (bucketer.HasDepth())
 					{
-                        RenderMeshedInternal(context, globals, bucketer.GetDepthRuns(), bucketer.GetDepthArgsBuffer(), SRV_INDIRECT_DEPTH_BUFFER, true);
+                        RenderMeshedInternal(context, globals, bucketer.GetDepthRuns(), SRV_INDIRECT_DEPTH_BUFFER, true);
 					}
 				}
 			}
@@ -1120,10 +1116,10 @@ void MeshSorter::RenderMeshes(
 				{
 					if (!SeparateZPass)
 					{
-						RenderMeshedInternal(context, globals, bucketer.GetColorRunsRW(), bucketer.GetColorArgsBuffer(), SRV_INDIRECT_COLOR_BUFFER, true);
+						RenderMeshedInternal(context, globals, bucketer.GetColorRunsRW(), SRV_INDIRECT_COLOR_BUFFER, true);
 					}
 
-                    RenderMeshedInternal(context, globals, bucketer.GetColorRunsEQ(), bucketer.GetColorArgsBuffer(), SRV_INDIRECT_COLOR_BUFFER, true);
+                    RenderMeshedInternal(context, globals, bucketer.GetColorRunsEQ(), SRV_INDIRECT_COLOR_BUFFER, true);
 				}
 			}
         }

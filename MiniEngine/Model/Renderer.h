@@ -84,7 +84,8 @@ namespace Renderer
 		kNoCulled = 0,
 		kFrustrumCulled = 1,
 		kOcclusionPass1Culled = 2,
-		kOcclusionPass2Culled = 3
+		kOcclusionPass2Culled = 3,
+		kFreezeCulled = 4
 	};
 
     void Initialize(void);
@@ -171,7 +172,6 @@ namespace Renderer
 		void RenderMeshedInternal(GraphicsContext& context, 
             const GlobalConstants& inGlobals, 
             const std::vector<GPUDriven::PSORun>& psoRuns, 
-            IndirectArgsBuffer& indirectArgsBuffer,
             uint32_t indirectArgsOffset, bool bOcclusionCull = false); // shadow pass不做遮挡剔除
 
         struct SortKey
