@@ -14,14 +14,17 @@ cbuffer GlobalConstants : register(b1)
     float4 ViewSpaceFrustumPlanes5;
     float4x4 ViewProjMatrix;
     float4x4 InverseViewProjMatrix;
+    float4x4 PrevViewMatrix;
     float4x4 PrevViewProjMatrix;
     float4x4 SunShadowMatrix;
     float3 ViewerPos;
+    float3 PrevViewerPos;
     float3 SunDirection;
     float3 SunIntensity;
     float4 ShadowTexelSize;
 
     float4 InvTileDim;
+    float4 HZBSizeAndInv;
     uint4 TileCount;
     uint4 FirstLightIndex;
 
@@ -190,6 +193,16 @@ Texture2D<float4> GetSceneColorSRV()
 Texture2D<float> GetSceneDepthSRV()
 {
     return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_SCENE_DEPTH];
+}
+
+Texture2D<float> GetPrevSceneHZBSRV(uint frameIndexMod2)
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_SCENE_HZB0 + 1 - frameIndexMod2];
+}
+
+Texture2D<float> GetCurrentSceneHZBSRV(uint frameIndexMod2)
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_SCENE_HZB0 + frameIndexMod2];
 }
 
 TextureCube<float3> GetIBLDiffuseLDSRV()

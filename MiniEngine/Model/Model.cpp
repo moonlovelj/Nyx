@@ -442,7 +442,8 @@ void ModelInstance::CreateMeshIndirectCommands()
 					GPUDriven::CommandBucketer::Get().AppendShadow(depthBucket, cmd);
 				}
 
-				// 预分桶：Depth（非阴影）
+				// 预分桶：Depth（非阴影）//TODO: 运行时切换SeparateZPass需要重新组织命令
+                if (SeparateZPass || alphaTest)
 				{
 					uint32_t depthBucket = (skinned ? 2u : 0u) + (alphaTest ? 1u : 0u);
 					GPUDriven::CommandBucketer::Get().AppendDepth(depthBucket, cmd);

@@ -19,6 +19,7 @@
 #include "../Core/CommandContext.h"
 #include "../Core/UploadBuffer.h"
 #include "../Core/TextureManager.h"
+#include "../Core/HierarchicalDepthBuffer.h"
 #include "GPUDriven/ExecuteIndirect.h"
 #include "GPUDriven/CommandBucketer.h"
 #include "Shaders/BindlessIndices.hlsli"
@@ -98,12 +99,24 @@ namespace Renderer
         const D3D12_VIEWPORT& viewport, uint32_t inArgsBufferOffset,
         uint32_t startCommandOffset, uint32_t maxCommands, uint16_t psoIdx);
 
+	void OcclusionCulling(
+        GraphicsContext& gfxContext, 
+        const GlobalConstants& inGlobals,
+        uint32_t inArgsBufferOffset,
+		uint32_t startCommandOffset, 
+        uint32_t maxCommands, 
+        uint16_t psoIdx, uint32_t passIdx);
+
 	void FillCullingResult(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, 
         uint32_t inArgsBufferOffset, uint32_t startCommandOffset,
         uint32_t maxCommands, uint16_t psoIdx, CullingStage cullingStage);
 
     uint32_t GetBindlessResourcesBaseOffset();
 	void SetBindlessResourceDescriptor(uint32_t bindlessIndex, const D3D12_CPU_DESCRIPTOR_HANDLE& handle);
+
+	HierarchicalDepthBuffer& GetPrevHZB();
+	HierarchicalDepthBuffer& GetCurrentHZB();
+
 
     class MeshSorter
     {
@@ -159,7 +172,7 @@ namespace Renderer
             const GlobalConstants& inGlobals, 
             const std::vector<GPUDriven::PSORun>& psoRuns, 
             IndirectArgsBuffer& indirectArgsBuffer,
-            uint32_t indirectArgsOffset);
+            uint32_t indirectArgsOffset, bool bOcclusionCull = false); // shadow pass不做遮挡剔除
 
         struct SortKey
         {

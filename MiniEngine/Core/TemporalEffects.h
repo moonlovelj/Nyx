@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -33,6 +33,8 @@ namespace TemporalEffects
 
     // Returns whether the frame is odd or even, relevant to checkerboard rendering.
     uint32_t GetFrameIndexMod2( void );
+
+    uint32_t GetFrameIndex(void);
 
     // Jitter values are neutral at 0.5 and vary from [0, 1).  Jittering only occurs when temporal antialiasing
     // is enabled.  You can use these values to jitter your viewport or projection matrix.

@@ -36,7 +36,7 @@ namespace Graphics
     ColorBuffer g_VelocityBuffer;
     ColorBuffer g_OverlayBuffer;
     ColorBuffer g_HorizontalBuffer;
-    HierarchicalDepthBuffer g_FurthestHZB;
+    HierarchicalDepthBuffer g_FurthestHZB[2];
 
     ShadowBuffer g_ShadowBuffer;
 
@@ -142,7 +142,8 @@ void Graphics::InitializeRenderingBuffers( uint32_t bufferWidth, uint32_t buffer
             g_MinMaxDepth32.Create(L"MinMaxDepth 32x32", bufferWidth5, bufferHeight5, 1, DXGI_FORMAT_R32_UINT, esram );
 
             g_SceneDepthBuffer.Create( L"Scene Depth Buffer", bufferWidth, bufferHeight, DSV_FORMAT, esram );
-			g_FurthestHZB.Create(L"Furthest HZB", bufferWidth, bufferHeight, DXGI_FORMAT_R32_FLOAT, esram);
+			g_FurthestHZB[0].Create(L"Furthest HZB 0", bufferWidth, bufferHeight, DXGI_FORMAT_R32_FLOAT, esram);
+			g_FurthestHZB[1].Create(L"Furthest HZB 1", bufferWidth, bufferHeight, DXGI_FORMAT_R32_FLOAT, esram);
 
             esram.PushStack(); // Begin opaque geometry
 
@@ -263,7 +264,8 @@ void Graphics::ResizeDisplayDependentBuffers(uint32_t NativeWidth, uint32_t Nati
 void Graphics::DestroyRenderingBuffers()
 {
     g_SceneDepthBuffer.Destroy();
-    g_FurthestHZB.Destroy();
+	g_FurthestHZB[0].Destroy();
+	g_FurthestHZB[1].Destroy();
     g_SceneColorBuffer.Destroy();
     g_SceneNormalBuffer.Destroy();
     g_GBufferA.Destroy();

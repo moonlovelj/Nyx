@@ -251,6 +251,9 @@
     <FxCompile Include="Shaders\ModelViewerVS.hlsl">
       <ShaderType>Vertex</ShaderType>
     </FxCompile>
+    <FxCompile Include="Shaders\OcclusionCullCS.hlsl" />
+    <FxCompile Include="Shaders\OcclusionCullPass1CS.hlsl" />
+    <FxCompile Include="Shaders\OcclusionCullPass2CS.hlsl" />
     <FxCompile Include="Shaders\SkyboxPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>

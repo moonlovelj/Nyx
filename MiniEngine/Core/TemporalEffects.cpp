@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -119,6 +119,11 @@ void TemporalEffects::Update( uint64_t FrameIndex )
 uint32_t TemporalEffects::GetFrameIndexMod2( void )
 {
     return s_FrameIndexMod2;
+}
+
+uint32_t TemporalEffects::GetFrameIndex(void)
+{
+    return s_FrameIndex;
 }
 
 void TemporalEffects::GetJitterOffset( float& JitterX, float& JitterY )

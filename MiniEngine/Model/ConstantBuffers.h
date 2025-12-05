@@ -74,13 +74,16 @@ __declspec(align(256)) struct GlobalConstants
     Math::Vector4 ViewSpaceFrustumPlanes[6];
     Math::Matrix4 ViewProjMatrix;
     Math::Matrix4 InverseViewProjMatrix;
-    Math::Matrix4 PrevViewProjMatrix;
+	Math::Matrix4 PrevViewMatrix;
+	Math::Matrix4 PrevViewProjMatrix;
     Math::Matrix4 SunShadowMatrix;
     Math::Vector3 ViewerPos;
+    Math::Vector3 PrevViewerPos;
     Math::Vector3 SunDirection;
     Math::Vector3 SunIntensity;
     float ShadowTexelSize[4];
-    float InvTileDim[4]; 
+    float InvTileDim[4];
+    float HZBSizeAndInv[4];
     uint32_t TileCount[4];
     uint32_t FirstLightIndex[4];
     uint32_t ViewportWidth;

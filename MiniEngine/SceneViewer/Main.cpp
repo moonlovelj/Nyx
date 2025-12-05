@@ -51,8 +51,8 @@ public:
     virtual void RenderScene( void ) override;
 
 private:
-    Math::Matrix4 m_PrevViewProjMatrix;
-    Camera m_Camera;
+	Camera m_PrevCamera;
+	Camera m_Camera;
     unique_ptr<CameraController> m_CameraController;
 
     D3D12_VIEWPORT m_MainViewport;
@@ -252,7 +252,7 @@ void SceneViewer::Startup( void )
         //auto model = Renderer::LoadModel(L"Assets/TestMesh/test.gltf", forceRebuild);
         //m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
 
-        ModelInstanceManager::Get().Initialize(model, 120 * 120);
+        ModelInstanceManager::Get().Initialize(model, 64);
         OrientedBox obb = ModelInstanceManager::Get().GetModelInstance(0).GetBoundingBox();
         float modelRadius = Length(obb.GetDimensions()) * 0.5f;
         const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 0.5f, 0.0f, 0.0f);
@@ -383,11 +383,19 @@ void SceneViewer::RenderScene( void )
         GlobalConstants globals;
         globals.ViewProjMatrix = m_Camera.GetViewProjMatrix();
 		globals.InverseViewProjMatrix = Invert(m_Camera.GetViewProjMatrix());
-		globals.PrevViewProjMatrix = m_PrevViewProjMatrix;
         globals.SunShadowMatrix = m_SunShadowCamera.GetShadowMatrix();
         globals.ViewerPos = m_Camera.GetPosition();
         globals.SunDirection = SunDirection;
         globals.SunIntensity = Vector3(Scalar(g_SunLightIntensity));
+
+		globals.PrevViewMatrix = m_PrevCamera.GetViewMatrix();
+		globals.PrevViewProjMatrix = m_PrevCamera.GetViewProjMatrix();
+		globals.PrevViewerPos = m_PrevCamera.GetPosition();
+		globals.HZBSizeAndInv[0] = (float)Renderer::GetCurrentHZB().GetWidth();
+		globals.HZBSizeAndInv[1] = (float)Renderer::GetCurrentHZB().GetHeight();
+		globals.HZBSizeAndInv[2] = 1.f / (float)Renderer::GetCurrentHZB().GetWidth();
+		globals.HZBSizeAndInv[3] = 1.f / (float)Renderer::GetCurrentHZB().GetHeight();
+
 
         globals.ShadowTexelSize[0] = 1.0f / g_ShadowBuffer.GetWidth();
         globals.ShadowTexelSize[1] = g_SunLightSize;
@@ -501,7 +509,7 @@ void SceneViewer::RenderScene( void )
 
                 sorter.RenderMeshes(MeshSorter::kGBuffer, gfxContext, globals);
 
-				g_FurthestHZB.GenerateHZB(gfxContext, g_SceneDepthBuffer);
+				Renderer::GetCurrentHZB().GenerateHZB(gfxContext, g_SceneDepthBuffer);
             }
 
             {
@@ -532,7 +540,6 @@ void SceneViewer::RenderScene( void )
     else
         MotionBlur::RenderObjectBlur(gfxContext, g_VelocityBuffer);
 
-
-	m_PrevViewProjMatrix = m_Camera.GetViewProjMatrix();
+    m_PrevCamera = m_Camera;
     gfxContext.Finish();
 }
