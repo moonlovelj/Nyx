@@ -68,6 +68,8 @@ namespace Renderer
     BoolVar SeparateZPass("Renderer/Separate Z Pass", false);
     BoolVar DeferredRendering("Renderer/Deferred Rendering", true);
 	BoolVar UseOcclusionCull("Renderer/Occlusion Cull", true);
+
+    // 注意这个可视化仅在开启冻结前启用遮挡剔除，才能正确显示
 	BoolVar FreezeCull("Renderer/Freeze Cull", false);
     
 	const char* ViewModeLabels[] = { "Lit", "MeshletLOD", "MeshletID", "MeshletTriangle"};
