@@ -2,7 +2,7 @@
 #include "Model.h"
 #include "InstanceResourceManager.h"
 #include "ConstantBuffers.h"
-#include "GPUDriven/CommandBucketer.h"
+#include "CommandBucketer.h"
 
 void ModelInstanceManager::Initialize(std::shared_ptr<Model> sourceModel, uint32_t instanceCount)
 {
@@ -54,12 +54,14 @@ void ModelInstanceManager::Initialize(std::shared_ptr<Model> sourceModel, uint32
 		Renderer::SetBindlessResourceDescriptor(SRV_MESH_CONSTANTS_BUFFER, InstanceResourceManager::Get().GetMeshConstantsBuffer().GetSRV());
 		Renderer::SetBindlessResourceDescriptor(SRV_JOINTS_BUFFER, InstanceResourceManager::Get().GetJointsBuffer().GetSRV());
 		Renderer::SetBindlessResourceDescriptor(SRV_VERTEX_BUFFER, sourceModel->m_DataBuffer.GetSRV());
+		Renderer::SetBindlessResourceDescriptor(SRV_INDEX_BUFFER, sourceModel->m_DataBuffer.GetSRV());
 		Renderer::SetBindlessResourceDescriptor(SRV_MESHLET_BUFFER, sourceModel->m_MeshletConstants.GetSRV());
 		Renderer::SetBindlessResourceDescriptor(SRV_MATERIAL_CONSTANTS_BUFFER, sourceModel->m_MaterialConstants.GetSRV());
 		Renderer::SetBindlessResourceDescriptor(SRV_INSTANCE_CONSTANTS_BUFFER, m_InstanceConstantsGPU.GetSRV());
+		Renderer::SetBindlessResourceDescriptor(SRV_GEOMETRY_BUFFER, sourceModel->m_DataBuffer.GetSRV());
 	}
 
-	GPUDriven::CommandBucketer::Get().FinalizeAll();
+	Renderer::CommandBucketer::Get().FinalizeIndirectCommands();
 }
 
 void ModelInstanceManager::Render(Renderer::MeshSorter& sorter) const
@@ -94,7 +96,7 @@ void ModelInstanceManager::Cleanup()
 {
 	m_ModelInstances.clear();
 	InstanceResourceManager::Get().Cleanup();
-	GPUDriven::CommandBucketer::Get().ResetAll();
+	Renderer::CommandBucketer::Get().ResetAll();
 	m_InstanceConstantsCPU.Destroy();
 	m_InstanceConstantsGPU.Destroy();
 }

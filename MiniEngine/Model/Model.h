@@ -24,7 +24,6 @@
 #include "../Core/Math/BoundingSphere.h"
 #include "ConstantBuffers.h"
 #include "InstanceResourceManager.h"
-#include "GPUDriven/ExecuteIndirect.h"
 #include <cstdint>
 #include <map>
 
@@ -80,6 +79,10 @@ struct Mesh
         uint32_t primCount;   // Number of indices = 3 * number of triangles
         uint32_t startIndex;  // Offset to first index in index buffer 
         uint32_t baseVertex;  // Offset to first vertex in vertex buffer
+		uint32_t meshletVertexCount; // meshlet 顶点数量
+        uint32_t meshletVertexOffset; // meshlet 顶点缓冲偏移（字节）
+        uint32_t meshletPrimCount;   // meshlet 局部三角形数量 * 3
+		uint32_t meshletPrimOffset;    // meshlet 局部三角形偏移（字节） 
 		float    bounds[4];     // meshlet bounding sphere
 
 		// Nanite LOD 数据

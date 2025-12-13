@@ -102,16 +102,22 @@ struct MeshletConstants
     uint32_t VertexStride;
 	uint32_t VertexBufferDepthOffset;
 	uint32_t VertexDepthStride;
+
+	uint32_t MeshletVerticesOffset;   // 指向该 Meshlet 的顶点索引列表 (uint32)
+	uint32_t MeshletPrimitivesOffset; // 指向该 Meshlet 的三角形列表 (Packed uint32: 8bit+8bit+8bit)
+	uint32_t VertexCount;             // Meshlet 唯一顶点数 (Max 256)
+	uint32_t PrimitiveCount;          // Meshlet 三角形数 (Max 124)
+
+    uint32_t IndexBufferOffset;
 	uint32_t MeshConstantsIndexOffset;
 	uint32_t MaterialConstantsIndex;
     uint32_t MeshJointsIndexOffset;
 
 	// Nanite LOD 数据
-	float    parentError;      // 父层级简化误差（Infinity = 根节点）
 	float    parentBounds[4];  // 父层级包围球
     float    lodBounds[4];     // 当前层级包围球
+    float    parentError;      // 父层级简化误差（Infinity = 根节点）
 	float    lodError;	       // 当前层级简化误差
     uint32_t lodLevel;         // 当前 LOD 层级（0 = 最精细）
-	float    padding1;
-    float    padding2;
+    uint32_t psoFlags;
 };

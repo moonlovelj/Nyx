@@ -117,49 +117,6 @@ void ChangeIBLBias(EngineVar::ActionType)
 
 #include <direct.h> // for _getcwd() to check data root path
 
-//void LoadIBLTextures()
-//{
-//    char CWD[256];
-//    _getcwd(CWD, 256);
-//
-//    Utility::Printf("Loading IBL environment maps\n");
-//
-//    WIN32_FIND_DATA ffd;
-//    HANDLE hFind = FindFirstFile(L"Textures/*_diffuseIBL.dds", &ffd);
-//
-//    g_IBLSet.AddEnum(L"None");
-//
-//    if (hFind != INVALID_HANDLE_VALUE) do
-//    {
-//        if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-//            continue;
-//
-//        std::wstring diffuseFile = ffd.cFileName;
-//        std::wstring baseFile = diffuseFile; 
-//        baseFile.resize(baseFile.rfind(L"_diffuseIBL.dds"));
-//        std::wstring specularFile = baseFile + L"_specularIBL.dds";
-//
-//        TextureRef diffuseTex = TextureManager::LoadDDSFromFile(L"Textures/" + diffuseFile);
-//        if (diffuseTex.IsValid())
-//        {
-//            TextureRef specularTex = TextureManager::LoadDDSFromFile(L"Textures/" + specularFile);
-//            if (specularTex.IsValid())
-//            {
-//                g_IBLSet.AddEnum(baseFile);
-//                g_IBLTextures.push_back(std::make_pair(diffuseTex, specularTex));
-//            }
-//        }
-//    }
-//    while (FindNextFile(hFind, &ffd) != 0);
-//
-//    FindClose(hFind);
-//
-//    Utility::Printf("Found %u IBL environment map sets\n", g_IBLTextures.size());
-//
-//    if (g_IBLTextures.size() > 0)
-//        g_IBLSet.Increment();
-//}
-
 void LoadIBLHDRITextures()
 {
     char CWD[256];
@@ -242,17 +199,18 @@ void SceneViewer::Startup( void )
 
     if (CommandLineArgs::GetString(L"model", gltfFileName) == false)
     {
-		//m_ModelInst = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
+        //auto model = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
 		//m_ModelInst = Renderer::LoadModel(L"Assets/old_federal_building/scene.gltf", forceRebuild);
 		//m_ModelInst = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/DamagedHelmet/glTF/DamagedHelmet.gltf", forceRebuild);
-        //auto model = Renderer::LoadModel(L"Assets/AnimTest/AnimTest.gltf", forceRebuild);
+        auto model = Renderer::LoadModel(L"Assets/AnimTest/AnimTest.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/lumber_mill_wood_factory_gltf/scene.gltf", forceRebuild);
-		auto model = Renderer::LoadModel(L"Assets/jinx/scene.gltf", forceRebuild);
-        //auto model = Renderer::LoadModel(L"Assets/TestMesh/test.gltf", forceRebuild);
+		//auto model = Renderer::LoadModel(L"Assets/jinx/scene.gltf", forceRebuild);
+		//auto model = Renderer::LoadModel(L"Assets/japanese_metal_lantern_vfvjccaqx_gltf_raw/Japanese_Metal_Lantern_vfvjccaqx_Raw.gltf", forceRebuild);
+        //auto model = Renderer::LoadModel(L"Assets/OcclusionTest/scene.gltf", forceRebuild);
         //m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
 
-        ModelInstanceManager::Get().Initialize(model, 64);
+        ModelInstanceManager::Get().Initialize(model, 2);
         OrientedBox obb = ModelInstanceManager::Get().GetModelInstance(0).GetBoundingBox();
         float modelRadius = Length(obb.GetDimensions()) * 0.5f;
         const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 0.5f, 0.0f, 0.0f);
@@ -509,6 +467,7 @@ void SceneViewer::RenderScene( void )
 
                 sorter.RenderMeshes(MeshSorter::kGBuffer, gfxContext, globals);
 
+                gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 				Renderer::GetCurrentHZB().GenerateHZB(gfxContext, g_SceneDepthBuffer);
             }
 
@@ -530,7 +489,7 @@ void SceneViewer::RenderScene( void )
     // is necessary for all temporal effects (and motion blur).
     MotionBlur::GenerateCameraVelocityBuffer(gfxContext, m_Camera, true);
 
-    TemporalEffects::ResolveImage(gfxContext);
+    //TemporalEffects::ResolveImage(gfxContext);
 
     ParticleEffectManager::Render(gfxContext, m_Camera, g_SceneColorBuffer, g_SceneDepthBuffer,  g_LinearDepth[FrameIndex]);
 

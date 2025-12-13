@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -48,6 +48,9 @@ void CommandSignature::Finalize( const RootSignature* RootSignature, uint32_t In
                 break;
             case D3D12_INDIRECT_ARGUMENT_TYPE_INDEX_BUFFER_VIEW:
                 ByteStride += sizeof(D3D12_INDEX_BUFFER_VIEW);
+                break;
+            case D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_MESH:
+                ByteStride += sizeof(D3D12_DISPATCH_MESH_ARGUMENTS);
                 break;
             case D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT_BUFFER_VIEW:
             case D3D12_INDIRECT_ARGUMENT_TYPE_SHADER_RESOURCE_VIEW:

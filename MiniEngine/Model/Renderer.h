@@ -20,8 +20,7 @@
 #include "../Core/UploadBuffer.h"
 #include "../Core/TextureManager.h"
 #include "../Core/HierarchicalDepthBuffer.h"
-#include "GPUDriven/ExecuteIndirect.h"
-#include "GPUDriven/CommandBucketer.h"
+#include "CommandBucketer.h"
 #include "Shaders/BindlessIndices.hlsli"
 #include <cstdint>
 #include <vector>
@@ -43,7 +42,7 @@ namespace Renderer
 
     using namespace Math;
 
-    extern std::vector<GraphicsPSO> sm_PSOs;
+    extern std::vector<PSO> sm_PSOs;
     extern RootSignature m_RootSig;
     extern DescriptorHeap s_TextureHeap;
     extern DescriptorHeap s_SamplerHeap;
@@ -54,13 +53,25 @@ namespace Renderer
 
     extern UploadBuffer m_IndirectArgsCounterBufferReset;
 
+	struct IndirectCommand
+	{
+		UINT InstanceIndex;
+		UINT MeshletIndex;
+	};
+
+	struct DispatchMeshCommand
+	{
+		D3D12_DISPATCH_MESH_ARGUMENTS dispatchMeshArguments;
+	};
+
+	extern CommandSignature GPUDrivenDrawIndirectCommandSignature;
+
     enum RootBindings
     {
         kMeshConstants,
         kMaterialConstants,
 		kCommonCBV,
-		kRootConstants,
-		kRootConstants1,
+		kCommandConstants,
 		kViewModeConstants,
         kStandbyCBV,
         kNumRootBindings
@@ -88,6 +99,19 @@ namespace Renderer
 		kFreezeCulled = 4
 	};
 
+	enum PsoIdx : uint8_t
+	{
+		kPsoShadow = 0,
+		kPsoMain = 1,
+		kPsoTransparent = 2,
+	};
+
+	inline UINT AlignForUavCounter(UINT bufferSize)
+	{
+		const UINT alignment = D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT;
+		return (bufferSize + (alignment - 1)) & ~(alignment - 1);
+	}
+
     void Initialize(void);
     void Shutdown(void);
 
@@ -96,21 +120,21 @@ namespace Renderer
     void SetIBLBias(float LODBias);
     void UpdateGlobalDescriptors(void);
     void DrawSkybox( GraphicsContext& gfxContext, const Camera& camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor );
-	void FrustrumCulling(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, const BaseCamera* camera,
-        const D3D12_VIEWPORT& viewport, uint32_t inArgsBufferOffset,
-        uint32_t startCommandOffset, uint32_t maxCommands, uint16_t psoIdx);
+	void FrustrumCulling(GraphicsContext& gfxContext, 
+        const GlobalConstants& inGlobals, const BaseCamera* camera,
+        const D3D12_VIEWPORT& viewport, Renderer::PsoIdx psoIdx);
 
 	void OcclusionCulling(
         GraphicsContext& gfxContext, 
         const GlobalConstants& inGlobals,
-        uint32_t inArgsBufferOffset,
-		uint32_t startCommandOffset, 
-        uint32_t maxCommands, 
-        uint16_t psoIdx, uint32_t passIdx);
+        Renderer::PsoIdx psoIdx,
+        uint32_t passIdx);
 
-	void FillCullingResult(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, 
-        uint32_t inArgsBufferOffset, uint32_t startCommandOffset,
-        uint32_t maxCommands, uint16_t psoIdx, CullingStage cullingStage);
+	void FillCullingResult(
+        GraphicsContext& gfxContext, 
+        const GlobalConstants& inGlobals, 
+        Renderer::PsoIdx psoIdx, 
+        CullingStage cullingStage);
 
     uint32_t GetBindlessResourcesBaseOffset();
 	void SetBindlessResourceDescriptor(uint32_t bindlessIndex, const D3D12_CPU_DESCRIPTOR_HANDLE& handle);
@@ -171,8 +195,8 @@ namespace Renderer
     private:
 		void RenderMeshedInternal(GraphicsContext& context, 
             const GlobalConstants& inGlobals, 
-            const std::vector<GPUDriven::PSORun>& psoRuns, 
-            uint32_t indirectArgsOffset, bool bOcclusionCull = false); // shadow pass不做遮挡剔除
+            Renderer::PsoIdx psoIdx, 
+            bool bOcclusionCull = false); // shadow pass不做遮挡剔除
 
         struct SortKey
         {

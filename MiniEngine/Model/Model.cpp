@@ -14,8 +14,7 @@
 #include "Model.h"
 #include "Renderer.h"
 #include "ConstantBuffers.h"
-#include "GPUDriven/ExecuteIndirect.h"
-#include "GPUDriven/CommandBucketer.h"
+#include "CommandBucketer.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -114,10 +113,15 @@ void Model::BuildMeshletConstantsBuffer()
 		{
             MeshletConstants& meshletConstant = meshletConstants[cmdIdx];
 			memcpy(meshletConstant.BoundingSphere, mesh.draw[j].bounds, 16);
-            meshletConstant.VertexBufferOffset = mesh.vbOffset;
+            meshletConstant.VertexBufferOffset = mesh.vbOffset + mesh.draw[j].baseVertex * mesh.vbStride;
             meshletConstant.VertexStride = mesh.vbStride;
-            meshletConstant.VertexBufferDepthOffset = mesh.vbDepthOffset;
+            meshletConstant.VertexBufferDepthOffset = mesh.vbDepthOffset + mesh.draw[j].baseVertex * stride;
             meshletConstant.VertexDepthStride = stride;
+			meshletConstant.MeshletVerticesOffset = mesh.draw[j].meshletVertexOffset;
+			meshletConstant.MeshletPrimitivesOffset = mesh.draw[j].meshletPrimOffset;
+			meshletConstant.VertexCount = mesh.draw[j].meshletVertexCount;
+			meshletConstant.PrimitiveCount = mesh.draw[j].meshletPrimCount / 3;
+			meshletConstant.IndexBufferOffset = mesh.ibOffset + mesh.draw[j].startIndex * 4;// 索引默认32bit
             meshletConstant.MeshJointsIndexOffset = mesh.startJoint;
             meshletConstant.MeshConstantsIndexOffset = mesh.meshCBV;
             meshletConstant.MaterialConstantsIndex = mesh.materialCBV;
@@ -126,6 +130,7 @@ void Model::BuildMeshletConstantsBuffer()
             meshletConstant.lodError = mesh.draw[j].lodError;
 			memcpy(meshletConstant.lodBounds, mesh.draw[j].lodBounds, 16);
             meshletConstant.lodLevel = mesh.draw[j].lodLevel;
+			meshletConstant.psoFlags = mesh.psoFlags;
 
 			++cmdIdx;
 		}
@@ -399,12 +404,12 @@ void ModelInstance::CreateMeshIndirectCommands()
 {
     if (m_Model)
     {
-        const uint32_t totalDraws = std::max(1u, m_Model->GetNumTotalDraws());
+        //const uint32_t totalDraws = std::max(1u, m_Model->GetNumTotalDraws());
 
-        std::vector<GPUDriven::IndirectCommand> cmds;
-        cmds.reserve(totalDraws);
-		std::vector<GPUDriven::IndirectCommand> cmdsZPass;
-        cmdsZPass.reserve(totalDraws);
+		//std::vector<GPUDriven::IndirectCommand> cmds;
+		//cmds.reserve(totalDraws);
+		//std::vector<GPUDriven::IndirectCommand> cmdsZPass;
+  //      cmdsZPass.reserve(totalDraws);
 
 		const uint8_t* pMesh = m_Model->m_MeshData.get();
 		uint32_t cmdIdx = 0;
@@ -417,45 +422,29 @@ void ModelInstance::CreateMeshIndirectCommands()
 
             for (uint32_t j = 0; j < mesh.numDraws; j++)
             {
-                GPUDriven::IndirectCommand cmd;
+                Renderer::IndirectCommand cmd;
 
                 ASSERT(mesh.ibOffset%4 == 0, "Index buffer error.");
                 cmd.InstanceIndex = m_Alloc.instanceID;
                 cmd.MeshletIndex = cmdIdx;
-                cmd.drawArguments.IndexCountPerInstance = mesh.draw[j].primCount;
-                cmd.drawArguments.InstanceCount = 1;
-                cmd.drawArguments.StartIndexLocation = mesh.ibOffset / 4 + mesh.draw[j].startIndex;
-				cmd.drawArguments.BaseVertexLocation = mesh.draw[j].baseVertex;
-				cmd.drawArguments.StartInstanceLocation = 0;
-                cmds.push_back(cmd);
+                //cmds.push_back(cmd);
 
                 // ZPass
 				uint32_t stride = alphaTest ? 16u : 12u;
 				if (skinned)
 					stride += 16;
 
-                cmdsZPass.push_back(cmd);
+                //cmdsZPass.push_back(cmd);
 
-				// 预分桶：Depth（阴影）
-				{
-					uint32_t depthBucket = (skinned ? 2u : 0u) + (alphaTest ? 1u : 0u);
-					GPUDriven::CommandBucketer::Get().AppendShadow(depthBucket, cmd);
-				}
-
-				// 预分桶：Depth（非阴影）//TODO: 运行时切换SeparateZPass需要重新组织命令
-                if (SeparateZPass || alphaTest)
-				{
-					uint32_t depthBucket = (skinned ? 2u : 0u) + (alphaTest ? 1u : 0u);
-					GPUDriven::CommandBucketer::Get().AppendDepth(depthBucket, cmd);
-				}
-
-				// 预分桶：Color（半透明过滤；是否等深 = SeparateZPass || alphaTest）
-				if (!alphaBlend)
-				{
-					bool equalDepth = (SeparateZPass || alphaTest);
-					GPUDriven::CommandBucketer::Get().AppendColor(equalDepth ? mesh.pso + 1 : mesh.pso, cmd, equalDepth);
-				}
-
+                if (alphaBlend)
+                {
+                    Renderer::CommandBucketer::Get().AppendIndirectCommand(Renderer::PsoIdx::kPsoTransparent, cmd);
+                }
+                else
+                {
+					Renderer::CommandBucketer::Get().AppendIndirectCommand(Renderer::PsoIdx::kPsoShadow, cmd);
+					Renderer::CommandBucketer::Get().AppendIndirectCommand(Renderer::PsoIdx::kPsoMain, cmd);
+                }
                 ++cmdIdx;
             }
             pMesh += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);

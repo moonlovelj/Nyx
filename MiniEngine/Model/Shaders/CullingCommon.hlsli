@@ -14,14 +14,4 @@
 #define CULLING_OCCLUSION_PASS2_VISIBLE	    0x4
 
 
-cbuffer CullConstants : register(b3)
-{
-    uint startCommand;
-    uint maxCommands;
-    float screenErrorConstant; // 计算meshlet屏幕误差时使用的提前计算的常量 (cotHalfFov * screenHeight) / 2.0
-    uint psoIdx;
-    uint indirectBufferOffset;
-    uint cullingStage;
-};
-
 #endif

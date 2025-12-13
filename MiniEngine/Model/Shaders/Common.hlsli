@@ -21,13 +21,12 @@
 
 #define Renderer_RootSig \
     "RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED | SAMPLER_HEAP_DIRECTLY_INDEXED), " \
-    "CBV(b0, visibility = SHADER_VISIBILITY_VERTEX), " \
-    "CBV(b0, visibility = SHADER_VISIBILITY_PIXEL), " \
-    "CBV(b1), " \
-    "RootConstants(b2, num32BitConstants = 4), " \
-    "RootConstants(b3, num32BitConstants = 8), " \
-    "RootConstants(b4, num32BitConstants = 4), " \
-    "CBV(b5), " \
+    "CBV(b0, visibility = SHADER_VISIBILITY_ALL), " \
+    "CBV(b1, visibility = SHADER_VISIBILITY_ALL), " \
+    "CBV(b2), " \
+    "RootConstants(b3, num32BitConstants = 4), " \
+    "RootConstants(b5, num32BitConstants = 4), " \
+    "CBV(b6), " \
     "StaticSampler(s10, maxAnisotropy = 8)," \
     "StaticSampler(s11," \
         "addressU = TEXTURE_ADDRESS_CLAMP," \

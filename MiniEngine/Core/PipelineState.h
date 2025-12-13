@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -27,6 +27,7 @@ class ComputeShader;
 class PSO
 {
 public:
+    PSO() : m_Name(L"Default PSO Name"), m_RootSignature(nullptr), m_PSO(nullptr) {}
 
     PSO(const wchar_t* Name) : m_Name(Name), m_RootSignature(nullptr), m_PSO(nullptr) {}
 
@@ -112,4 +113,41 @@ public:
 private:
 
     D3D12_COMPUTE_PIPELINE_STATE_DESC m_PSODesc;
+};
+
+
+class MeshShaderPSO : public PSO
+{
+public:
+	MeshShaderPSO(LPCWSTR Name = L"Unnamed Mesh Shader PSO");
+
+	void SetBlendState(const D3D12_BLEND_DESC& BlendDesc);
+	void SetRasterizerState(const D3D12_RASTERIZER_DESC& RasterizerDesc);
+	void SetDepthStencilState(const D3D12_DEPTH_STENCIL_DESC& DepthStencilDesc);
+	void SetSampleMask(UINT SampleMask);
+	void SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE TopologyType);
+	void SetRenderTargetFormat(DXGI_FORMAT RTVFormat, DXGI_FORMAT DSVFormat, UINT MsaaCount = 1, UINT MsaaQuality = 0);
+	void SetRenderTargetFormats(UINT NumRTVs, const DXGI_FORMAT* RTVFormats, DXGI_FORMAT DSVFormat, UINT MsaaCount = 1, UINT MsaaQuality = 0);
+
+	void SetMeshShader(const void* Binary, size_t Size);
+	void SetPixelShader(const void* Binary, size_t Size);
+	void SetAmplificationShader(const void* Binary, size_t Size); // 可选 (AS)
+
+	void Finalize();
+
+private:
+	D3D12_RASTERIZER_DESC m_RasterizerState;
+	D3D12_DEPTH_STENCIL_DESC m_DepthStencilState;
+	D3D12_BLEND_DESC m_BlendState;
+	UINT m_SampleMask;
+	D3D12_PRIMITIVE_TOPOLOGY_TYPE m_PrimitiveTopologyType;
+
+	// Render Targets
+	D3D12_RT_FORMAT_ARRAY m_RTVFormats;
+	DXGI_FORMAT m_DSVFormat;
+	DXGI_SAMPLE_DESC m_SampleDesc;
+
+	D3D12_SHADER_BYTECODE m_MS;
+	D3D12_SHADER_BYTECODE m_PS;
+	D3D12_SHADER_BYTECODE m_AS;
 };

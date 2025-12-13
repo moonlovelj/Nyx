@@ -3,7 +3,17 @@
 
 #include "BindlessIndices.hlsli"
 
-cbuffer GlobalConstants : register(b1)
+#define PSO_HAS_POSITION      0x0001
+#define PSO_HAS_NORMAL        0x0002
+#define PSO_HAS_TANGENT       0x0004
+#define PSO_HAS_UV0           0x0008
+#define PSO_HAS_UV1           0x0010
+#define PSO_ALPHA_BLEND       0x0020
+#define PSO_ALPHA_TEST        0x0040
+#define PSO_TWO_SIDED         0x0080
+#define PSO_HAS_SKIN          0x0100
+
+cbuffer GlobalConstants : register(b2)
 {
     float4x4 ViewMatrix;
     float4 ViewSpaceFrustumPlanes0;
@@ -39,17 +49,18 @@ cbuffer GlobalConstants : register(b1)
     uint BindlessResourcesBaseIndex;
 }
 
-cbuffer CB2 : register(b2)
+cbuffer CommandConstants : register(b3)
 {
-    uint InstanceIndex;
-    uint MeshletIndex;
-}
+    uint MaxCommands;
+    float ScreenErrorConstant; // 计算meshlet屏幕误差时使用的提前计算的常量 (cotHalfFov * screenHeight) / 2.0
+    uint PsoIdx;
+    uint CullingStage;
+};
 
-cbuffer CB4 : register(b4)
+cbuffer CB4 : register(b5)
 {
     uint ViewMode;
 }
-
 
 struct InstanceConstant
 {
@@ -64,18 +75,24 @@ struct MeshletConstant
     uint VertexStride;
     uint VertexBufferDepthOffset;
     uint VertexDepthStride;
+
+    uint32_t MeshletVerticesOffset;   // 指向该 Meshlet 的顶点索引列表 (uint32)
+    uint32_t MeshletPrimitivesOffset; // 指向该 Meshlet 的三角形列表
+    uint32_t VertexCount;             // Meshlet 唯一顶点数 (Max 256)
+    uint32_t PrimitiveCount;          // Meshlet 三角形数 (Max 128)
+
+    uint IndexBufferOffset;
     uint MeshConstantsIndexOffset;
     uint MaterialConstantsIndex;
     uint MeshJointsIndexOffset;
 
     // Nanite LOD 数据
-    float    parentError;      // 父层级简化误差（Infinity = 根节点）
     float4   parentBounds;     // 父层级包围球
     float4   lodBounds;        // 当前层级包围球
+    float    parentError;      // 父层级简化误差（Infinity = 根节点）
     float    lodError;	       // 当前层级简化误差
     uint     lodLevel;         // 当前 LOD 层级（0 = 最精细）
-    float    padding1;
-    float    padding2;
+    uint     psoFlags;
 };
 
 // 实际是Instance级别
@@ -92,12 +109,10 @@ struct MaterialConstant
     float normalTextureScale;
     float2 metallicRoughnessFactor;
     uint flags;
-
     uint TextureStartIndex;
     uint SamplerStartIndex;
 };
 
-#ifdef ENABLE_SKINNING
 struct Joint
 {
     float4x4 PosMatrix;
@@ -108,18 +123,18 @@ Joint GetJointBufferSRV(uint index)
     ByteAddressBuffer JointBuffer = ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_JOINTS_BUFFER];
     return JointBuffer.Load<Joint>(index * sizeof(Joint));
 }
-#endif
 
 struct IndirectCommand
 {
     uint InstanceIndex;
     uint MeshletIndex;
-    uint IndexCountPerInstance;
-    uint InstanceCount;
-    uint StartIndexLocation;
-    uint BaseVertexLocation;
-    uint StartInstanceLocation;
-    uint paddings;
+};
+
+struct DispatchMeshCommand
+{
+    uint ThreadGroupCountX;
+    uint ThreadGroupCountY;
+    uint ThreadGroupCountZ;
 };
 
 struct LightData
@@ -163,6 +178,16 @@ InstanceConstant GetInstanceConstantSRV(uint index)
 ByteAddressBuffer GetVertexBufferSRV()
 {
     return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_VERTEX_BUFFER];
+}
+
+ByteAddressBuffer GetIndexBufferSRV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_INDEX_BUFFER];
+}
+
+ByteAddressBuffer GetGeometryBufferSRV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_GEOMETRY_BUFFER];
 }
 
 Texture2D<float4> GetGBufferASRV()
@@ -255,39 +280,29 @@ StructuredBuffer<LightData> GetLightBufferSRV()
     return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_LIGHT_BUFFER];
 }
 
-// bufferOffset 必须是SRV_INDIRECT_SHADOW_BUFFER、SRV_INDIRECT_DEPTH_BUFFER、SRV_INDIRECT_COLOR_BUFFER
-IndirectCommand GetIndirectCommandBufferSRV(uint bufferOffset, uint index)
+// bufferOffset = psoContinuousIdx
+IndirectCommand GetIndirectCommandsBufferSRV(uint bufferOffset, uint index)
 {
-    ByteAddressBuffer indirectCommandBuffer = ResourceDescriptorHeap[BindlessResourcesBaseIndex + bufferOffset];
+    ByteAddressBuffer indirectCommandBuffer = ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_INDIRECT_COMMANDS_BASE + bufferOffset];
     return indirectCommandBuffer.Load<IndirectCommand>(index * sizeof(IndirectCommand));
 }
 
-IndirectCommand GetIndirectCommandShadowSRV(uint index)
+// bufferOffset = psoContinuousIdx
+ByteAddressBuffer GetIndirectVisibleFlagsBufferSRV(uint bufferOffset)
 {
-    return GetIndirectCommandBufferSRV(SRV_INDIRECT_SHADOW_BUFFER, index);
-}
-
-IndirectCommand GetIndirectCommandDepthSRV(uint index)
-{
-    return GetIndirectCommandBufferSRV(SRV_INDIRECT_DEPTH_BUFFER, index);
-}
-
-IndirectCommand GetIndirectCommandColorSRV(uint index)
-{
-    return GetIndirectCommandBufferSRV(SRV_INDIRECT_COLOR_BUFFER, index);
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_INDIRECT_VISIBLE_FLAGS_BASE + bufferOffset];
 }
 
 // bufferOffset = psoContinuousIdx
-ByteAddressBuffer GetVisibleFlagSRV(uint bufferOffset)
+IndirectCommand GetIndirectCullingResultsBufferSRV(uint bufferOffset, uint index)
 {
-    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_VISIBLE_FLAGS_BASE + bufferOffset];
+    StructuredBuffer<IndirectCommand> cullingResultBuffer = ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_INDIRECT_CULLING_RESULTS_BASE + bufferOffset];
+    return cullingResultBuffer[index];
 }
 
-// bufferOffset = psoContinuousIdx
-IndirectCommand GetCullingResultSRV(uint bufferOffset, uint index)
+ByteAddressBuffer GetIndirectCullingResultsCounterBufferSRV(uint bufferOffset)
 {
-	ByteAddressBuffer cullingResultBuffer = ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_CULLING_RESULT_BASE + bufferOffset];
-	return cullingResultBuffer.Load<IndirectCommand>(index * sizeof(IndirectCommand));
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_INDIRECT_CULLING_RESULTS_COUNTER_BASE + bufferOffset];
 }
 
 // UAV
@@ -297,15 +312,15 @@ RWTexture2D<float4> GetSceneColorUAV()
 }
 
 // bufferOffset = psoIdx
-RWByteAddressBuffer GetVisibleFlagUAV(uint bufferOffset)
+RWByteAddressBuffer GetIndirectVisibleFlagsBufferUAV(uint bufferOffset)
 {
-    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_VISIBLE_FLAGS_BASE + bufferOffset];
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_INDIRECT_VISIBLE_FLAGS_BASE + bufferOffset];
 }
 
 // bufferOffset = psoIdx
-AppendStructuredBuffer<IndirectCommand> GetCullingResultUAV(uint bufferOffset)
+AppendStructuredBuffer<IndirectCommand> GetIndirectCullingResultsBufferUAV(uint bufferOffset)
 {
-    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_CULLING_RESULT_BASE + bufferOffset];
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_INDIRECT_CULLING_RESULTS_BASE + bufferOffset];
 }
 
 RWByteAddressBuffer GetLightGridUAV()
@@ -316,6 +331,11 @@ RWByteAddressBuffer GetLightGridUAV()
 RWByteAddressBuffer GetLightGridBitMaskUAV()
 {
     return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_LIGHT_GRID_MASK];
+}
+
+RWStructuredBuffer<DispatchMeshCommand> GetDispatchMeshBufferUAV(uint bufferOffset)
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_INDIRECT_DISPATCH_MESHES_BASE + bufferOffset];
 }
 
 #endif

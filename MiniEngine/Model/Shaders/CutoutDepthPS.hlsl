@@ -23,7 +23,7 @@ struct VSOutput
 [RootSignature(Renderer_RootSig)]
 void main(VSOutput vsOutput)
 {
-    MeshletConstant meshletConstant = GetMeshletConstantSRV(MeshletIndex);
+    MeshletConstant meshletConstant = GetMeshletConstantSRV(0);
     MaterialConstant materilConstant = GetMaterialConstantSRV(meshletConstant.MaterialConstantsIndex);
     
     float cutoff = f16tof32(materilConstant.flags >> 16);

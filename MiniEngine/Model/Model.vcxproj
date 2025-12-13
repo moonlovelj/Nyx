@@ -92,8 +92,7 @@
     <ClInclude Include="Animation.h" />
     <ClInclude Include="ConstantBuffers.h" />
     <ClInclude Include="glTF.h" />
-    <ClInclude Include="GPUDriven\CommandBucketer.h" />
-    <ClInclude Include="GPUDriven\ExecuteIndirect.h" />
+    <ClInclude Include="CommandBucketer.h" />
     <ClInclude Include="IndexOptimizePostTransform.h" />
     <ClInclude Include="InstanceResourceManager.h" />
     <ClInclude Include="json.hpp" />
@@ -114,8 +113,7 @@
     <ClCompile Include="Animation.cpp" />
     <ClCompile Include="BuildH3D.cpp" />
     <ClCompile Include="glTF.cpp" />
-    <ClCompile Include="GPUDriven\CommandBucketer.cpp" />
-    <ClCompile Include="GPUDriven\ExecuteIndirect.cpp" />
+    <ClCompile Include="CommandBucketer.cpp" />
     <ClCompile Include="IndexOptimizePostTransform.cpp" />
     <ClCompile Include="InstanceResourceManager.cpp" />
     <ClCompile Include="LightManager.cpp" />
@@ -245,6 +243,11 @@
     <FxCompile Include="Shaders\GBufferPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
+    <FxCompile Include="Shaders\MeshBufferGenCS.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compute</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">Compute</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compute</ShaderType>
+    </FxCompile>
     <FxCompile Include="Shaders\ModelViewerPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
@@ -259,6 +262,21 @@
     </FxCompile>
     <FxCompile Include="Shaders\SkyboxVS.hlsl">
       <ShaderType>Vertex</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Shaders\UberGBufferPS.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Shaders\UberMeshShader.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Mesh</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">Mesh</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Mesh</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Shaders\VBufferPS.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
     </FxCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

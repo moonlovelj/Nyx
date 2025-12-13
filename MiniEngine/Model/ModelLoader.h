@@ -24,7 +24,7 @@
 
 namespace glTF { class Asset; struct Mesh; }
 
-#define CURRENT_MINI_FILE_VERSION 15
+#define CURRENT_MINI_FILE_VERSION 16
 
 namespace Renderer
 {

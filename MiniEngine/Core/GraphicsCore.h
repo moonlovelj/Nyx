@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -38,7 +38,7 @@ namespace Graphics
 	bool IsShaderModelSupported(ID3D12Device* pDevice, D3D_SHADER_MODEL ShaderModel);
 	bool IsRootSignatureVersionSupported(ID3D12Device* pDevice, D3D_ROOT_SIGNATURE_VERSION Version);
 
-    extern ID3D12Device* g_Device;
+    extern ID3D12Device2* g_Device;
     extern CommandListManager g_CommandManager;
     extern ContextManager g_ContextManager;
 

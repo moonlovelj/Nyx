@@ -21,7 +21,7 @@ float GetProjectedError(float4 sphereVS, float errorWS)
 {
     float d2 = dot(sphereVS.xyz, sphereVS.xyz);
     float r = errorWS;
-    return 1.0 * screenErrorConstant * r / sqrt(max(d2 - r * r, 1e-6));
+    return 1.0 * ScreenErrorConstant * r / sqrt(max(d2 - r * r, 1e-6));
 }
 
 float GetProjectedErrorPerspective(float clipW, float errorWS, float lodScalePixels)
@@ -30,7 +30,7 @@ float GetProjectedErrorPerspective(float clipW, float errorWS, float lodScalePix
 }
 
 bool ShouldMeshletLodVisible(
-    float4x4 WorldMatrix, 
+    float4x4 WorldMatrix,
     float lodError, float4 lodBounds,
     float parentError, float4 parentBounds)
 {
@@ -76,12 +76,18 @@ bool IsSphereInFrustum(float4x4 WorldMatrix, float4 sphereLS)
     for (int i = 0; i < 6; ++i)
     {
         float4 plane;
-        if (i == 0) plane = ViewSpaceFrustumPlanes0;
-        else if (i == 1) plane = ViewSpaceFrustumPlanes1;
-        else if (i == 2) plane = ViewSpaceFrustumPlanes2;
-        else if (i == 3) plane = ViewSpaceFrustumPlanes3;
-        else if (i == 4) plane = ViewSpaceFrustumPlanes4;
-        else plane = ViewSpaceFrustumPlanes5;
+        if (i == 0)
+            plane = ViewSpaceFrustumPlanes0;
+        else if (i == 1)
+            plane = ViewSpaceFrustumPlanes1;
+        else if (i == 2)
+            plane = ViewSpaceFrustumPlanes2;
+        else if (i == 3)
+            plane = ViewSpaceFrustumPlanes3;
+        else if (i == 4)
+            plane = ViewSpaceFrustumPlanes4;
+        else
+            plane = ViewSpaceFrustumPlanes5;
         float distance = dot(plane.xyz, sphereVS.xyz) + plane.w;
         if (distance < -sphereVS.w)
             return false;
@@ -94,10 +100,10 @@ bool IsSphereInFrustum(float4x4 WorldMatrix, float4 sphereLS)
 void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
 {
     uint index = (groupId.x * CULLING_THREAD_GROUP_SIZE) + groupIndex;
-    if (index < maxCommands)
+    if (index < MaxCommands)
     {
-        RWByteAddressBuffer visibleFlagUAV = GetVisibleFlagUAV(psoIdx);
-        IndirectCommand inCommand = GetIndirectCommandBufferSRV(indirectBufferOffset, index + startCommand);
+        RWByteAddressBuffer visibleFlagUAV = GetIndirectVisibleFlagsBufferUAV(PsoIdx);
+        IndirectCommand inCommand = GetIndirectCommandsBufferSRV(PsoIdx, index);
 
         MeshletConstant meshletConstant = GetMeshletConstantSRV(inCommand.MeshletIndex);
         InstanceConstant instanceConstant = GetInstanceConstantSRV(inCommand.InstanceIndex);

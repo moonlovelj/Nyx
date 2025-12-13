@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -42,6 +42,11 @@ public:
     {
         m_IndirectParam.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH;
     }
+
+	void DispatchMesh(void)
+	{
+		m_IndirectParam.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_MESH;
+	}
 
     void VertexBufferView(UINT Slot)
     {

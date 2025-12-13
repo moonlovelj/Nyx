@@ -117,6 +117,9 @@ void Renderer::CompileMesh(
 		size_t totalDrawsAfterSplit = 0;
 		uint32_t totalBufferSize = 0;
 
+		size_t meshletVBSize = 0; // 存储meshlet的unique顶点，实际是顶点buffer的索引
+		size_t meshletIBSize = 0; // 存储meshlet的局部三角形索引，也就是meshletVB的索引
+
 		// Compute local space bounding sphere for all submeshes
 		BoundingSphere collectiveSphere(kZero);
 
@@ -165,9 +168,14 @@ void Renderer::CompileMesh(
 			vbDepthSize += draw->DepthVB->size();
 
 			// 计算所有 LOD 的 IB 总大小
-			for (const auto& m : buildResult)
-				ibSize += m.Triangles.size() * 4;
-
+            for (const auto& m : buildResult)
+            {
+				ASSERT(m.Triangles.size() % 3 == 0);
+                ibSize += m.Triangles.size() * 4;
+				meshletVBSize += m.Vertices.size() * 4;
+				meshletIBSize += (m.Triangles.size() / 3 * 4);// 为了兼容byteaddressbuffer的4字节对齐
+            }
+				
 			collectiveSphere = collectiveSphere.Union(draw->m_BoundsLS);
 			totalDrawsAfterSplit += buildResult.size();
 
@@ -175,7 +183,8 @@ void Renderer::CompileMesh(
         }
 
 		ibSize = Math::AlignUp(ibSize, 4);
-		totalBufferSize = (uint32_t)(vbSize + vbDepthSize + ibSize);
+        meshletIBSize = Math::AlignUp(meshletIBSize, 4);
+		totalBufferSize = (uint32_t)(vbSize + vbDepthSize + ibSize + meshletVBSize + meshletIBSize);
 
 		Utility::ByteArray stagingBuffer;
 		stagingBuffer.reset(new std::vector<unsigned char>(totalBufferSize));
@@ -221,6 +230,8 @@ void Renderer::CompileMesh(
         uint32_t curMeshletIBOffset = 0;
         uint32_t curIndexOffset = 0;
         uint32_t curPrimDepthVBOffset = 0;
+		uint32_t curMeshletVBOffset = 0;
+		uint32_t curMeshletPrimOffset = 0;
 
 		for (size_t iPrim = 0; iPrim < preInfo.size(); ++iPrim)
 		{
@@ -234,6 +245,16 @@ void Renderer::CompileMesh(
 				d.baseVertex = curVertOffset;
 				d.startIndex = curIndexOffset;
 				std::memcpy(d.bounds, m.Sphere, sizeof(d.bounds));
+                if (mesh->psoFlags & PSOFlags::kHasSkin)
+                {
+					d.bounds[3] *= 2.f; // TODO 蒙皮的包围球需要更精确计算
+                }
+
+				d.meshletVertexCount = (uint32_t)m.Vertices.size();
+                d.meshletVertexOffset = (uint32_t)(bufferMemory.size() + vbSize + vbDepthSize + ibSize + curMeshletVBOffset);
+
+				d.meshletPrimCount = (uint32_t)m.Triangles.size();
+				d.meshletPrimOffset = (uint32_t)(bufferMemory.size() + vbSize + vbDepthSize + ibSize + meshletVBSize + curMeshletPrimOffset);
 
 				// LOD 数据
 				d.parentError = m.ParentError;
@@ -242,8 +263,24 @@ void Renderer::CompileMesh(
 				std::memcpy(d.lodBounds, m.LodBounds, sizeof(d.lodBounds));
 				d.lodLevel = m.LODLevel;
 
+				std::memcpy(uploadMem + vbSize + vbDepthSize + ibSize + curMeshletVBOffset,
+					m.Vertices.data(), m.Vertices.size() * 4);
+
+				std::vector<uint8_t> meshletTriangles8(m.Triangles.size() / 3 * 4);
+                for (size_t t = 0; t < m.Triangles.size() / 3; ++t)
+                {
+                    meshletTriangles8[t * 4 + 0] = m.Triangles[t * 3 + 0];
+                    meshletTriangles8[t * 4 + 1] = m.Triangles[t * 3 + 1];
+                    meshletTriangles8[t * 4 + 2] = m.Triangles[t * 3 + 2];
+                    meshletTriangles8[t * 4 + 3] = 0; // padding
+				}
+				std::memcpy(uploadMem + vbSize + vbDepthSize + ibSize + meshletVBSize + curMeshletPrimOffset,
+                    meshletTriangles8.data(), meshletTriangles8.size());
+
 				++drawIdx;
 				curIndexOffset += (uint32_t)m.Triangles.size();
+				curMeshletVBOffset += (uint32_t)m.Vertices.size() * 4;
+                curMeshletPrimOffset += (uint32_t)m.Triangles.size() / 3 * 4;
 			}
 
 			// 拷贝 VB

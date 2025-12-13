@@ -43,12 +43,6 @@
     <ClCompile Include="Animation.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="GPUDriven\ExecuteIndirect.cpp">
-      <Filter>GPUDriven</Filter>
-    </ClCompile>
-    <ClCompile Include="GPUDriven\CommandBucketer.cpp">
-      <Filter>GPUDriven</Filter>
-    </ClCompile>
     <ClCompile Include="MeshOptimizer\allocator.cpp">
       <Filter>MeshOptimizer</Filter>
     </ClCompile>
@@ -102,6 +96,9 @@
     </ClCompile>
     <ClCompile Include="InstanceResourceManager.cpp" />
     <ClCompile Include="ModelInstanceManager.cpp" />
+    <ClCompile Include="CommandBucketer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
@@ -109,9 +106,6 @@
     </Filter>
     <Filter Include="Shaders">
       <UniqueIdentifier>{9169b7c9-f1a7-41d4-9098-58de36da850c}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="GPUDriven">
-      <UniqueIdentifier>{4dbdecf1-13d2-4f16-b1d8-e688db856ab8}</UniqueIdentifier>
     </Filter>
     <Filter Include="MeshOptimizer">
       <UniqueIdentifier>{f8da113d-85ae-4614-800a-21aa0fe71cb4}</UniqueIdentifier>
@@ -160,12 +154,6 @@
     <ClInclude Include="Animation.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="GPUDriven\ExecuteIndirect.h">
-      <Filter>GPUDriven</Filter>
-    </ClInclude>
-    <ClInclude Include="GPUDriven\CommandBucketer.h">
-      <Filter>GPUDriven</Filter>
-    </ClInclude>
     <ClInclude Include="MeshOptimizer\meshoptimizer.h">
       <Filter>MeshOptimizer</Filter>
     </ClInclude>
@@ -174,6 +162,9 @@
     </ClInclude>
     <ClInclude Include="InstanceResourceManager.h" />
     <ClInclude Include="ModelInstanceManager.h" />
+    <ClInclude Include="CommandBucketer.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="Shaders\Common.hlsli">
@@ -330,6 +321,18 @@
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\OcclusionCullPass2CS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\VBufferPS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\UberMeshShader.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\UberGBufferPS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\MeshBufferGenCS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>

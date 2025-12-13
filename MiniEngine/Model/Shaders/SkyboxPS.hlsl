@@ -13,7 +13,7 @@
 #include "Common.hlsli"
 #include "BindlessIndices.hlsli"
 
-cbuffer PSConstants : register(b0)
+cbuffer PSConstants : register(b1)
 {
     float TextureLevel;
     uint BindlessResourcesBaseIndex;

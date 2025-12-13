@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -20,7 +20,7 @@
 
 namespace Graphics
 {
-    extern ID3D12Device* g_Device;
+    extern ID3D12Device2* g_Device;
 }
 
 // This class is a linear allocation system for dynamically generated descriptor tables.  It internally caches

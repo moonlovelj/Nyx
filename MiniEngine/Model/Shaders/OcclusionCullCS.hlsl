@@ -102,9 +102,9 @@ bool IsSphereVisible(
     float3 boxMax = sphereWS.xyz + sphereWS.w;
     float4 uvRect = ComputeAABBUVRect(boxMin, boxMax, vpMatrix);
 
-    // 视锥 XY 平面剔除（空矩形或完全在屏幕外）
+    // 如何矩形不合法（比如和近裁剪面相交等），就采用保守策略，不剔除，因为经过视锥剔除，这个meshlet肯定在视锥内
     if (uvRect.z < 0 || uvRect.x > 1 || uvRect.w < 0 || uvRect.y > 1)
-        return false;
+        return true;
 
     float2 HZBUVScale = float2((ViewportWidth * 0.5f) * HZBSizeAndInv.z, (ViewportHeight * 0.5f) * HZBSizeAndInv.w);
     float4 texUVRect = uvRect * HZBUVScale.xyxy;
@@ -123,10 +123,10 @@ bool IsSphereVisible(
 void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
 {
     uint index = (groupId.x * CULLING_THREAD_GROUP_SIZE) + groupIndex;
-    if (index < maxCommands)
+    if (index < MaxCommands)
     {
-        RWByteAddressBuffer visibleFlagUAV = GetVisibleFlagUAV(psoIdx);
-        IndirectCommand inCommand = GetIndirectCommandBufferSRV(indirectBufferOffset, index + startCommand);
+        RWByteAddressBuffer visibleFlagUAV = GetIndirectVisibleFlagsBufferUAV(PsoIdx);
+        IndirectCommand inCommand = GetIndirectCommandsBufferSRV(PsoIdx, index);
 
         MeshletConstant meshletConstant = GetMeshletConstantSRV(inCommand.MeshletIndex);
         InstanceConstant instanceConstant = GetInstanceConstantSRV(inCommand.InstanceIndex);
@@ -134,10 +134,7 @@ void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
         float4x4 WorldMatrix = meshConstant.WorldMatrix;
         
         uint visible = visibleFlagUAV.Load(index * 4);
-        
-//#define OCCLUSION_CULL_PASS1 1
-//#define OCCLUSION_CULL_PASS2 1
-        
+           
 #ifdef OCCLUSION_CULL_PASS1
 
         // Pass1

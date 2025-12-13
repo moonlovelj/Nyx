@@ -37,10 +37,13 @@ VSOutput main(VSInput vsInput)
 {
     VSOutput vsOutput;
         
-    InstanceConstant instanceConstant = GetInstanceConstantSRV(InstanceIndex);
+    InstanceConstant instanceConstant = GetInstanceConstantSRV(0);
     
-    MeshletConstant meshletConstant = GetMeshletConstantSRV(MeshletIndex);
-    uint VertexLoadOffset = meshletConstant.VertexBufferDepthOffset + vsInput.vertexID * meshletConstant.VertexDepthStride;
+    MeshletConstant meshletConstant = GetMeshletConstantSRV(0);
+    ByteAddressBuffer IndexBuffer = GetIndexBufferSRV();
+    uint vertexID = IndexBuffer.Load(meshletConstant.IndexBufferOffset + vsInput.vertexID * 4);
+    
+    uint VertexLoadOffset = meshletConstant.VertexBufferDepthOffset + vertexID * meshletConstant.VertexDepthStride;
     
     ByteAddressBuffer VertexBuffer = GetVertexBufferSRV();
     uint3 PackedPos = VertexBuffer.Load3(VertexLoadOffset);

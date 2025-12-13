@@ -1,3 +1,3 @@
 ﻿
-#define OCCLUSION_CULL_PASS1
+#define OCCLUSION_CULL_PASS2
 #include "OcclusionCullCS.hlsl"
