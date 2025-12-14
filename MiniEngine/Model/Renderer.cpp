@@ -58,6 +58,8 @@
 #include "CompiledShaders/UberMeshShader.h"
 #include "CompiledShaders/UberGBufferPS.h"
 #include "CompiledShaders/MeshBufferGenCS.h"
+#include "CompiledShaders/VBufferPS.h"
+#include "CompiledShaders/ResolveVBufferToGBufferCS.h"
 
 #pragma warning(disable:4319) // '~': zero extending 'uint32_t' to 'uint64_t' of greater size
 
@@ -109,6 +111,8 @@ namespace Renderer
 	ComputePSO m_MeshBufferGenPSO(L"Renderer: Mesh Buffer Gen PSO");
 
     MeshShaderPSO m_UberMeshPSO(L"Renderer: Uber Mesh PSO");
+
+	ComputePSO m_ResolveVBufferToGBufferPSO(L"Renderer: Resolve VBuffer To GBuffer PSO");
 }
 
 void Renderer::Initialize(void)
@@ -191,12 +195,16 @@ void Renderer::Initialize(void)
 	};
     m_UberMeshPSO.SetRenderTargetFormats(5, RTVFormats, g_SceneDepthBuffer.GetFormat());
 	m_UberMeshPSO.SetMeshShader(g_pUberMeshShader, sizeof(g_pUberMeshShader));
-	m_UberMeshPSO.SetPixelShader(g_pUberGBufferPS, sizeof(g_pUberGBufferPS));
+	m_UberMeshPSO.SetPixelShader(g_pVBufferPS, sizeof(g_pVBufferPS));
 	m_UberMeshPSO.Finalize();
 
     m_MeshBufferGenPSO.SetRootSignature(m_RootSig);
     m_MeshBufferGenPSO.SetComputeShader(g_pMeshBufferGenCS, sizeof(g_pMeshBufferGenCS));
     m_MeshBufferGenPSO.Finalize();
+
+    m_ResolveVBufferToGBufferPSO.SetRootSignature(m_RootSig);
+    m_ResolveVBufferToGBufferPSO.SetComputeShader(g_pResolveVBufferToGBufferCS, sizeof(g_pResolveVBufferToGBufferCS));
+    m_ResolveVBufferToGBufferPSO.Finalize();
 
     // Depth Only PSOs
 
@@ -346,6 +354,10 @@ void Renderer::Initialize(void)
         // uav
 		SetBindlessResourceDescriptor(UAV_SCENE_COLOR, g_SceneColorBuffer.GetUAV());
 		SetBindlessResourceDescriptor(UAV_VBUFFER, g_VisibilityBuffer.GetUAV());
+		SetBindlessResourceDescriptor(UAV_GBUFFER_A, g_GBufferA.GetUAV());
+		SetBindlessResourceDescriptor(UAV_GBUFFER_B, g_GBufferB.GetUAV());
+		SetBindlessResourceDescriptor(UAV_GBUFFER_C, g_GBufferC.GetUAV());
+		SetBindlessResourceDescriptor(UAV_GBUFFER_D, g_GBufferD.GetUAV());
     }
 
     s_Initialized = true;
@@ -689,6 +701,8 @@ void Renderer::FillCullingResult(GraphicsContext& gfxContext,
 
     context.TransitionResource(bucketer.GetIndirectCommandsGPU(psoIdx), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
+    //context.FlushResourceBarriers();
+
     context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
     context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
 	context.SetRootSignature(m_RootSig);
@@ -705,6 +719,29 @@ void Renderer::FillCullingResult(GraphicsContext& gfxContext,
 
     gfxContext.TransitionResource(bucketer.GetIndirectCullingResults(psoIdx), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, true);
     gfxContext.TransitionResource(bucketer.GetIndirectCullingResultsCounter(psoIdx), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, true);
+}
+
+void Renderer::ResolveVBufferToGBuffer(GraphicsContext& gfxContext, const GlobalConstants& inGlobals)
+{
+	ScopedTimer _prof(L"Renderer::ResolveVBufferToGBuffer", gfxContext);
+	ComputeContext& context = gfxContext.GetComputeContext();
+
+	context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    context.TransitionResource(CommandBucketer::Get().GetIndirectCullingResults(PsoIdx::kPsoMain), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+	context.TransitionResource(g_GBufferA, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	context.TransitionResource(g_GBufferB, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	context.TransitionResource(g_GBufferC, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	context.TransitionResource(g_GBufferD, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
+	context.SetRootSignature(m_RootSig);
+
+    context.SetPipelineState(m_ResolveVBufferToGBufferPSO);
+	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
+    context.SetConstants(kViewModeConstants, (uint32_t)ViewMode);
+
+    context.Dispatch2D(g_SceneColorBuffer.GetWidth(), g_SceneColorBuffer.GetHeight());
 }
 
 uint32_t Renderer::GetBindlessResourcesBaseOffset()
@@ -1008,6 +1045,11 @@ void MeshSorter::RenderMeshes(
 					context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), m_DSV->GetDSV());
 				}
 				break;
+            case kVBuffer:
+				context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+				context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
+				context.SetRenderTarget(g_VisibilityBuffer.GetRTV(), m_DSV->GetDSV());
+                break;
 			case kGBuffer:
 			    if (SeparateZPass)
 			    {
@@ -1073,7 +1115,7 @@ void MeshSorter::RenderMeshes(
                     RenderMeshedInternal(context, globals, Renderer::PsoIdx::kPsoShadow);
 				}
 			}
-			else
+			else if (kVBuffer == pass)
 			{
                 if (bucketer.HasAnyCommands(Renderer::PsoIdx::kPsoMain))
                     RenderMeshedInternal(context, globals, Renderer::PsoIdx::kPsoMain, true);

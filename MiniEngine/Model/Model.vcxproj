@@ -257,6 +257,7 @@
     <FxCompile Include="Shaders\OcclusionCullCS.hlsl" />
     <FxCompile Include="Shaders\OcclusionCullPass1CS.hlsl" />
     <FxCompile Include="Shaders\OcclusionCullPass2CS.hlsl" />
+    <FxCompile Include="Shaders\ResolveVBufferToGBufferCS.hlsl" />
     <FxCompile Include="Shaders\SkyboxPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>

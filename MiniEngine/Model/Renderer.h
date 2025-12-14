@@ -139,6 +139,8 @@ namespace Renderer
     uint32_t GetBindlessResourcesBaseOffset();
 	void SetBindlessResourceDescriptor(uint32_t bindlessIndex, const D3D12_CPU_DESCRIPTOR_HANDLE& handle);
 
+	void ResolveVBufferToGBuffer(GraphicsContext& gfxContext, const GlobalConstants& inGlobals);
+
 	HierarchicalDepthBuffer& GetPrevHZB();
 	HierarchicalDepthBuffer& GetCurrentHZB();
 
@@ -147,7 +149,7 @@ namespace Renderer
     {
     public:
 		enum BatchType { kDefault, kShadows };
-        enum DrawPass { kZPass, kOpaque, kGBuffer, kTransparent, kNumPasses };
+        enum DrawPass { kZPass, kOpaque, kVBuffer, kGBuffer, kTransparent, kNumPasses };
 
 		MeshSorter(BatchType type)
 		{

@@ -13,6 +13,10 @@
 #define PSO_TWO_SIDED         0x0080
 #define PSO_HAS_SKIN          0x0100
 
+#define PSO_IDX_SHADOW        0
+#define PSO_IDX_MAIN          1
+#define PSO_IDX_TRANSPARENT   2
+
 cbuffer GlobalConstants : register(b2)
 {
     float4x4 ViewMatrix;
@@ -190,6 +194,11 @@ ByteAddressBuffer GetGeometryBufferSRV()
     return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_GEOMETRY_BUFFER];
 }
 
+Texture2D<uint2> GetVBufferSRV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_VBUFFER];
+}
+
 Texture2D<float4> GetGBufferASRV()
 {
 	return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_GBUFFER_A];
@@ -309,6 +318,26 @@ ByteAddressBuffer GetIndirectCullingResultsCounterBufferSRV(uint bufferOffset)
 RWTexture2D<float4> GetSceneColorUAV()
 {
     return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_SCENE_COLOR];
+}
+
+RWTexture2D<float4> GetGBufferAUAV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_GBUFFER_A];
+}
+
+RWTexture2D<float4> GetGBufferBUAV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_GBUFFER_B];
+}
+
+RWTexture2D<float4> GetGBufferCUAV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_GBUFFER_C];
+}
+
+RWTexture2D<float4> GetGBufferDUAV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_GBUFFER_D];
 }
 
 // bufferOffset = psoIdx

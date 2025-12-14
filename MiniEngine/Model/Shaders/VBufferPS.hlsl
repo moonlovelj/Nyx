@@ -1,7 +1,12 @@
 ﻿#include "Common.hlsli"
-#include "MaterialCommon.hlsli"
 #include "CommonResources.hlsli"
 
+struct VSOutput
+{
+    float4 position : SV_POSITION;
+    float2 uv0 : TEXCOORD0;
+    nointerpolation uint visibleCommandIndex : TEXCOORD1;
+};
 
 struct MRT
 {
@@ -12,8 +17,8 @@ struct MRT
 MRT main(VSOutput vsOutput, uint primID : SV_PrimitiveID)
 {
     MRT mrt;
-    //mrt.Color = float4(MatProps.Emissive, 1.0f);
-
+    mrt.VBuffer.g = asuint(vsOutput.position.z);
+    mrt.VBuffer.r = ((vsOutput.visibleCommandIndex & 0x01FFFFFF) << 7) | (primID & 0x7F);
     return mrt;
 }
 

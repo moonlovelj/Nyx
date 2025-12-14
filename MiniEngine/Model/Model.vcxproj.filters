@@ -335,5 +335,8 @@
     <FxCompile Include="Shaders\MeshBufferGenCS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="Shaders\ResolveVBufferToGBufferCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
 </Project>
