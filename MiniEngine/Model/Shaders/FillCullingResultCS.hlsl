@@ -12,18 +12,18 @@ void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
     if (index < MaxCommands)
     {
         ByteAddressBuffer visibleFlags = GetIndirectVisibleFlagsBufferSRV(PsoIdx);
-        AppendStructuredBuffer<IndirectCommand> OutputCommands = GetIndirectCullingResultsBufferUAV(PsoIdx);
+        AppendStructuredBuffer<uint> OutputCommands = GetIndirectCullingResultsBufferUAV(PsoIdx);
 
         if (CullingStage == CULLING_RESULT_NO_CULLED)
         {
-            OutputCommands.Append(GetIndirectCommandsBufferSRV(PsoIdx, index));
+            OutputCommands.Append(index);
         }
         else if (CullingStage == CULLING_RESULT_OF_FRUSTUM)
         {
             uint visible = visibleFlags.Load(index * 4);
             if (visible & CULLING_FRUSTUM_VISIBLE)
             {
-                OutputCommands.Append(GetIndirectCommandsBufferSRV(PsoIdx, index));
+                OutputCommands.Append(index);
             }
         }
         else if (CullingStage == CULLING_RESULT_OF_OCCLUSION_PASS1)
@@ -32,7 +32,7 @@ void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
             if ((visible & CULLING_FRUSTUM_VISIBLE) > 0 &&
                 (visible & CULLING_OCCLUSION_PASS1_VISIBLE) > 0)
             {
-                OutputCommands.Append(GetIndirectCommandsBufferSRV(PsoIdx, index));
+                OutputCommands.Append(index);
             }
         }
         else if (CullingStage == CULLING_RESULT_OF_OCCLUSION_PASS2)
@@ -42,7 +42,7 @@ void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
                 (visible & CULLING_OCCLUSION_PASS1_VISIBLE) == 0 &&
                 (visible & CULLING_OCCLUSION_PASS2_VISIBLE) > 0)
             {
-                OutputCommands.Append(GetIndirectCommandsBufferSRV(PsoIdx, index));
+                OutputCommands.Append(index);
             }
         }
         else if (CullingStage == CULLING_RESULT_OF_FREEZE_CULL)
@@ -50,7 +50,7 @@ void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
             uint visible = visibleFlags.Load(index * 4);
             if (visible & (CULLING_OCCLUSION_PASS1_VISIBLE | CULLING_OCCLUSION_PASS2_VISIBLE))
             {
-                OutputCommands.Append(GetIndirectCommandsBufferSRV(PsoIdx, index));
+                OutputCommands.Append(index);
             }
         }
     }

@@ -10,7 +10,7 @@ struct VSOutput
 {
     float4 position : SV_POSITION;
     float2 uv0 : TEXCOORD0;
-    nointerpolation uint visibleCommandIndex : TEXCOORD1;
+    nointerpolation uint commandIndex : TEXCOORD1;
 };
 
 struct PrimitiveAttributes
@@ -28,7 +28,8 @@ void main(
     out indices uint3 outIndices[MAX_PRIMS],
     out primitives PrimitiveAttributes sharedPrimitives[MAX_PRIMS])
 {
-    IndirectCommand command = GetIndirectCullingResultsBufferSRV(PsoIdx, gid);
+    uint commandIndex = GetIndirectCullingResultsBufferSRV(PsoIdx, gid);
+    IndirectCommand command = GetIndirectCommandsBufferSRV(PsoIdx, commandIndex);
     MeshletConstant mlet = GetMeshletConstantSRV(command.MeshletIndex);
     InstanceConstant inst = GetInstanceConstantSRV(command.InstanceIndex);
     MeshConstant meshInstance = GetMeshConstantSRV(inst.MeshConstantsBase + mlet.MeshConstantsIndexOffset);
@@ -94,7 +95,7 @@ void main(
             float3 worldPos = mul(WorldMatrix, position).xyz;
             verts[localVertexIdx].position = mul(ViewProjMatrix, float4(worldPos, 1.0));
             verts[localVertexIdx].uv0 = uv0;
-            verts[localVertexIdx].visibleCommandIndex = gid;
+            verts[localVertexIdx].commandIndex = commandIndex;
         }
     }
     

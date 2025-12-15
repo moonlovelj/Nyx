@@ -303,9 +303,9 @@ ByteAddressBuffer GetIndirectVisibleFlagsBufferSRV(uint bufferOffset)
 }
 
 // bufferOffset = psoContinuousIdx
-IndirectCommand GetIndirectCullingResultsBufferSRV(uint bufferOffset, uint index)
+uint GetIndirectCullingResultsBufferSRV(uint bufferOffset, uint index)
 {
-    StructuredBuffer<IndirectCommand> cullingResultBuffer = ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_INDIRECT_CULLING_RESULTS_BASE + bufferOffset];
+    StructuredBuffer<uint> cullingResultBuffer = ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_INDIRECT_CULLING_RESULTS_BASE + bufferOffset];
     return cullingResultBuffer[index];
 }
 
@@ -347,7 +347,7 @@ RWByteAddressBuffer GetIndirectVisibleFlagsBufferUAV(uint bufferOffset)
 }
 
 // bufferOffset = psoIdx
-AppendStructuredBuffer<IndirectCommand> GetIndirectCullingResultsBufferUAV(uint bufferOffset)
+AppendStructuredBuffer<uint> GetIndirectCullingResultsBufferUAV(uint bufferOffset)
 {
     return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_INDIRECT_CULLING_RESULTS_BASE + bufferOffset];
 }

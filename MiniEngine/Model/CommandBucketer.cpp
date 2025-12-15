@@ -23,6 +23,8 @@ void CommandBucketer::FinalizeIndirectCommands()
 		size_t cmdCount = kvp.second.size();
 		if (cmdCount == 0) 	continue;
 
+		ASSERT(cmdCount < 0x01FFFFFF, "Too many indirect commands for PSO %d: %zu", kvp.first, cmdCount);
+
 		m_IndirectCommandsGPU[kvp.first].Create(
 			L"Indirect Commands Buffer",
 			(uint32_t)cmdCount,
@@ -46,7 +48,7 @@ void CommandBucketer::FinalizeIndirectCommands()
 		m_IndirectCullingResults[kvp.first].Create(
 			L"Indirect Culling Results Buffer",
 			(uint32_t)cmdCount,
-			(uint32_t)sizeof(IndirectCommand),
+			(uint32_t)sizeof(uint32_t),
 			nullptr);
 
 		Renderer::SetBindlessResourceDescriptor(SRV_INDIRECT_CULLING_RESULTS_BASE + (uint32_t)kvp.first,

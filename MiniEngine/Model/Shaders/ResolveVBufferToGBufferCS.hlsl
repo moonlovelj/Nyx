@@ -245,8 +245,8 @@ void main( uint2 DTid : SV_DispatchThreadID )
             VSOutput vsOutput;
             float depth = asfloat(VBufferRaw.g);
             uint primitiveIndex = VBufferRaw.r & 0x7F;
-            uint visibleCommandIndex = (VBufferRaw.r >> 7);
-            IndirectCommand command = GetIndirectCullingResultsBufferSRV(PSO_IDX_MAIN, visibleCommandIndex);
+            uint commandIndex = (VBufferRaw.r >> 7);
+            IndirectCommand command = GetIndirectCommandsBufferSRV(PSO_IDX_MAIN, commandIndex);
             vsOutput.meshletIndex = command.MeshletIndex;
             MeshletConstant mlet = GetMeshletConstantSRV(command.MeshletIndex);
             InstanceConstant inst = GetInstanceConstantSRV(command.InstanceIndex);
