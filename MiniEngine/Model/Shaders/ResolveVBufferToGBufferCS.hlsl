@@ -9,6 +9,10 @@ struct VSOutput
     float4 tangent;
     float2 uv0;
     float2 uv1;
+    float2 uv0_dx;
+    float2 uv0_dy;
+    float2 uv1_dx;
+    float2 uv1_dy;
     uint meshletIndex;
 };
 
@@ -18,6 +22,13 @@ static const uint METALLICROUGHNESS_UV_OFFSET = 1;
 static const uint OCCLUSION_UV_OFFSET = 2;
 static const uint EMISSIVE_UV_OFFSET = 3;
 static const uint NORMAL_UV_OFFSET = 4;
+
+struct Derivs
+{
+    float2 uv; // 插值的UV
+    float2 uv_dx;
+    float2 uv_dy;
+};
 
 float2 ParseUV(in VSOutput vsOutput, uint offset, uint flags, uint psoFlags)
 {
@@ -29,7 +40,27 @@ float2 ParseUV(in VSOutput vsOutput, uint offset, uint flags, uint psoFlags)
     return vsOutput.uv0;
 }
 
-float3 ComputeNormal(VSOutput vsOutput, Texture2D<float3> NormalTexture, SamplerState NormalSampler)
+float4 SampleTextureWithDerivs(
+    in VSOutput vsOutput,
+    Texture2D<float4> texture,
+    SamplerState texSampler,
+    uint offset, 
+    uint flags, 
+    uint psoFlags)
+{
+    float2 uv = vsOutput.uv0;
+    float2 uv_dx = vsOutput.uv0_dx;
+    float2 uv_dy = vsOutput.uv0_dy;
+    if (psoFlags & PSO_HAS_UV1)
+    {
+        uv = lerp(vsOutput.uv0, vsOutput.uv1, (flags >> offset) & 1);
+        uv_dx = lerp(vsOutput.uv0_dx, vsOutput.uv1_dx, (flags >> offset) & 1);
+        uv_dy = lerp(vsOutput.uv0_dy, vsOutput.uv1_dy, (flags >> offset) & 1);
+    }
+    return texture.SampleGrad(texSampler, uv, uv_dx, uv_dy);
+}
+
+float3 ComputeNormal(VSOutput vsOutput, Texture2D<float4> NormalTexture, SamplerState NormalSampler)
 {
     MeshletConstant meshletConstant = GetMeshletConstantSRV(vsOutput.meshletIndex);
     MaterialConstant materilConstant = GetMaterialConstantSRV(meshletConstant.MaterialConstantsIndex);
@@ -49,7 +80,7 @@ float3 ComputeNormal(VSOutput vsOutput, Texture2D<float3> NormalTexture, Sampler
     float3x3 tangentFrame = float3x3(tangent, bitangent, normal);
 
     // Read normal map and convert to SNORM (TODO:  convert all normal maps to R8G8B8A8_SNORM?)
-    normal = NormalTexture.Sample(NormalSampler, ParseUV(vsOutput, NORMAL_UV_OFFSET, flags, meshletConstant.psoFlags)) * 2.0 - 1.0;
+    normal = SampleTextureWithDerivs(vsOutput, NormalTexture, NormalSampler, NORMAL_UV_OFFSET, flags, meshletConstant.psoFlags).rgb * 2.0 - 1.0;
 
     // glTF spec says to normalize N before and after scaling, but that's excessive
     normal = normalize(normal * float3(normalTextureScale, normalTextureScale, 1));
@@ -81,10 +112,10 @@ MaterialProperties GetMaterialProperties(VSOutput vsOutput)
     uint SamplerStartIndex = materilConstant.SamplerStartIndex;
 
     Texture2D<float4> BaseColorTexture = ResourceDescriptorHeap[TextureStartIndex];
-    Texture2D<float3> MetallicRoughnessTexture = ResourceDescriptorHeap[TextureStartIndex + 1];
-    Texture2D<float1> OcclusionTexture = ResourceDescriptorHeap[TextureStartIndex + 2];
-    Texture2D<float3> EmissiveTexture = ResourceDescriptorHeap[TextureStartIndex + 3];
-    Texture2D<float3> NormalTexture = ResourceDescriptorHeap[TextureStartIndex + 4];
+    Texture2D<float4> MetallicRoughnessTexture = ResourceDescriptorHeap[TextureStartIndex + 1];
+    Texture2D<float4> OcclusionTexture = ResourceDescriptorHeap[TextureStartIndex + 2];
+    Texture2D<float4> EmissiveTexture = ResourceDescriptorHeap[TextureStartIndex + 3];
+    Texture2D<float4> NormalTexture = ResourceDescriptorHeap[TextureStartIndex + 4];
 
     SamplerState BaseColorSampler = SamplerDescriptorHeap[SamplerStartIndex];
     SamplerState MetallicRoughnessSampler = SamplerDescriptorHeap[SamplerStartIndex + 1];
@@ -93,82 +124,139 @@ MaterialProperties GetMaterialProperties(VSOutput vsOutput)
     SamplerState NormalSampler = SamplerDescriptorHeap[SamplerStartIndex + 4];
 
     MaterialProperties MatProps;
-    MatProps.BaseColor = baseColorFactor * BaseColorTexture.Sample(BaseColorSampler, ParseUV(vsOutput, BASECOLOR_UV_OFFSET, flags, meshletConstant.psoFlags));
+    MatProps.BaseColor = baseColorFactor * SampleTextureWithDerivs(vsOutput, BaseColorTexture, BaseColorSampler, BASECOLOR_UV_OFFSET, flags, meshletConstant.psoFlags);
     float2 metallicRoughness = metallicRoughnessFactor *
-        MetallicRoughnessTexture.Sample(MetallicRoughnessSampler, ParseUV(vsOutput, METALLICROUGHNESS_UV_OFFSET, flags, meshletConstant.psoFlags)).bg;
+        SampleTextureWithDerivs(vsOutput, MetallicRoughnessTexture, MetallicRoughnessSampler, METALLICROUGHNESS_UV_OFFSET, flags, meshletConstant.psoFlags).bg;
     metallicRoughness.y = max(0.001, metallicRoughness.y);
     MatProps.Metallic = metallicRoughness.x;
     MatProps.Roughness = metallicRoughness.y;
-    MatProps.Occlusion = OcclusionTexture.Sample(OcclusionSampler, ParseUV(vsOutput, OCCLUSION_UV_OFFSET, flags, meshletConstant.psoFlags));
-    MatProps.Emissive = emissiveFactor * EmissiveTexture.Sample(EmissiveSampler, ParseUV(vsOutput, EMISSIVE_UV_OFFSET, flags, meshletConstant.psoFlags));
+    MatProps.Occlusion = SampleTextureWithDerivs(vsOutput, OcclusionTexture, OcclusionSampler, OCCLUSION_UV_OFFSET, flags, meshletConstant.psoFlags).r;
+    MatProps.Emissive = emissiveFactor * SampleTextureWithDerivs(vsOutput, EmissiveTexture, EmissiveSampler, EMISSIVE_UV_OFFSET, flags, meshletConstant.psoFlags).rgb;
     MatProps.Normal = ComputeNormal(vsOutput, NormalTexture, NormalSampler);
     return MatProps;
 }
 
-// 边缘函数：计算二维向量叉乘 (相当于三角形有向面积的2倍)
+// 计算二维向量叉乘 (相当于三角形有向面积的2倍)
 float EdgeFunction(float2 a, float2 b, float2 c)
 {
     return (c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x);
 }
 
-struct BarycentricDerivates
+struct BarycentricDerivs
 {
-    float3 lambda; // 透视矫正后的重心坐标
-    float3 ddx; // 用于纹理采样的导数 (可选)
-    float3 ddy; // 用于纹理采样的导数 (可选)
+    float3 lambda; // 重心坐标
+    float3 lambda_correction; // 透视矫正重心坐标
+    float3 ddx_lambda; // 重心坐标对 Screen X 的偏导
+    float3 ddy_lambda; // 重心坐标对 Screen Y 的偏导
+    float  w[3]; // 三个点的 clip w 值
 };
 
-float3 CalculateBarycentrics(float3 worldPos[3], float2 pixelPos, float4x4 viewProj, float2 screenSize)
+BarycentricDerivs CalculateBarycentricsAndDerivs(
+    float3 p[3], // 三角形三个顶点的世界坐标
+    float2 pixelPos, // 当前像素坐标
+    float4x4 viewProj,
+    float2 screenSize)
 {
+    BarycentricDerivs output;
+    
     float4 clipPos[3];
     float2 screenPos[3];
-
-    // 1. 将顶点变换到 Clip Space (由 World 到 Clip)
+    
     [unroll]
     for (int i = 0; i < 3; ++i)
     {
-        clipPos[i] = mul(viewProj, float4(worldPos[i], 1.0f));
-        
-        // 2. 变换到 Screen Space (NDC -> Pixel Coordinates)
-        // 注意：这里没有做完整的 Clipping，假设 VBuffer 既然存了这个 ID，该像素一定在三角形内
-        // 除以 w 得到 NDC
+        clipPos[i] = mul(viewProj, float4(p[i], 1.0f));
+        // NDC -> Screen
         float2 ndc = clipPos[i].xy / clipPos[i].w;
-        
-        // 映射到 [0, screenSize]
-        // 注意 Y 轴翻转问题，DX 中 NDC Y 向上，屏幕空间 Y 向下 (通常 UV 也是左上角 0,0)
-        // 下面公式假设 Y 轴向下为正 (视具体图形 API 而定，DX需注意 y = -y)
+        // 注意 Y 轴方向，DX 是左上角(0,0)，NDC Y向上，所以 ndc.y 要反转
         screenPos[i] = (float2(ndc.x, -ndc.y) * 0.5f + 0.5f) * screenSize;
+        output.w[i] = clipPos[i].w;
     }
 
-    // 3. 计算屏幕空间有向面积 (三角形总面积)
-    // 为了数值稳定性，最好加上微小偏移或确保不为0，但在光栅化覆盖的像素上它不会为0
+    // 计算面积 (的2倍)
     float area = EdgeFunction(screenPos[0], screenPos[1], screenPos[2]);
     float invArea = 1.0f / area;
 
-    // 4. 计算当前像素相对于三个边的重心坐标 (Screen Space Barycentrics)
-    // 这里的 lambda 是线性的（屏幕空间线性），还没有做透视矫正
-    float3 lambdaScreen;
-    // 像素中心通常要 +0.5
+    // 计算重心坐标
     float2 centerPos = pixelPos + 0.5f;
-    
-    lambdaScreen.x = EdgeFunction(screenPos[1], screenPos[2], centerPos) * invArea;
-    lambdaScreen.y = EdgeFunction(screenPos[2], screenPos[0], centerPos) * invArea;
-    lambdaScreen.z = EdgeFunction(screenPos[0], screenPos[1], centerPos) * invArea;
-    // 或者 lambdaScreen.z = 1.0 - lambdaScreen.x - lambdaScreen.y;
+    output.lambda.x = EdgeFunction(screenPos[1], screenPos[2], centerPos) * invArea;
+    output.lambda.y = EdgeFunction(screenPos[2], screenPos[0], centerPos) * invArea;
+    output.lambda.z = EdgeFunction(screenPos[0], screenPos[1], centerPos) * invArea;
 
-    // 5. 透视矫正 (Perspective Correction)
-    // 属性插值需要除以 w，因为屏幕空间的线性插值对应 1/w 空间的线性插值
+    // 计算重心坐标的屏幕空间导数 (解析解)
+    // d(lambda)/dx = (V_next.y - V_prev.y) / Area
+    // d(lambda)/dy = (V_prev.x - V_next.x) / Area
+    // 系数是 1.0/Area 还是 1.0/(2*Area) 取决于 EdgeFunction 的实现，EdgeFunction算出的是2倍面积，所以直接除以它即可
+    
+    output.ddx_lambda.x = (screenPos[1].y - screenPos[2].y) * invArea;
+    output.ddx_lambda.y = (screenPos[2].y - screenPos[0].y) * invArea;
+    output.ddx_lambda.z = (screenPos[0].y - screenPos[1].y) * invArea;
+
+    output.ddy_lambda.x = (screenPos[2].x - screenPos[1].x) * invArea;
+    output.ddy_lambda.y = (screenPos[0].x - screenPos[2].x) * invArea;
+    output.ddy_lambda.z = (screenPos[1].x - screenPos[0].x) * invArea;
+    
     float3 oneOverW = float3(1.0f / clipPos[0].w, 1.0f / clipPos[1].w, 1.0f / clipPos[2].w);
     
     // 计算当前像素的 1/w
-    float pixelOneOverW = lambdaScreen.x * oneOverW.x +
-                          lambdaScreen.y * oneOverW.y +
-                          lambdaScreen.z * oneOverW.z;
+    float pixelOneOverW = output.lambda.x * oneOverW.x +
+                          output.lambda.y * oneOverW.y +
+                          output.lambda.z * oneOverW.z;
     
     // 最终的重心坐标 (用于插值 UV、Normal、WorldPos 等)
-    float3 lambda = (lambdaScreen * oneOverW) / pixelOneOverW;
+    output.lambda_correction = (output.lambda * oneOverW) / pixelOneOverW;
 
-    return lambda;
+    return output;
+}
+
+float4 InterpolateOnly(float4 val[3], BarycentricDerivs bary)
+{
+    return val[0] * bary.lambda_correction.x + 
+           val[1] * bary.lambda_correction.y + 
+           val[2] * bary.lambda_correction.z;   
+}
+
+// 属性插值并计算导数 (透视矫正链式法则)
+// val: 顶点的属性数组 (如 uv0, uv1, uv2)
+// w: 顶点的 w 数组 (clipPos.w)
+// bary: 重心数据
+Derivs InterpolateWithDerivs(float2 val[3], BarycentricDerivs bary)
+{
+    Derivs d;
+    
+    // 属性需预除 w
+    float3 oneOverW = float3(1.0f / bary.w[0], 1.0f / bary.w[1], 1.0f / bary.w[2]);
+    float2 attr[3];
+    attr[0] = val[0] * oneOverW.x;
+    attr[1] = val[1] * oneOverW.y;
+    attr[2] = val[2] * oneOverW.z;
+
+    // 计算当前像素的 1/w 和 属性值 (Pre-divide)
+    float pixelOneOverW = dot(bary.lambda, oneOverW);
+    float2 pixelAttrPreDiv = attr[0] * bary.lambda.x + attr[1] * bary.lambda.y + attr[2] * bary.lambda.z;
+    
+    // 最终属性值 (透视矫正后)
+    d.uv = pixelAttrPreDiv / pixelOneOverW;
+
+    // 对除法求导 (u/v)' = (u'v - uv') / v^2
+    // 需要求 d(pixelAttrPreDiv / pixelOneOverW) / dx
+    
+    // 计算 1/w 的导数
+    float ddx_oneOverW = dot(bary.ddx_lambda, oneOverW);
+    float ddy_oneOverW = dot(bary.ddy_lambda, oneOverW);
+
+    // 计算 PreDiv属性 的导数
+    float2 ddx_attrPre = attr[0] * bary.ddx_lambda.x + attr[1] * bary.ddx_lambda.y + attr[2] * bary.ddx_lambda.z;
+    float2 ddy_attrPre = attr[0] * bary.ddy_lambda.x + attr[1] * bary.ddy_lambda.y + attr[2] * bary.ddy_lambda.z;
+
+    // 应用除法法则
+    float w_sqr = pixelOneOverW * pixelOneOverW;
+    
+    // ddx = (attr' * w - attr * w') / w^2
+    d.uv_dx = (ddx_attrPre * pixelOneOverW - pixelAttrPreDiv * ddx_oneOverW) / w_sqr;
+    d.uv_dy = (ddy_attrPre * pixelOneOverW - pixelAttrPreDiv * ddy_oneOverW) / w_sqr;
+
+    return d;
 }
 
 struct PrimitiveAttributes
@@ -281,30 +369,47 @@ void main( uint2 DTid : SV_DispatchThreadID )
             worldPos[0] = mul(WorldMatrix, localPosition0).xyz;
             worldPos[1] = mul(WorldMatrix, localPosition1).xyz;
             worldPos[2] = mul(WorldMatrix, localPosition2).xyz;
-            float3 barycentrics = CalculateBarycentrics(worldPos, DTid + float2(0.5, 0.5), 
+
+            BarycentricDerivs barycentricDerivs = CalculateBarycentricsAndDerivs(worldPos, DTid + float2(0.5, 0.5),
                 ViewProjMatrix, float2(ViewportWidth, ViewportHeight));
 
-            float3 normal =
-                primAttrs[0].normal * barycentrics.x +
-                primAttrs[1].normal * barycentrics.y +
-                primAttrs[2].normal * barycentrics.z;
-            float4 tangent =
-                primAttrs[0].tangent * barycentrics.x +
-                primAttrs[1].tangent * barycentrics.y +
-                primAttrs[2].tangent * barycentrics.z;
+            float4 normals[3] = {
+                float4(primAttrs[0].normal, 0),
+                float4(primAttrs[1].normal, 0),
+                float4(primAttrs[2].normal, 0)
+            };
+            float3 normal = InterpolateOnly(normals, barycentricDerivs).xyz;
+
+            float4 tangents[3] = {
+                primAttrs[0].tangent,
+                primAttrs[1].tangent,
+                primAttrs[2].tangent
+            };
             
-            vsOutput.uv0 =
-                primAttrs[0].uv0 * barycentrics.x +
-                primAttrs[1].uv0 * barycentrics.y +
-                primAttrs[2].uv0 * barycentrics.z;
+            float4 tangent = InterpolateOnly(tangents, barycentricDerivs);
+            float2 uvs0[3] = {
+                primAttrs[0].uv0,
+                primAttrs[1].uv0,
+                primAttrs[2].uv0
+            };
             
-            vsOutput.uv1 = 
-                primAttrs[0].uv1 * barycentrics.x +
-                primAttrs[1].uv1 * barycentrics.y +
-                primAttrs[2].uv1 * barycentrics.z;
+            Derivs derivs0 = InterpolateWithDerivs(uvs0, barycentricDerivs);
+
+            float2 uvs1[3] = {
+                primAttrs[0].uv1,
+                primAttrs[1].uv1,
+                primAttrs[2].uv1
+            };
+            Derivs derivs1 = InterpolateWithDerivs(uvs1, barycentricDerivs);
             
             vsOutput.normal = mul(WorldIT, normal).xyz;
             vsOutput.tangent = float4(mul(WorldIT, tangent.xyz).xyz, tangent.w);
+            vsOutput.uv0 = derivs0.uv;
+            vsOutput.uv0_dx = derivs0.uv_dx;
+            vsOutput.uv0_dy = derivs0.uv_dy;
+            vsOutput.uv1 = derivs1.uv;
+            vsOutput.uv1_dx = derivs1.uv_dx;
+            vsOutput.uv1_dy = derivs1.uv_dy;
             
             MaterialProperties MatProps = GetMaterialProperties(vsOutput);
             SceneColorUAV[DTid] = float4(MatProps.Emissive, 1.0f);
@@ -337,11 +442,5 @@ void main( uint2 DTid : SV_DispatchThreadID )
             GBufferCUAV[DTid] = float4(0, 0, 0, 0);
             GBufferDUAV[DTid] = float4(0, 0, 0, 0);
         }
-        
-        //mrt.Color = float4(MatProps.Emissive, 1.0f);
-        //mrt.GBufferA = float4(MatProps.Normal, 1.0);
-        //mrt.GBufferB = MatProps.BaseColor;
-        //mrt.GBufferC = float4(MatProps.Metallic, MatProps.Roughness, MatProps.Occlusion, 0.f);
-        //mrt.GBufferD.a = ViewMode;
     }
 }

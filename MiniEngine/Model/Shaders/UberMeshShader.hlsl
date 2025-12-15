@@ -63,7 +63,7 @@ void main(
             if (mlet.psoFlags & PSO_ALPHA_TEST)
             {
                 uint PackedUV = geometryData.Load(vertexOffset);
-                DecodeR16G16FLOATToFloat2(PackedUV);
+                uv0 = DecodeR16G16FLOATToFloat2(PackedUV);
                 vertexOffset += 4;
             }
 
