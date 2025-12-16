@@ -308,8 +308,7 @@ PrimitiveAttributes LoadPrimitiveAttributes(
         attr.uv1 = attr.uv0;
     }
 
-    // TODO: skinning
-    // TODO: 采样计算导数
+    // TODO: skinning normal and tangent
     
     return attr;
 }

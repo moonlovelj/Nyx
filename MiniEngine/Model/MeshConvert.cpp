@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -430,7 +430,17 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
     dvbw.Write( position.get(), "POSITION", 0, vertexCount );
     if (material.alphaTest)
     {
-        dvbw.Write(material.baseColorUV ? texcoord1.get() : texcoord0.get(), "TEXCOORD", 0, vertexCount);
+        const XMFLOAT2* texcoordData = material.baseColorUV ? texcoord1.get() : texcoord0.get();
+        if (!texcoordData)
+        {
+            //TODO 暂时特殊处理，按理说alphatest的材质一定会有UV的
+			std::vector<XMFLOAT2> tempUVs(vertexCount, XMFLOAT2(0.0f, 0.0f));
+            dvbw.Write(tempUVs.data(), "TEXCOORD", 0, vertexCount);
+        }
+        else
+        {
+            dvbw.Write(texcoordData, "TEXCOORD", 0, vertexCount);
+        }
     }
     if (HasSkin)
     {

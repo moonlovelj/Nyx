@@ -9,7 +9,7 @@
 struct VSOutput
 {
     float4 position : SV_POSITION;
-    float2 uv0 : TEXCOORD0;
+    //float2 uv0 : TEXCOORD0;
     nointerpolation uint commandIndex : TEXCOORD1;
 };
 
@@ -59,42 +59,42 @@ void main(
             float4 position = float4(asfloat(geometryData.Load3(vertexOffset)), 1.0);
             vertexOffset += 12;
 
-            float2 uv0 = 0;
-            if (mlet.psoFlags & PSO_ALPHA_TEST)
-            {
-                uint PackedUV = geometryData.Load(vertexOffset);
-                uv0 = DecodeR16G16FLOATToFloat2(PackedUV);
-                vertexOffset += 4;
-            }
+            //float2 uv0 = 0;
+            //if (mlet.psoFlags & PSO_ALPHA_TEST)
+            //{
+            //    uint PackedUV = geometryData.Load(vertexOffset);
+            //    uv0 = DecodeR16G16FLOATToFloat2(PackedUV);
+            //    vertexOffset += 4;
+            //}
 
             // Skinning (动态分支)
-            if (mlet.psoFlags & PSO_HAS_SKIN)
-            {
-                uint2 PackedJointIndices = geometryData.Load2(vertexOffset);
-                vertexOffset += 8;
-                uint2 PackedWeights = geometryData.Load2(vertexOffset);
-                vertexOffset += 8;
+            //if (mlet.psoFlags & PSO_HAS_SKIN)
+            //{
+            //    uint2 PackedJointIndices = geometryData.Load2(vertexOffset);
+            //    vertexOffset += 8;
+            //    uint2 PackedWeights = geometryData.Load2(vertexOffset);
+            //    vertexOffset += 8;
     
-                uint4 jointIndices = DecodeR16G16B16A16UINTToUint4(PackedJointIndices);
-                float4 jointWeights = DecodeR16G16B16A16UNORMToFloat4(PackedWeights);
+            //    uint4 jointIndices = DecodeR16G16B16A16UINTToUint4(PackedJointIndices);
+            //    float4 jointWeights = DecodeR16G16B16A16UNORMToFloat4(PackedWeights);
     
-                // I don't like this hack.  The weights should be normalized already, but something is fishy.
-                float4 weights = jointWeights / dot(jointWeights, 1);
+            //    // I don't like this hack.  The weights should be normalized already, but something is fishy.
+            //    float4 weights = jointWeights / dot(jointWeights, 1);
 
-                float4x4 skinPosMat =
-                    GetJointBufferSRV(inst.JointBase + mlet.MeshJointsIndexOffset + jointIndices.x).PosMatrix * weights.x +
-                    GetJointBufferSRV(inst.JointBase + mlet.MeshJointsIndexOffset + jointIndices.y).PosMatrix * weights.y +
-                    GetJointBufferSRV(inst.JointBase + mlet.MeshJointsIndexOffset + jointIndices.z).PosMatrix * weights.z +
-                    GetJointBufferSRV(inst.JointBase + mlet.MeshJointsIndexOffset + jointIndices.w).PosMatrix * weights.w;
+            //    float4x4 skinPosMat =
+            //        GetJointBufferSRV(inst.JointBase + mlet.MeshJointsIndexOffset + jointIndices.x).PosMatrix * weights.x +
+            //        GetJointBufferSRV(inst.JointBase + mlet.MeshJointsIndexOffset + jointIndices.y).PosMatrix * weights.y +
+            //        GetJointBufferSRV(inst.JointBase + mlet.MeshJointsIndexOffset + jointIndices.z).PosMatrix * weights.z +
+            //        GetJointBufferSRV(inst.JointBase + mlet.MeshJointsIndexOffset + jointIndices.w).PosMatrix * weights.w;
 
-                position = mul(skinPosMat, position);
-            }
+            //    position = mul(skinPosMat, position);
+            //}
 
             float4x4 WorldMatrix = meshInstance.WorldMatrix;
             float4x3 WorldIT = meshInstance.WorldIT;
             float3 worldPos = mul(WorldMatrix, position).xyz;
             verts[localVertexIdx].position = mul(ViewProjMatrix, float4(worldPos, 1.0));
-            verts[localVertexIdx].uv0 = uv0;
+            //verts[localVertexIdx].uv0 = uv0;
             verts[localVertexIdx].commandIndex = commandIndex;
         }
     }
