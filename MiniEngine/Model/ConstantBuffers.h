@@ -19,15 +19,16 @@
 
 struct InstanceConstants
 {
-    uint32_t MeshConstantsBase;
-    uint32_t JointBase;
+	float BoundingSphere[4]; // Local space bounding sphere
+    uint32_t MeshBufferIdx;
+    uint32_t JointBufferIdx;
 };
 
 // instance 粒度
 struct MeshConstants
 {
-    Math::Matrix4 World;         // Object to world
-    Math::Matrix3 WorldIT;       // Object normal to world normal
+    Math::Matrix4 World;         // Local to world
+    Math::Matrix3 WorldIT;       // Local normal to world normal
 };
 
 // The order of textures for PBR materials

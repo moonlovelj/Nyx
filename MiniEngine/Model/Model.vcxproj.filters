@@ -99,6 +99,9 @@
     <ClCompile Include="CommandBucketer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="GeometryStreaming.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
@@ -165,6 +168,13 @@
     <ClInclude Include="CommandBucketer.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="MeshletStructs.h" />
+    <ClInclude Include="GeometryStreaming.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="StructsIO.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="Shaders\Common.hlsli">
@@ -208,6 +218,15 @@
       <Filter>Shaders</Filter>
     </None>
     <None Include="Shaders\SharedHeader.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="Shaders\CullCommon.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="Shaders\WaveUtil.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="Shaders\GeometryCommon.hlsli">
       <Filter>Shaders</Filter>
     </None>
   </ItemGroup>
@@ -336,6 +355,36 @@
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\ResolveVBufferToGBufferCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\CullPass1CS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\InstanceCullPass0CS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\InstanceCullCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\InstanceCullPass1CS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\DAGCullCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\DAGCullPass0CS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\DAGCullPass1CS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\UberMeshShaderPass0.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\UberMeshShaderPass1.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\FreezeCullCS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>

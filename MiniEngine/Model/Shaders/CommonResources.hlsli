@@ -2,6 +2,8 @@
 #define __COMMON_RESOURCES_HLSLI__
 
 #include "BindlessIndices.hlsli"
+#include "../StructsIO.h"
+#include "../MeshletStructs.h"
 
 #define PSO_HAS_POSITION      0x0001
 #define PSO_HAS_NORMAL        0x0002
@@ -68,8 +70,9 @@ cbuffer CB4 : register(b5)
 
 struct InstanceConstant
 {
-    uint MeshConstantsBase;
-    uint JointBase;
+    float4 BoundingSphere; // Local space bounding sphere
+    uint MeshBufferIdx;
+    uint JointBufferIdx;
 };
 
 struct MeshletConstant
@@ -314,6 +317,54 @@ ByteAddressBuffer GetIndirectCullingResultsCounterBufferSRV(uint bufferOffset)
     return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_INDIRECT_CULLING_RESULTS_COUNTER_BASE + bufferOffset];
 }
 
+ByteAddressBuffer GetTaskQueueBufferSRV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_TASK_QUEUE_BUFFER];
+}
+
+ByteAddressBuffer GetTaskQueueCounterBufferSRV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_TASK_QUEUE_COUNTER_BUFFER];
+}
+
+StructuredBuffer<HierarchyNode> GetHierarchyNodesBufferSRV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_HIERARCHY_NODES_BUFFER];
+}
+
+ByteAddressBuffer GetGeometryChunksBufferSRV(uint chunkOffset)
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_GEOMETRY_CHUNK_DATA_BUFFER + chunkOffset];
+}
+
+StructuredBuffer<GroupDataLocation> GetGroupDataLocationBufferSRV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_GROUP_DATA_LOCATION_BUFFER];
+}
+
+StructuredBuffer<VisibleMeshletPayload> GetVisibleMeshletBufferSRV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_VISIBLE_MESHLET_BUFFER];
+}
+
+VisibleMeshletPayload GetVisibleMeshletPayload(uint index)
+{
+    return GetVisibleMeshletBufferSRV()[index];
+}
+
+StructuredBuffer<DrawItem> GetPotentialDrawItemBufferSRV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_POTENTIAL_DRAW_ITEM_BUFFER];
+}
+
+StructuredBuffer<QueueState> GetTaskQueueStateBufferSRV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_TASK_QUEUE_STATE_BUFFER];
+}
+
+
+// ------------------------
+// ------------------------
 // UAV
 RWTexture2D<float4> GetSceneColorUAV()
 {
@@ -362,9 +413,34 @@ RWByteAddressBuffer GetLightGridBitMaskUAV()
     return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_LIGHT_GRID_MASK];
 }
 
-RWStructuredBuffer<DispatchMeshCommand> GetDispatchMeshBufferUAV(uint bufferOffset)
+RWStructuredBuffer<DispatchMeshCommand> GetDispatchMeshBufferUAV()
 {
-    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_INDIRECT_DISPATCH_MESHES_BASE + bufferOffset];
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_INDIRECT_DISPATCH_MESHES_BASE];
+}
+
+globallycoherent RWStructuredBuffer<QueueState> GetTaskQueueStateBufferUAV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_TASK_QUEUE_STATE_BUFFER];
+}
+
+globallycoherent RWByteAddressBuffer GetTaskQueueBufferUAV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_TASK_QUEUE_BUFFER];
+}
+
+globallycoherent RWByteAddressBuffer GetMeshletBatchBufferUAV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_MESHLET_BATCH_BUFFER];
+}
+
+globallycoherent RWByteAddressBuffer GetCandidateMeshletBufferUAV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_CANDIDATE_MESHLET_BUFFER];
+}
+
+RWStructuredBuffer<VisibleMeshletPayload> GetVisibleMeshletBufferUAV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_VISIBLE_MESHLET_BUFFER];
 }
 
 #endif

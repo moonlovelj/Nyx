@@ -56,7 +56,7 @@ namespace Renderer
 	struct IndirectCommand
 	{
 		UINT InstanceIndex;
-		UINT MeshletIndex;
+		UINT RootNodeIndex;
 	};
 
 	struct DispatchMeshCommand
@@ -136,6 +136,10 @@ namespace Renderer
         Renderer::PsoIdx psoIdx, 
         CullingStage cullingStage);
 
+	void InstanceCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, uint32_t cullPassIdx);
+	void DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, const BaseCamera* camera,
+		const D3D12_VIEWPORT& viewport, uint32_t cullPassIdx);
+
     uint32_t GetBindlessResourcesBaseOffset();
 	void SetBindlessResourceDescriptor(uint32_t bindlessIndex, const D3D12_CPU_DESCRIPTOR_HANDLE& handle);
 
@@ -182,13 +186,13 @@ namespace Renderer
         const Frustum& GetViewFrustum() const { return m_Camera->GetViewSpaceFrustum(); }
         const Matrix4& GetViewMatrix() const { return m_Camera->GetViewMatrix(); }
 
-        void AddMesh( const Mesh& mesh, float distance,
-            D3D12_GPU_VIRTUAL_ADDRESS meshCBV,
-            D3D12_GPU_VIRTUAL_ADDRESS materialCBV,
-            D3D12_GPU_VIRTUAL_ADDRESS bufferPtr,
-            D3D12_GPU_VIRTUAL_ADDRESS meshJoints,
-			const IndirectArgsBuffer& indirectArgsBuffer,
-			uint32_t indirectArgsOffset);
+   //     void AddMesh( const Mesh& mesh, float distance,
+   //         D3D12_GPU_VIRTUAL_ADDRESS meshCBV,
+   //         D3D12_GPU_VIRTUAL_ADDRESS materialCBV,
+   //         D3D12_GPU_VIRTUAL_ADDRESS bufferPtr,
+   //         D3D12_GPU_VIRTUAL_ADDRESS meshJoints,
+			//const IndirectArgsBuffer& indirectArgsBuffer,
+			//uint32_t indirectArgsOffset);
 
         void Sort();
 

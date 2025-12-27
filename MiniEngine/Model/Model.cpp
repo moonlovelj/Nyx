@@ -26,32 +26,29 @@ using namespace Renderer;
 void Model::Destroy()
 {
     m_BoundingSphere = BoundingSphere(kZero);
-    m_DataBuffer.Destroy();
+    //m_DataBuffer.Destroy();
     m_MaterialConstants.Destroy();
-	m_MeshletConstants.Destroy();
+	//m_MeshletConstants.Destroy();
     m_NumNodes = 0;
     m_NumMeshes = 0;
-    m_MeshData = nullptr;
+    //m_MeshData = nullptr;
     m_SceneGraph = nullptr;
 }
 
 uint32_t Model::GetNumTotalDraws() const
 {
     uint32_t totalDraws = 0;
-    const uint8_t* pMesh = m_MeshData.get();
-    for (uint32_t i = 0; i < m_NumMeshes; i++)
+    for(const auto& meshPtr : m_Meshes)
     {
-        const Mesh& mesh = *(const Mesh*)pMesh;
-        totalDraws += mesh.numDraws;
-		pMesh += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
-    }
+        totalDraws += meshPtr->numDraws;
+	}
     return totalDraws;
 }
 
 void Model::Render(
     MeshSorter& sorter) const
 {
-    sorter.SetIndexBuffer({m_DataBuffer.GetGpuVirtualAddress(), (uint32_t)m_DataBuffer.GetBufferSize(), DXGI_FORMAT_R32_UINT });
+    //sorter.SetIndexBuffer({m_DataBuffer.GetGpuVirtualAddress(), (uint32_t)m_DataBuffer.GetBufferSize(), DXGI_FORMAT_R32_UINT });
 
     // Pointer to current mesh
   //  const uint8_t* pMesh = m_MeshData.get();
@@ -91,55 +88,6 @@ void Model::Render(
   //  }
 }
 
-void Model::BuildMeshletConstantsBuffer()
-{
-	const uint32_t totalDraws = GetNumTotalDraws();
-	if (totalDraws == 0) return;
-
-	std::vector<MeshletConstants> meshletConstants(totalDraws);
-	const uint8_t* pMesh = m_MeshData.get();
-	uint32_t cmdIdx = 0;
-	for (uint32_t i = 0; i < m_NumMeshes; ++i)
-	{
-		const Mesh& mesh = *(const Mesh*)pMesh;
-		const bool alphaTest = (mesh.psoFlags & PSOFlags::kAlphaTest) != 0;
-		const bool skinned = mesh.numJoints > 0;
-
-		uint32_t stride = alphaTest ? 16u : 12u;
-		if (skinned)
-			stride += 16;
-
-		for (uint32_t j = 0; j < mesh.numDraws; ++j)
-		{
-            MeshletConstants& meshletConstant = meshletConstants[cmdIdx];
-			memcpy(meshletConstant.BoundingSphere, mesh.draw[j].bounds, 16);
-            meshletConstant.VertexBufferOffset = mesh.vbOffset + mesh.draw[j].baseVertex * mesh.vbStride;
-            meshletConstant.VertexStride = mesh.vbStride;
-            meshletConstant.VertexBufferDepthOffset = mesh.vbDepthOffset + mesh.draw[j].baseVertex * stride;
-            meshletConstant.VertexDepthStride = stride;
-			meshletConstant.MeshletVerticesOffset = mesh.draw[j].meshletVertexOffset;
-			meshletConstant.MeshletPrimitivesOffset = mesh.draw[j].meshletPrimOffset;
-			meshletConstant.VertexCount = mesh.draw[j].meshletVertexCount;
-			meshletConstant.PrimitiveCount = mesh.draw[j].meshletPrimCount / 3;
-			meshletConstant.IndexBufferOffset = mesh.ibOffset + mesh.draw[j].startIndex * 4;// 索引默认32bit
-            meshletConstant.MeshJointsIndexOffset = mesh.startJoint;
-            meshletConstant.MeshConstantsIndexOffset = mesh.meshCBV;
-            meshletConstant.MaterialConstantsIndex = mesh.materialCBV;
-            meshletConstant.parentError = mesh.draw[j].parentError;
-			memcpy(meshletConstant.parentBounds, mesh.draw[j].parentBounds, 16);
-            meshletConstant.lodError = mesh.draw[j].lodError;
-			memcpy(meshletConstant.lodBounds, mesh.draw[j].lodBounds, 16);
-            meshletConstant.lodLevel = mesh.draw[j].lodLevel;
-			meshletConstant.psoFlags = mesh.psoFlags;
-
-			++cmdIdx;
-		}
-		pMesh += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
-	}
-
-    m_MeshletConstants.Create(L"Meshlet Constants GPU", totalDraws, sizeof(MeshletConstants), meshletConstants.data());
-}
-
 void ModelInstance::Render(MeshSorter& sorter) const
 {
     if (m_Model != nullptr)
@@ -148,12 +96,29 @@ void ModelInstance::Render(MeshSorter& sorter) const
     }
 }
 
+void ModelInstance::SetupInstanceData(InstanceConstants* instanceContants) const
+{
+    if (!m_Model) return;
+
+	uint32_t localInstanceIdx = 0;
+    for (const auto& meshPtr : m_Model->m_Meshes)
+    {
+        for (size_t i = 0; i < meshPtr->numDraws; i++)
+        {
+            InstanceConstants& data = instanceContants[localInstanceIdx++];
+            data.MeshBufferIdx = meshPtr->matrixIdx + m_Alloc.meshConstantBase;
+			data.JointBufferIdx = 0XFFFFFFFF;
+			std::memcpy(data.BoundingSphere, meshPtr->draw[i].boundingSphere, sizeof(float) * 4);
+        }
+    }
+}
+
 ModelInstance::ModelInstance( std::shared_ptr<const Model> sourceModel )
     : m_Model(sourceModel), m_Locator(kIdentity)
 {
     //static_assert((_alignof(MeshConstants) & 255) == 0, "CBVs need 256 byte alignment");
 
-    DestroyMeshIndirectCommands();
+    //DestroyMeshIndirectCommands();
 
     if (sourceModel == nullptr)
     {
@@ -199,7 +164,7 @@ ModelInstance::ModelInstance( std::shared_ptr<const Model> sourceModel )
 			}
 		}
 
-        CreateMeshIndirectCommands();
+        GatherDrawItems();
     }
 }
 
@@ -213,7 +178,7 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
     m_Model = sourceModel;
     m_Locator = UniformTransform(kIdentity);
 
-    DestroyMeshIndirectCommands();
+    //DestroyMeshIndirectCommands();
 
     if (sourceModel == nullptr)
     {
@@ -259,7 +224,7 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
             }
         }
 
-        CreateMeshIndirectCommands();
+        GatherDrawItems();
     }
     return *this;
 }
@@ -400,66 +365,84 @@ Math::OrientedBox ModelInstance::GetBoundingBox() const
     return m_Locator * m_Model->m_BoundingBox;
 }
 
-void ModelInstance::CreateMeshIndirectCommands()
-{
-    if (m_Model)
-    {
-        //const uint32_t totalDraws = std::max(1u, m_Model->GetNumTotalDraws());
+//void ModelInstance::CreateMeshIndirectCommands()
+//{
+  //  if (m_Model)
+  //  {
+  //      //const uint32_t totalDraws = std::max(1u, m_Model->GetNumTotalDraws());
 
-		//std::vector<GPUDriven::IndirectCommand> cmds;
-		//cmds.reserve(totalDraws);
-		//std::vector<GPUDriven::IndirectCommand> cmdsZPass;
-  //      cmdsZPass.reserve(totalDraws);
+		////std::vector<GPUDriven::IndirectCommand> cmds;
+		////cmds.reserve(totalDraws);
+		////std::vector<GPUDriven::IndirectCommand> cmdsZPass;
+  ////      cmdsZPass.reserve(totalDraws);
 
-		const uint8_t* pMesh = m_Model->m_MeshData.get();
-		uint32_t cmdIdx = 0;
-        for (uint32_t i = 0; i < m_Model->m_NumMeshes; i++)
-        {
-            const Mesh& mesh = *(const Mesh*)pMesh;
-            const bool alphaBlend = (mesh.psoFlags & PSOFlags::kAlphaBlend) == PSOFlags::kAlphaBlend;
-            const bool alphaTest = (mesh.psoFlags & PSOFlags::kAlphaTest) == PSOFlags::kAlphaTest;
-			const bool skinned = mesh.numJoints > 0;
+		//const uint8_t* pMesh = m_Model->m_MeshData.get();
+		//uint32_t cmdIdx = 0;
+  //      for (uint32_t i = 0; i < m_Model->m_NumMeshes; i++)
+  //      {
+  //          const Mesh& mesh = *(const Mesh*)pMesh;
+  //          const bool alphaBlend = (mesh.psoFlags & PSOFlags::kAlphaBlend) == PSOFlags::kAlphaBlend;
+  //          const bool alphaTest = (mesh.psoFlags & PSOFlags::kAlphaTest) == PSOFlags::kAlphaTest;
+		//	const bool skinned = mesh.numJoints > 0;
 
-            for (uint32_t j = 0; j < mesh.numDraws; j++)
-            {
-                Renderer::IndirectCommand cmd;
+  //          for (uint32_t j = 0; j < mesh.numDraws; j++)
+  //          {
+  //              Renderer::IndirectCommand cmd;
 
-                ASSERT(mesh.ibOffset%4 == 0, "Index buffer error.");
-                cmd.InstanceIndex = m_Alloc.instanceID;
-                cmd.MeshletIndex = cmdIdx;
-                //cmds.push_back(cmd);
+  //              ASSERT(mesh.ibOffset%4 == 0, "Index buffer error.");
+  //              cmd.InstanceIndex = m_Alloc.instanceID;
+  //              cmd.MeshletIndex = cmdIdx;
+  //              //cmds.push_back(cmd);
 
-                // ZPass
-				uint32_t stride = alphaTest ? 16u : 12u;
-				if (skinned)
-					stride += 16;
+  //              // ZPass
+		//		uint32_t stride = alphaTest ? 16u : 12u;
+		//		if (skinned)
+		//			stride += 16;
 
-                //cmdsZPass.push_back(cmd);
+  //              //cmdsZPass.push_back(cmd);
 
-                if (alphaBlend)
-                {
-                    Renderer::CommandBucketer::Get().AppendIndirectCommand(Renderer::PsoIdx::kPsoTransparent, cmd);
-                }
-                else
-                {
-					Renderer::CommandBucketer::Get().AppendIndirectCommand(Renderer::PsoIdx::kPsoShadow, cmd);
-					Renderer::CommandBucketer::Get().AppendIndirectCommand(Renderer::PsoIdx::kPsoMain, cmd);
-                }
-                ++cmdIdx;
-            }
-            pMesh += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
-        }
+  //              if (alphaBlend)
+  //              {
+  //                  Renderer::CommandBucketer::Get().AppendIndirectCommand(Renderer::PsoIdx::kPsoTransparent, cmd);
+  //              }
+  //              else
+  //              {
+		//			Renderer::CommandBucketer::Get().AppendIndirectCommand(Renderer::PsoIdx::kPsoShadow, cmd);
+		//			Renderer::CommandBucketer::Get().AppendIndirectCommand(Renderer::PsoIdx::kPsoMain, cmd);
+  //              }
+  //              ++cmdIdx;
+  //          }
+  //          pMesh += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
+  //      }
 
 		//m_IndirectArgsBuffer = std::make_shared<IndirectArgsBuffer>();
         //m_IndirectArgsBuffer->Create(L"Model Indirect Command", totalDraws, sizeof(GPUDriven::IndirectCommand), cmds.data());
-    }
-}
+    //}
+//}
 
-void ModelInstance::DestroyMeshIndirectCommands()
+//void ModelInstance::DestroyMeshIndirectCommands()
+//{
+//    //if (m_IndirectArgsBuffer)
+//    //{
+//    //    m_IndirectArgsBuffer->Destroy();
+//    //    m_IndirectArgsBuffer.reset();
+//    //}
+//}
+
+void ModelInstance::GatherDrawItems() const
 {
-    if (m_IndirectArgsBuffer)
+    if (m_Model)
     {
-        m_IndirectArgsBuffer->Destroy();
-        m_IndirectArgsBuffer.reset();
+		uint32_t localInstanceID = m_Alloc.instanceID * m_Model->GetNumTotalDraws();
+        for (const auto& mesh : m_Model->m_Meshes)
+        {
+            for (uint32_t i = 0; i < mesh->numDraws; i++)
+            {
+                CommandBucketer::Get().AddDrawItem({
+                     localInstanceID++,
+                     mesh->draw[i].rootNodeIndex,
+                    });
+            }
+        }
     }
 }

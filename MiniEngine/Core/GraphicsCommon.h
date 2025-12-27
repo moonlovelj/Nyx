@@ -90,5 +90,7 @@ namespace Graphics
 	extern ComputePSO g_GenerateMipsArrayLinearPSO[4];
 	extern ComputePSO g_GenerateMipsArrayGammaPSO[4];
 	extern ComputePSO g_GenerateHZBPSO;
+    extern ComputePSO g_BufferClearPSO;
+
     extern GraphicsPSO g_DownsampleDepthPSO;
 }

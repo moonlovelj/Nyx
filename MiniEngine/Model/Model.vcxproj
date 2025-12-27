@@ -91,6 +91,7 @@
   <ItemGroup>
     <ClInclude Include="Animation.h" />
     <ClInclude Include="ConstantBuffers.h" />
+    <ClInclude Include="GeometryStreaming.h" />
     <ClInclude Include="glTF.h" />
     <ClInclude Include="CommandBucketer.h" />
     <ClInclude Include="IndexOptimizePostTransform.h" />
@@ -99,6 +100,7 @@
     <ClInclude Include="LightManager.h" />
     <ClInclude Include="MeshConvert.h" />
     <ClInclude Include="MeshletBuilder.h" />
+    <ClInclude Include="MeshletStructs.h" />
     <ClInclude Include="MeshOptimizer\meshoptimizer.h" />
     <ClInclude Include="Model.h" />
     <ClInclude Include="ModelInstanceManager.h" />
@@ -107,11 +109,13 @@
     <ClInclude Include="ParticleEffects.h" />
     <ClInclude Include="Renderer.h" />
     <ClInclude Include="SponzaRenderer.h" />
+    <ClInclude Include="StructsIO.h" />
     <ClInclude Include="TextureConvert.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Animation.cpp" />
     <ClCompile Include="BuildH3D.cpp" />
+    <ClCompile Include="GeometryStreaming.cpp" />
     <ClCompile Include="glTF.cpp" />
     <ClCompile Include="CommandBucketer.cpp" />
     <ClCompile Include="IndexOptimizePostTransform.cpp" />
@@ -149,10 +153,12 @@
     <None Include="packages.config" />
     <None Include="Shaders\BindlessIndices.hlsli" />
     <None Include="Shaders\Common.hlsli" />
+    <None Include="Shaders\CullCommon.hlsli" />
     <None Include="Shaders\CullingCommon.hlsli" />
     <None Include="Shaders\DataCodec.hlsli" />
     <None Include="Shaders\FillLightGridCS.hlsli" />
     <None Include="Shaders\CommonResources.hlsli" />
+    <None Include="Shaders\GeometryCommon.hlsli" />
     <None Include="Shaders\LightGrid.hlsli" />
     <None Include="Shaders\Lighting.hlsli" />
     <None Include="Shaders\LightingCommon.hlsli" />
@@ -161,8 +167,10 @@
     <None Include="Shaders\SharedHeader.hlsli" />
     <None Include="Shaders\ViewMode.hlsli" />
     <None Include="Shaders\VSToPSCommon.hlsli" />
+    <None Include="Shaders\WaveUtil.hlsli" />
   </ItemGroup>
   <ItemGroup>
+    <FxCompile Include="Shaders\CullPass1CS.hlsl" />
     <FxCompile Include="Shaders\CutoutDepthPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
@@ -172,6 +180,9 @@
     <FxCompile Include="Shaders\CutoutDepthVS.hlsl">
       <ShaderType>Vertex</ShaderType>
     </FxCompile>
+    <FxCompile Include="Shaders\DAGCullCS.hlsl" />
+    <FxCompile Include="Shaders\DAGCullPass0CS.hlsl" />
+    <FxCompile Include="Shaders\DAGCullPass1CS.hlsl" />
     <FxCompile Include="Shaders\DefaultNoTangentNoUV1PS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
@@ -205,11 +216,7 @@
     <FxCompile Include="Shaders\DefaultVS.hlsl">
       <ShaderType>Vertex</ShaderType>
     </FxCompile>
-    <FxCompile Include="Shaders\DeferredLightingCS.hlsl">
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compute</ShaderType>
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">Compute</ShaderType>
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compute</ShaderType>
-    </FxCompile>
+    <FxCompile Include="Shaders\DeferredLightingCS.hlsl" />
     <FxCompile Include="Shaders\DepthOnlySkinVS.hlsl">
       <ShaderType>Vertex</ShaderType>
     </FxCompile>
@@ -230,6 +237,7 @@
     <FxCompile Include="Shaders\DefaultPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
+    <FxCompile Include="Shaders\FreezeCullCS.hlsl" />
     <FxCompile Include="Shaders\FrustumCullCS.hlsl" />
     <FxCompile Include="Shaders\GBufferNoTangentNoUV1PS.hlsl">
       <ShaderType>Pixel</ShaderType>
@@ -243,11 +251,10 @@
     <FxCompile Include="Shaders\GBufferPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
-    <FxCompile Include="Shaders\MeshBufferGenCS.hlsl">
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compute</ShaderType>
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">Compute</ShaderType>
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compute</ShaderType>
-    </FxCompile>
+    <FxCompile Include="Shaders\InstanceCullCS.hlsl" />
+    <FxCompile Include="Shaders\InstanceCullPass0CS.hlsl" />
+    <FxCompile Include="Shaders\InstanceCullPass1CS.hlsl" />
+    <FxCompile Include="Shaders\MeshBufferGenCS.hlsl" />
     <FxCompile Include="Shaders\ModelViewerPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
@@ -265,19 +272,19 @@
       <ShaderType>Vertex</ShaderType>
     </FxCompile>
     <FxCompile Include="Shaders\UberGBufferPS.hlsl">
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">Pixel</ShaderType>
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
+      <ShaderType>Pixel</ShaderType>
     </FxCompile>
     <FxCompile Include="Shaders\UberMeshShader.hlsl">
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Mesh</ShaderType>
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">Mesh</ShaderType>
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Mesh</ShaderType>
+      <ShaderType>Mesh</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Shaders\UberMeshShaderPass0.hlsl">
+      <ShaderType>Mesh</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Shaders\UberMeshShaderPass1.hlsl">
+      <ShaderType>Mesh</ShaderType>
     </FxCompile>
     <FxCompile Include="Shaders\VBufferPS.hlsl">
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">Pixel</ShaderType>
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
+      <ShaderType>Pixel</ShaderType>
     </FxCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

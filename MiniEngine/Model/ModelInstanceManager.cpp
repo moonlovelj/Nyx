@@ -3,6 +3,7 @@
 #include "InstanceResourceManager.h"
 #include "ConstantBuffers.h"
 #include "CommandBucketer.h"
+#include "GeometryStreaming.h"
 
 void ModelInstanceManager::Initialize(std::shared_ptr<Model> sourceModel, uint32_t instanceCount)
 {
@@ -23,7 +24,8 @@ void ModelInstanceManager::Initialize(std::shared_ptr<Model> sourceModel, uint32
 	const uint32_t gridSide = static_cast<uint32_t>(std::ceil(std::sqrt(static_cast<double>(instanceCount))));
 	const float half = (gridSide > 0) ? (static_cast<float>(gridSide - 1) * 0.5f) : 0.0f;
 
-	m_InstanceConstantsCPU.Create(L"Model Instance Constants CPU", instanceCount * sizeof(InstanceConstants));
+	const uint32_t numModelDraws = sourceModel->GetNumTotalDraws();
+	m_InstanceConstantsCPU.Create(L"Model Instance Constants CPU", instanceCount * numModelDraws * sizeof(InstanceConstants));
 	InstanceConstants* instanceConstantsCPU = (InstanceConstants*)m_InstanceConstantsCPU.Map();
 	for (uint32_t i = 0; i < instanceCount; ++i)
 	{
@@ -37,15 +39,13 @@ void ModelInstanceManager::Initialize(std::shared_ptr<Model> sourceModel, uint32
 		const float z = (static_cast<float>(row) - half) * spacing;
 
 		m_ModelInstances[i].SetPosition(Math::Vector3(x, 0.0f, z));
-
-		instanceConstantsCPU[i].MeshConstantsBase = m_ModelInstances[i].GetInstanceAllocation().meshConstantBase;
-		instanceConstantsCPU[i].JointBase = m_ModelInstances[i].GetInstanceAllocation().jointBase;
+		m_ModelInstances[i].SetupInstanceData(instanceConstantsCPU + i * numModelDraws);
 	}
 	m_InstanceConstantsCPU.Unmap();
 
 	m_InstanceConstantsGPU.Create(
 		L"Model Instance Constants GPU",
-		instanceCount,
+		instanceCount * numModelDraws,
 		sizeof(InstanceConstants),
 		m_InstanceConstantsCPU
 	);
@@ -53,15 +53,24 @@ void ModelInstanceManager::Initialize(std::shared_ptr<Model> sourceModel, uint32
 	{
 		Renderer::SetBindlessResourceDescriptor(SRV_MESH_CONSTANTS_BUFFER, InstanceResourceManager::Get().GetMeshConstantsBuffer().GetSRV());
 		Renderer::SetBindlessResourceDescriptor(SRV_JOINTS_BUFFER, InstanceResourceManager::Get().GetJointsBuffer().GetSRV());
-		Renderer::SetBindlessResourceDescriptor(SRV_VERTEX_BUFFER, sourceModel->m_DataBuffer.GetSRV());
-		Renderer::SetBindlessResourceDescriptor(SRV_INDEX_BUFFER, sourceModel->m_DataBuffer.GetSRV());
-		Renderer::SetBindlessResourceDescriptor(SRV_MESHLET_BUFFER, sourceModel->m_MeshletConstants.GetSRV());
+		//Renderer::SetBindlessResourceDescriptor(SRV_VERTEX_BUFFER, sourceModel->m_DataBuffer.GetSRV());
+		//Renderer::SetBindlessResourceDescriptor(SRV_INDEX_BUFFER, sourceModel->m_DataBuffer.GetSRV());
+		//Renderer::SetBindlessResourceDescriptor(SRV_MESHLET_BUFFER, sourceModel->m_MeshletConstants.GetSRV());
 		Renderer::SetBindlessResourceDescriptor(SRV_MATERIAL_CONSTANTS_BUFFER, sourceModel->m_MaterialConstants.GetSRV());
 		Renderer::SetBindlessResourceDescriptor(SRV_INSTANCE_CONSTANTS_BUFFER, m_InstanceConstantsGPU.GetSRV());
-		Renderer::SetBindlessResourceDescriptor(SRV_GEOMETRY_BUFFER, sourceModel->m_DataBuffer.GetSRV());
+		//Renderer::SetBindlessResourceDescriptor(SRV_GEOMETRY_BUFFER, sourceModel->m_DataBuffer.GetSRV());
 	}
 
 	Renderer::CommandBucketer::Get().FinalizeIndirectCommands();
+
+	GeometryStreaming::Initialize(
+		sourceModel->m_Nodes,
+		static_cast<uint32_t>(sourceModel->m_GroupMetadatas.size()));
+	GeometryStreaming::LoadAllGeometries(
+		sourceModel->m_StreamingFilePath,
+		sourceModel->m_GeometryBlobOffsetInFile,
+		sourceModel->m_PageMetadatas,
+		sourceModel->m_GroupMetadatas);
 }
 
 void ModelInstanceManager::Render(Renderer::MeshSorter& sorter) const
@@ -94,6 +103,7 @@ void ModelInstanceManager::Update(GraphicsContext& gfxContext, float deltaTime)
 
 void ModelInstanceManager::Cleanup()
 {
+	GeometryStreaming::Shutdown();
 	m_ModelInstances.clear();
 	InstanceResourceManager::Get().Cleanup();
 	Renderer::CommandBucketer::Get().ResetAll();

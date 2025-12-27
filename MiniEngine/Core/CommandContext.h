@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -201,6 +201,7 @@ public:
     }
 
     void ClearUAV( GpuBuffer& Target );
+    void ClearUAV(GpuBuffer& Target, UINT ClearValue);
     void ClearUAV( ColorBuffer& Target );
     void ClearColor( ColorBuffer& Target, D3D12_RECT* Rect = nullptr);
     void ClearColor(ColorBuffer& Target, float Colour[4], D3D12_RECT* Rect = nullptr);
@@ -275,7 +276,9 @@ public:
     static ComputeContext& Begin(const std::wstring& ID = L"", bool Async = false);
 
     void ClearUAV( GpuBuffer& Target );
+    void ClearUAV(GpuBuffer& Target, UINT ClearValue);
     void ClearUAV( ColorBuffer& Target );
+	void ClearBufferUAV(GpuBuffer& Dest, size_t NumBytes, UINT ClearValue);
 
     void SetRootSignature( const RootSignature& RootSig );
 

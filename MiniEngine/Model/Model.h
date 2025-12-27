@@ -22,15 +22,22 @@
 #include "../Core/TextureManager.h"
 #include "../Core/Math/BoundingBox.h"
 #include "../Core/Math/BoundingSphere.h"
+#include "MeshletStructs.h"
+#include <fstream>
 #include "ConstantBuffers.h"
 #include "InstanceResourceManager.h"
 #include <cstdint>
 #include <map>
+#include <vector>
+#include <string>
 
 
 namespace Renderer
 {
     class MeshSorter;
+
+	inline constexpr uint32_t kPageSizeInBytes = 256u * 1024u;             // 256 KB
+	inline constexpr uint32_t kChunkSizeInBytes = kPageSizeInBytes * 4u * 1024u; // 1 GB
 }
 
 //
@@ -55,44 +62,23 @@ namespace PSOFlags
 
 struct Mesh
 {
-    float    bounds[4];     // A bounding sphere
-    uint32_t vbOffset;      // BufferLocation - Buffer.GpuVirtualAddress
-    uint32_t vbSize;        // SizeInBytes
-    uint32_t vbDepthOffset; // BufferLocation - Buffer.GpuVirtualAddress
-    uint32_t vbDepthSize;   // SizeInBytes
-    uint32_t ibOffset;      // BufferLocation - Buffer.GpuVirtualAddress
-    uint32_t ibSize;        // SizeInBytes
-    uint8_t  vbStride;      // StrideInBytes
-    uint8_t  ibFormat;      // DXGI_FORMAT
-    uint16_t meshCBV;       // Index of mesh constant buffer
-    uint16_t materialCBV;   // Index of material constant buffer
-    uint16_t srvTable;      // Offset into SRV descriptor heap for textures
-    uint16_t samplerTable;  // Offset into sampler descriptor heap for samplers
-    uint16_t psoFlags;      // Flags needed to request a PSO
-    uint16_t pso;           // Index of pipeline state object
-    uint16_t numJoints;     // Number of skeleton joints when skinning
-    uint16_t startJoint;    // Flat offset to first joint index
-    uint16_t numDraws;      // Number of draw groups （包含所有 LOD 层级）
-
-    struct Draw
-    {
-        uint32_t primCount;   // Number of indices = 3 * number of triangles
-        uint32_t startIndex;  // Offset to first index in index buffer 
-        uint32_t baseVertex;  // Offset to first vertex in vertex buffer
-		uint32_t meshletVertexCount; // meshlet 顶点数量
-        uint32_t meshletVertexOffset; // meshlet 顶点缓冲偏移（字节）
-        uint32_t meshletPrimCount;   // meshlet 局部三角形数量 * 3
-		uint32_t meshletPrimOffset;    // meshlet 局部三角形偏移（字节） 
-		float    bounds[4];     // meshlet bounding sphere
-
-		// Nanite LOD 数据
-		float    parentError;               // 父层级简化误差（Infinity = 根节点）
-		float    parentBounds[4];           // 父层级包围球
-        float    lodError;	                // 当前层级简化误差
-		float    lodBounds[4];              // 当前层级包围球
-        uint32_t lodLevel;                  // 当前 LOD 层级（0 = 最精细)
-    };
-    Draw draw[1];           // Actually 1 or more draws
+	//uint16_t numJoints;     // Number of skeleton joints when skinning
+	//uint16_t startJoint;    // Flat offset to first joint index
+    uint32_t numDraws;
+    uint16_t matrixIdx;
+	uint16_t padding;
+	struct Draw
+	{
+        // 存到Group里
+		//uint16_t meshCBV;       // Index of mesh constant buffer
+		//uint16_t materialCBV;   // Index of material constant buffer
+		//uint16_t psoFlags;      // Flags needed to request a PSO
+		float boundingSphere[4];  // Local space bounding sphere
+		uint32_t rootNodeIndex; // 指向 m_Nodes 数组的根节点
+		//uint32_t groupMetadataStartIndex; // 指向 m_GroupMetadatas 数组
+		//uint32_t groupCount; // 有多少个 group
+	};
+	Draw draw[1]; 
 };
 
 struct GraphNode // 96 bytes
@@ -145,21 +131,19 @@ public:
 
     void Render(Renderer::MeshSorter& sorter) const;
 
-    void BuildMeshletConstantsBuffer();
-
     uint32_t GetNumTotalDraws() const;
 
     Math::BoundingSphere m_BoundingSphere; // Object-space bounding sphere
     Math::AxisAlignedBox m_BoundingBox;
-    ByteAddressBuffer m_DataBuffer;
+
     ByteAddressBuffer m_MaterialConstants;
-	ByteAddressBuffer m_MeshletConstants;
+
     uint32_t m_NumNodes;
     uint32_t m_NumMeshes;
     uint32_t m_NumAnimations;
 	uint32_t m_NumJoints;
 	uint32_t m_NumCameras;
-    std::unique_ptr<uint8_t[]> m_MeshData;
+
     std::unique_ptr<GraphNode[]> m_SceneGraph;
     std::vector<TextureRef> textures;
     std::unique_ptr<uint8_t[]> m_KeyFrameData;
@@ -168,6 +152,20 @@ public:
     std::unique_ptr<uint16_t[]> m_JointIndices;
 	std::unique_ptr<Math::Matrix4[]> m_JointIBMs;
 	std::unique_ptr<CameraData[]> m_Cameras;
+
+	// 逻辑 Mesh 对象
+	std::vector<Mesh*> m_Meshes;
+
+	std::vector<Renderer::GroupMetadata> m_GroupMetadatas;
+
+	std::vector<Renderer::PageMetadata> m_PageMetadatas;
+
+	// BVH 树 (需要上传到 GPU，这里暂存 CPU 端)
+	std::vector<Renderer::HierarchyNode> m_Nodes;
+
+	// 用于记录流式加载
+	std::wstring m_StreamingFilePath;
+	uint64_t m_GeometryBlobOffsetInFile = 0;
 
 protected:
     void Destroy();
@@ -178,7 +176,7 @@ class ModelInstance
 public:
     ModelInstance() {}
     ~ModelInstance() {
-        DestroyMeshIndirectCommands();
+
     }
     ModelInstance( std::shared_ptr<const Model> sourceModel );
     ModelInstance( const ModelInstance& modelInstance );
@@ -189,6 +187,7 @@ public:
 
     void Update(float deltaTime, MeshConstants* meshConstantsCPU, Joint* jointCPU);
     void Render(Renderer::MeshSorter& sorter) const;
+	void SetupInstanceData(InstanceConstants* instanceContants) const;
 
     void Resize(float newRadius);
     Math::Vector3 GetCenter() const;
@@ -212,8 +211,7 @@ public:
 	const InstanceAllocation& GetInstanceAllocation() const { return m_Alloc; }
 
 private:
-    void CreateMeshIndirectCommands();
-    void DestroyMeshIndirectCommands();
+    void GatherDrawItems() const;
 
     InstanceAllocation m_Alloc{};
 
@@ -225,6 +223,4 @@ private:
     std::vector<AnimationState> m_AnimState;    // Per-animation (not per-curve)
 
     std::map<uint32_t, std::shared_ptr<Math::Camera>> m_Cameras;
-
-	std::shared_ptr<IndirectArgsBuffer> m_IndirectArgsBuffer;
 };

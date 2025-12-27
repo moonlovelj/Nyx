@@ -40,6 +40,7 @@
 #include "CompiledShaders/GenerateMipsArrayGammaOddYCS.h"
 
 #include "CompiledShaders/GenerateHZBCS.h"
+#include "CompiledShaders/BufferClearCS.h"
 
 #include "CompiledShaders/ScreenQuadCommonVS.h"
 #include "CompiledShaders/DownsampleDepthPS.h"
@@ -131,6 +132,7 @@ namespace Graphics
 	};
 
     ComputePSO g_GenerateHZBPSO(L"GenerateHZB PSO");
+    ComputePSO g_BufferClearPSO(L"Buffer Clear PSO");
 
     GraphicsPSO g_DownsampleDepthPSO(L"DownsampleDepth PSO");
 }
@@ -325,6 +327,8 @@ void Graphics::InitializeCommonState(void)
 	CreatePSO(g_GenerateMipsArrayGammaPSO[3], g_pGenerateMipsArrayGammaOddCS);
 
     CreatePSO(g_GenerateHZBPSO, g_pGenerateHZBCS);
+
+    CreatePSO(g_BufferClearPSO, g_pBufferClearCS);
 
     g_DownsampleDepthPSO.SetRootSignature(g_CommonRS);
     g_DownsampleDepthPSO.SetRasterizerState(RasterizerTwoSided);

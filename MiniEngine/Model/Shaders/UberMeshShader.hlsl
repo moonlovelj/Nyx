@@ -1,6 +1,7 @@
 ﻿#include "Common.hlsli"
 #include "CommonResources.hlsli"
 #include "DataCodec.hlsli"
+#include "GeometryCommon.hlsli"
 
 #define MAX_VERTS 256
 #define MAX_PRIMS 128
@@ -28,18 +29,36 @@ void main(
     out indices uint3 outIndices[MAX_PRIMS],
     out primitives PrimitiveAttributes sharedPrimitives[MAX_PRIMS])
 {
-    uint commandIndex = GetIndirectCullingResultsBufferSRV(PsoIdx, gid);
-    IndirectCommand command = GetIndirectCommandsBufferSRV(PsoIdx, commandIndex);
-    MeshletConstant mlet = GetMeshletConstantSRV(command.MeshletIndex);
-    InstanceConstant inst = GetInstanceConstantSRV(command.InstanceIndex);
-    MeshConstant meshInstance = GetMeshConstantSRV(inst.MeshConstantsBase + mlet.MeshConstantsIndexOffset);
-    MaterialConstant mat = GetMaterialConstantSRV(mlet.MaterialConstantsIndex);
+#ifdef UBER_MESH_SHADER_PASS1
+    StructuredBuffer<QueueState> taskStateSRV = GetTaskQueueStateBufferSRV();
+    const uint commandStart = taskStateSRV[0].PassState[0].VisibleMeshletCount;
+#else
+    const uint commandStart = 0;
+#endif
+    uint commandIndex = gid + commandStart;
+    VisibleMeshletPayload payload = GetVisibleMeshletPayload(commandIndex);
+    InstanceConstant inst = GetInstanceConstantSRV(payload.InstanceIndex);
+    MeshConstant meshInstance = GetMeshConstantSRV(inst.MeshBufferIdx);
     
-    SetMeshOutputCounts(mlet.VertexCount, mlet.PrimitiveCount);
+    StructuredBuffer<GroupDataLocation> groupDataLocationSRV = GetGroupDataLocationBufferSRV();
+    GroupDataLocation groupDataLocation = groupDataLocationSRV[payload.GetGroupIndex()];
+    uint groupByteOffset = groupDataLocation.ByteOffset;
+    ByteAddressBuffer geometryChunksBuffer = GetGeometryChunksBufferSRV(groupDataLocation.ChunkIndex);
+    MeshletHeader meshletHeader = geometryChunksBuffer.Load<MeshletHeader>(
+        groupByteOffset + sizeof(GroupHeader) + payload.GetMeshletIndex() * sizeof(MeshletHeader));
     
-    ByteAddressBuffer geometryData = GetGeometryBufferSRV();
+    MaterialConstant mat = GetMaterialConstantSRV(meshletHeader.GetMaterialBufferIndex());
+    
+    uint vertexCount = meshletHeader.GetVertexCount();
+    uint primitiveCount = meshletHeader.GetTriangleCount();
+    SetMeshOutputCounts(vertexCount, primitiveCount);
+    
+    uint vertexByteOffset = groupByteOffset + meshletHeader.VertexOffset;
+    uint indexByteOffset = groupByteOffset + meshletHeader.TriangleOffset;
+    uint vertexStride = meshletHeader.GetVertexStride();
+    
     // --------------------------------------------------------
-    // 阶段 A: 顶点处理 (Vertex Processing)
+    // 顶点处理 (Vertex Processing)
     // --------------------------------------------------------
     
     // 每个线程最多处理两个顶点
@@ -47,16 +66,13 @@ void main(
     for (uint i = 0; i < 2; ++i)
     {
         uint localVertexIdx = gtid * 2 + i;
-        if (localVertexIdx < mlet.VertexCount)
+        if (localVertexIdx < vertexCount)
         {
-            // (Local Index -> Mesh Vertex Index)
-            uint globalVertexIdx = geometryData.Load(mlet.MeshletVerticesOffset + localVertexIdx * 4);
-
             // 顶点拉取
-            uint vertexOffset = mlet.VertexBufferDepthOffset + globalVertexIdx * mlet.VertexDepthStride;
+            uint vertexOffset = vertexByteOffset + vertexStride * localVertexIdx;
 
             // Position (总是存在)
-            float4 position = float4(asfloat(geometryData.Load3(vertexOffset)), 1.0);
+            float4 position = float4(asfloat(geometryChunksBuffer.Load3(vertexOffset)), 1.0);
             vertexOffset += 12;
 
             //float2 uv0 = 0;
@@ -82,10 +98,10 @@ void main(
             //    float4 weights = jointWeights / dot(jointWeights, 1);
 
             //    float4x4 skinPosMat =
-            //        GetJointBufferSRV(inst.JointBase + mlet.MeshJointsIndexOffset + jointIndices.x).PosMatrix * weights.x +
-            //        GetJointBufferSRV(inst.JointBase + mlet.MeshJointsIndexOffset + jointIndices.y).PosMatrix * weights.y +
-            //        GetJointBufferSRV(inst.JointBase + mlet.MeshJointsIndexOffset + jointIndices.z).PosMatrix * weights.z +
-            //        GetJointBufferSRV(inst.JointBase + mlet.MeshJointsIndexOffset + jointIndices.w).PosMatrix * weights.w;
+            //        GetJointBufferSRV(inst.JointBufferIdx + mlet.MeshJointsIndexOffset + jointIndices.x).PosMatrix * weights.x +
+            //        GetJointBufferSRV(inst.JointBufferIdx + mlet.MeshJointsIndexOffset + jointIndices.y).PosMatrix * weights.y +
+            //        GetJointBufferSRV(inst.JointBufferIdx + mlet.MeshJointsIndexOffset + jointIndices.z).PosMatrix * weights.z +
+            //        GetJointBufferSRV(inst.JointBufferIdx + mlet.MeshJointsIndexOffset + jointIndices.w).PosMatrix * weights.w;
 
             //    position = mul(skinPosMat, position);
             //}
@@ -100,18 +116,13 @@ void main(
     }
     
     // --------------------------------------------------------
-    // 阶段 B: 图元处理 (Primitive Processing)
+    // 图元处理 (Primitive Processing)
     // --------------------------------------------------------
-    if (gtid < mlet.PrimitiveCount)
+    if (gtid < primitiveCount)
     {
-        uint packedTri = geometryData.Load(mlet.MeshletPrimitivesOffset + gtid * 4);
+        uint3 triIndices = LoadAndUnpackTriangle(geometryChunksBuffer, indexByteOffset, gtid);
 
-        // 解包 (3 x 8 bits)
-        uint i0 = packedTri & 0xFF;
-        uint i1 = (packedTri >> 8) & 0xFF;
-        uint i2 = (packedTri >> 16) & 0xFF;
-
-        outIndices[gtid] = uint3(i0, i1, i2);
+        outIndices[gtid] = triIndices;
         sharedPrimitives[gtid].primitiveIndex = gtid;
     }
 }

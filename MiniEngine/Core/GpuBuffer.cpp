@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -184,6 +184,8 @@ void ByteAddressBuffer::CreateDerivedViews(void)
     if (m_UAV.ptr == D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN)
         m_UAV = AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     g_Device->CreateUnorderedAccessView( m_pResource.Get(), nullptr, &UAVDesc, m_UAV );
+
+    m_RawUAV = m_UAV;
 }
 
 void StructuredBuffer::CreateDerivedViews(void)
@@ -213,6 +215,17 @@ void StructuredBuffer::CreateDerivedViews(void)
     if (m_UAV.ptr == D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN)
         m_UAV = AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     g_Device->CreateUnorderedAccessView(m_pResource.Get(), m_CounterBuffer.GetResource(), &UAVDesc, m_UAV);
+
+	if (m_RawUAV.ptr == D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN)
+		m_RawUAV = AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+	D3D12_UNORDERED_ACCESS_VIEW_DESC RawUAVDesc = {};
+	RawUAVDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+	RawUAVDesc.Format = DXGI_FORMAT_R32_TYPELESS;
+	RawUAVDesc.Buffer.NumElements = (UINT)m_BufferSize / 4;
+	RawUAVDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+
+	g_Device->CreateUnorderedAccessView(m_pResource.Get(), nullptr, &RawUAVDesc, m_RawUAV);
 }
 
 void TypedBuffer::CreateDerivedViews(void)
@@ -237,6 +250,17 @@ void TypedBuffer::CreateDerivedViews(void)
     if (m_UAV.ptr == D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN)
         m_UAV = AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     g_Device->CreateUnorderedAccessView(m_pResource.Get(), nullptr, &UAVDesc, m_UAV);
+
+	if (m_RawUAV.ptr == D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN)
+		m_RawUAV = AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+	D3D12_UNORDERED_ACCESS_VIEW_DESC RawUAVDesc = {};
+	RawUAVDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+	RawUAVDesc.Format = DXGI_FORMAT_R32_TYPELESS;
+	RawUAVDesc.Buffer.NumElements = (UINT)m_BufferSize / 4;
+	RawUAVDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+
+	g_Device->CreateUnorderedAccessView(m_pResource.Get(), nullptr, &RawUAVDesc, m_RawUAV);
 }
 
 const D3D12_CPU_DESCRIPTOR_HANDLE& StructuredBuffer::GetCounterSRV(CommandContext& Context)

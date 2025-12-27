@@ -107,7 +107,7 @@ void main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
 
         MeshletConstant meshletConstant = GetMeshletConstantSRV(inCommand.MeshletIndex);
         InstanceConstant instanceConstant = GetInstanceConstantSRV(inCommand.InstanceIndex);
-        MeshConstant meshConstant = GetMeshConstantSRV(instanceConstant.MeshConstantsBase + meshletConstant.MeshConstantsIndexOffset);
+            MeshConstant meshConstant = GetMeshConstantSRV(instanceConstant.MeshBufferIdx + meshletConstant.MeshConstantsIndexOffset);
         float4x4 WorldMatrix = meshConstant.WorldMatrix;
 
         if (IsSphereInFrustum(WorldMatrix, meshletConstant.BoundingSphere) &&

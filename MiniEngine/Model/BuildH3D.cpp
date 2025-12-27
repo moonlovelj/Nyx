@@ -1,4 +1,4 @@
-#include "ModelH3D.h"
+﻿#include "ModelH3D.h"
 #include "ModelLoader.h"
 #include "MeshConvert.h"
 #include "TextureConvert.h"
@@ -207,7 +207,7 @@ bool ModelH3D::BuildModel(ModelData& model, const std::wstring& basePath) const
 
         BoundingSphere sphereOS;
         AxisAlignedBox boxOS;
-        Renderer::CompileMesh(model.m_Meshes, model.m_GeometryData, gltfMesh, 0, Matrix4(kIdentity), sphereOS, boxOS); 
+        Renderer::CompileMesh(model, gltfMesh, 0, Matrix4(kIdentity), sphereOS, boxOS); 
         model.m_BoundingSphere = model.m_BoundingSphere.Union(sphereOS);
         model.m_BoundingBox.AddBoundingBox(boxOS);
     }

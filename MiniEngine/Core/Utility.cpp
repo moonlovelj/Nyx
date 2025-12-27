@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -15,6 +15,7 @@
 #include "Utility.h"
 #include <string>
 #include <locale>
+#include <immintrin.h>
 
 // A faster version of memcopy that uses SSE instructions.  TODO:  Write an ARM variant if necessary.
 void SIMDMemCopy( void* __restrict _Dest, const void* __restrict _Source, size_t NumQuadwords )
@@ -134,6 +135,14 @@ void SIMDMemFill( void* __restrict _Dest, __m128 FillVector, size_t NumQuadwords
     }
 
     _mm_sfence();
+}
+
+float F16ToF32(uint32_t bits)
+{
+	// _mm_cvtph_ps 接收一个包含 8 个 half 的 __m128i，返回 4 个 float 的 __m128
+	__m128i vh = _mm_set1_epi16(static_cast<short>(bits));
+	__m128 vf = _mm_cvtph_ps(vh);
+	return _mm_cvtss_f32(vf);
 }
 
 std::wstring Utility::UTF8ToWideString( const std::string& str )

@@ -122,16 +122,16 @@ std::vector<uint32_t> LoadMaterials(Model& model,
     }
 
     // Update table offsets for each mesh
-    uint8_t* meshPtr = model.m_MeshData.get();
-    for (uint32_t i = 0; i < model.m_NumMeshes; ++i)
-    {
-        Mesh& mesh = *(Mesh*)meshPtr;
-        uint32_t offsetPair = tableOffsets[mesh.materialCBV];
-        mesh.srvTable = offsetPair & 0xFFFF;
-        mesh.samplerTable = offsetPair >> 16;
-        mesh.pso = Renderer::GetPSO(mesh.psoFlags);
-        meshPtr += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
-    }
+	//uint8_t* meshPtr = model.m_MeshData.get();
+	//for (uint32_t i = 0; i < model.m_NumMeshes; ++i)
+	//{
+	//	Mesh& mesh = *(Mesh*)meshPtr;
+	//	uint32_t offsetPair = tableOffsets[mesh.materialCBV];
+	//	mesh.srvTable = offsetPair & 0xFFFF;
+	//	mesh.samplerTable = offsetPair >> 16;
+	//	mesh.pso = Renderer::GetPSO(mesh.psoFlags);
+	//	meshPtr += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
+	//}
 
     return tableOffsets;
 }
@@ -224,22 +224,41 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
 
     std::shared_ptr<Model> model(new Model);
 
+    model->m_StreamingFilePath = miniFileName;
+	model->m_GeometryBlobOffsetInFile = header.geometryBlobOffset;
+
     model->m_NumNodes = header.numNodes;
     model->m_SceneGraph.reset(new GraphNode[header.numNodes]);
     model->m_NumMeshes = header.numMeshes;
-    model->m_MeshData.reset(new uint8_t[header.meshDataSize]);
 
-	if (header.geometrySize > 0)
-	{
-		UploadBuffer modelData;
-		modelData.Create(L"Model Data Upload", header.geometrySize);
-		inFile.read((char*)modelData.Map(), header.geometrySize);
-		modelData.Unmap();
-		model->m_DataBuffer.Create(L"Model Data", header.geometrySize, 1, modelData);
-	}
 
     inFile.read((char*)model->m_SceneGraph.get(), header.numNodes * sizeof(GraphNode));
-    inFile.read((char*)model->m_MeshData.get(), header.meshDataSize);
+
+	for (uint32_t i = 0; i < header.numMeshes; ++i)
+	{
+		// 先读固定头部，拿到 numDraws
+		Mesh tempHead{};
+		inFile.read(reinterpret_cast<char*>(&tempHead), sizeof(Mesh));
+		if (!inFile) return nullptr;
+
+		// 计算真实字节数并分配
+		const size_t meshSize = sizeof(Mesh) + sizeof(Mesh::Draw) * (tempHead.numDraws - 1);
+		Mesh* mesh = static_cast<Mesh*>(std::malloc(meshSize));
+		if (!mesh) return nullptr;
+
+		// 将已读头部复制到目标内存
+		std::memcpy(mesh, &tempHead, sizeof(Mesh));
+
+		// 读取剩余的 Draw 数组数据（如果有）
+		const size_t remaining = meshSize - sizeof(Mesh);
+		if (remaining > 0)
+		{
+			inFile.read(reinterpret_cast<char*>(mesh) + sizeof(Mesh), remaining);
+			if (!inFile) { std::free(mesh); return nullptr; }
+		}
+
+		model->m_Meshes.push_back(mesh);
+	}
 
     UploadBuffer materialConstants;
 	if (header.numMaterials > 0)
@@ -318,6 +337,39 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
         inFile.read((char*)model->m_Cameras.get(), header.numCameras * sizeof(CameraData));
     }
 
-	model->BuildMeshletConstantsBuffer();
+	// --- 读取 Cluster LOD Data ---
+	// Group Infos (目录表)
+	if (header.groupCount > 0)
+	{
+		model->m_GroupMetadatas.resize(header.groupCount);
+		inFile.read((char*)model->m_GroupMetadatas.data(), header.groupCount * sizeof(GroupMetadata));
+	}
+
+	// BVH Nodes
+	if (header.hierarchyNodeCount > 0)
+	{
+		model->m_Nodes.resize(header.hierarchyNodeCount);
+		inFile.read((char*)model->m_Nodes.data(), header.hierarchyNodeCount * sizeof(HierarchyNode));
+	}
+
+	// Page Metadatas
+    if (header.pageCount > 0)
+    {
+        model->m_PageMetadatas.resize(header.pageCount);
+        inFile.read((char*)model->m_PageMetadatas.data(), header.pageCount * sizeof(PageMetadata));
+	}
+
+	// Geometry Blob
+	// 关键：不读取到内存！只记录文件偏移。
+	// 流式系统会在运行时根据 m_GroupInfos[i].OffsetInGlobalBuffer 这里的偏移去读取文件
+
+	// 如果一定要一次性读取（小场景），可以加个开关
+
+	if (header.geometryBlobSize > 0) 
+    {
+		//model->m_GlobalGeometryBlob.resize(header.geometryBlobSize);
+		//inFile.read((char*)model->m_GlobalGeometryBlob.data(), header.geometryBlobSize);
+	}
+
     return model;
 }

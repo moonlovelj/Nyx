@@ -24,7 +24,7 @@
 
 namespace glTF { class Asset; struct Mesh; }
 
-#define CURRENT_MINI_FILE_VERSION 16
+#define CURRENT_MINI_FILE_VERSION 19
 
 namespace Renderer
 {
@@ -53,7 +53,12 @@ namespace Renderer
     {
         BoundingSphere m_BoundingSphere;
         AxisAlignedBox m_BoundingBox;
-        std::vector<unsigned char> m_GeometryData;
+
+		std::vector<uint8_t> m_GlobalGeometryBlob; // 巨大的几何数据 Blob
+		std::vector<GroupMetadata> m_GroupInfos;
+		std::vector<HierarchyNode> m_Nodes;
+		std::vector<PageMetadata> m_Pages;
+
         std::vector<unsigned char> m_AnimationKeyFrameData;
         std::vector<AnimationCurve> m_AnimationCurves;
         std::vector<AnimationSet> m_Animations;
@@ -75,10 +80,15 @@ namespace Renderer
         uint32_t numNodes;
         uint32_t numMeshes;
         uint32_t numMaterials;
-        uint32_t meshDataSize;
         uint32_t numTextures;
+
+		uint64_t geometryBlobOffset;
+		uint64_t geometryBlobSize;
+		uint32_t groupCount;
+		uint32_t hierarchyNodeCount;
+        uint32_t pageCount;
+
         uint32_t stringTableSize;
-        uint32_t geometrySize;
         uint32_t keyFrameDataSize;      // Animation data
         uint32_t numAnimationCurves;
         uint32_t numAnimations;
@@ -90,13 +100,12 @@ namespace Renderer
     };
 
     void CompileMesh(
-        std::vector<Mesh*>& meshList,
-        std::vector<unsigned char>& bufferMemory,
-        glTF::Mesh& srcMesh,
-        uint32_t matrixIdx,
-        const Matrix4& localToObject,
-        Math::BoundingSphere& boundingSphere,
-        Math::AxisAlignedBox& boundingBox
+		ModelData& modelData,
+		glTF::Mesh& srcMesh,
+		uint32_t matrixIdx,
+		const Matrix4& localToObject,
+		Math::BoundingSphere& boundingSphere,
+		Math::AxisAlignedBox& boundingBox
     );
 
     bool BuildModel( ModelData& model, const glTF::Asset& asset, int sceneIdx = -1 );

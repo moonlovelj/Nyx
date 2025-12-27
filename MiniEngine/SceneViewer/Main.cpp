@@ -192,7 +192,7 @@ void SceneViewer::Startup( void )
 
     std::wstring gltfFileName;
 
-    bool forceRebuild = false;
+    bool forceRebuild = true;
     uint32_t rebuildValue;
     if (CommandLineArgs::GetInteger(L"rebuild", rebuildValue))
         forceRebuild = rebuildValue != 0;
@@ -202,10 +202,12 @@ void SceneViewer::Startup( void )
         //auto model = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
 		//m_ModelInst = Renderer::LoadModel(L"Assets/old_federal_building/scene.gltf", forceRebuild);
 		//m_ModelInst = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
-		auto model = Renderer::LoadModel(L"Assets/DamagedHelmet/glTF/DamagedHelmet.gltf", forceRebuild);
+		//auto model = Renderer::LoadModel(L"Assets/DamagedHelmet/glTF/DamagedHelmet.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/AnimTest/AnimTest.gltf", forceRebuild);
-        //auto model = Renderer::LoadModel(L"Assets/lumber_mill_wood_factory_gltf/scene.gltf", forceRebuild);
+        auto model = Renderer::LoadModel(L"Assets/lumber_mill_wood_factory_gltf/scene.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/Jinx/scene.gltf", forceRebuild);
+		//auto model = Renderer::LoadModel(L"Assets/Monkey/monkey.gltf", forceRebuild);
+		//auto model = Renderer::LoadModel(L"Assets/cube/cube.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/japanese_metal_lantern_vfvjccaqx_gltf_raw/Japanese_Metal_Lantern_vfvjccaqx_Raw.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/OcclusionTest/scene.gltf", forceRebuild);
         //m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
@@ -214,7 +216,7 @@ void SceneViewer::Startup( void )
 		OrientedBox obb = ModelInstanceManager::Get().GetModelInstance(0).GetBoundingBox();
 		//OrientedBox obb = ModelInstanceManager::Get().GetModelInstance(0).GetBoundingBox();
         float modelRadius = Length(obb.GetDimensions()) * 0.5f;
-		const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 0.5f, 0.0f, 0.0f);
+		const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 2.5f, 0.0f, 0.0f);
 		m_Camera.SetEyeAtUp(eye, obb.GetCenter(), Vector3(kYUnitVector));
 		//const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 10.f, modelRadius * 10.f, modelRadius * 10.f);
 		//m_Camera.SetEyeAtUp(eye, Vector3(-modelRadius * 10.f, 0, -modelRadius * 10.f), Vector3(kYUnitVector));
@@ -448,16 +450,19 @@ void SceneViewer::RenderScene( void )
                 gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_READ);
 				gfxContext.ClearColor(g_VisibilityBuffer);
                 sorter.RenderMeshes(MeshSorter::kVBuffer, gfxContext, globals);
-                Renderer::GetCurrentHZB().GenerateHZB(gfxContext, g_SceneDepthBuffer);
             }
 
             {
-				//gfxContext.ClearColor(g_GBufferA);
-				//gfxContext.ClearColor(g_GBufferB);
-				//gfxContext.ClearColor(g_GBufferC);
-				//gfxContext.ClearColor(g_GBufferD);
+				gfxContext.TransitionResource(g_GBufferA, D3D12_RESOURCE_STATE_RENDER_TARGET);
+				gfxContext.TransitionResource(g_GBufferB, D3D12_RESOURCE_STATE_RENDER_TARGET);
+				gfxContext.TransitionResource(g_GBufferC, D3D12_RESOURCE_STATE_RENDER_TARGET);
+				gfxContext.TransitionResource(g_GBufferD, D3D12_RESOURCE_STATE_RENDER_TARGET);
+				gfxContext.ClearColor(g_GBufferA);
+				gfxContext.ClearColor(g_GBufferB);
+				gfxContext.ClearColor(g_GBufferC);
+				gfxContext.ClearColor(g_GBufferD);
 
-                Renderer::ResolveVBufferToGBuffer(gfxContext, globals);
+				Renderer::ResolveVBufferToGBuffer(gfxContext, globals);
             }
 
             {

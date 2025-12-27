@@ -249,6 +249,7 @@
     <FxCompile Include="Shaders\BloomExtractAndDownsampleLdrCS.hlsl" />
     <FxCompile Include="Shaders\BlurCS.hlsl" />
     <FxCompile Include="Shaders\BoundNeighborhoodCS.hlsl" />
+    <FxCompile Include="Shaders\BufferClearCS.hlsl" />
     <FxCompile Include="Shaders\BufferCopyPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>

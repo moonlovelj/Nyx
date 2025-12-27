@@ -2,6 +2,9 @@
 #include "CommonResources.hlsli"
 #include "DataCodec.hlsli"
 #include "ViewMode.hlsli"
+#include "../MeshletStructs.h"
+#include "../StructsIO.h"
+#include "GeometryCommon.hlsli"
 
 struct VSOutput
 {
@@ -60,16 +63,17 @@ float4 SampleTextureWithDerivs(
     return texture.SampleGrad(texSampler, uv, uv_dx, uv_dy);
 }
 
-float3 ComputeNormal(VSOutput vsOutput, Texture2D<float4> NormalTexture, SamplerState NormalSampler)
+float3 ComputeNormal(VSOutput vsOutput, Texture2D<float4> NormalTexture, 
+    SamplerState NormalSampler, MeshletHeader meshletHeader)
 {
-    MeshletConstant meshletConstant = GetMeshletConstantSRV(vsOutput.meshletIndex);
-    MaterialConstant materilConstant = GetMaterialConstantSRV(meshletConstant.MaterialConstantsIndex);
+    MaterialConstant materilConstant = GetMaterialConstantSRV(meshletHeader.GetMaterialBufferIndex());
+    uint psoFlags = meshletHeader.GetPSOFlags();
     float normalTextureScale = materilConstant.normalTextureScale;
     uint flags = materilConstant.flags;
 
     float3 normal = normalize(vsOutput.normal);
     
-    if (!(meshletConstant.psoFlags & PSO_HAS_TANGENT))
+    if (!(psoFlags & PSO_HAS_TANGENT))
     {
         return normal;
     }
@@ -80,7 +84,7 @@ float3 ComputeNormal(VSOutput vsOutput, Texture2D<float4> NormalTexture, Sampler
     float3x3 tangentFrame = float3x3(tangent, bitangent, normal);
 
     // Read normal map and convert to SNORM (TODO:  convert all normal maps to R8G8B8A8_SNORM?)
-    normal = SampleTextureWithDerivs(vsOutput, NormalTexture, NormalSampler, NORMAL_UV_OFFSET, flags, meshletConstant.psoFlags).rgb * 2.0 - 1.0;
+    normal = SampleTextureWithDerivs(vsOutput, NormalTexture, NormalSampler, NORMAL_UV_OFFSET, flags, psoFlags).rgb * 2.0 - 1.0;
 
     // glTF spec says to normalize N before and after scaling, but that's excessive
     normal = normalize(normal * float3(normalTextureScale, normalTextureScale, 1));
@@ -99,10 +103,10 @@ struct MaterialProperties
     float3 Normal;
 };
 
-MaterialProperties GetMaterialProperties(VSOutput vsOutput)
+MaterialProperties GetMaterialProperties(VSOutput vsOutput, MeshletHeader meshletHeader)
 {
-    MeshletConstant meshletConstant = GetMeshletConstantSRV(vsOutput.meshletIndex);
-    MaterialConstant materilConstant = GetMaterialConstantSRV(meshletConstant.MaterialConstantsIndex);
+    MaterialConstant materilConstant = GetMaterialConstantSRV(meshletHeader.GetMaterialBufferIndex());
+    uint psoFlags = meshletHeader.GetPSOFlags();
     float4 baseColorFactor = materilConstant.baseColorFactor;
     float3 emissiveFactor = materilConstant.emissiveFactor;
     float normalTextureScale = materilConstant.normalTextureScale;
@@ -124,15 +128,15 @@ MaterialProperties GetMaterialProperties(VSOutput vsOutput)
     SamplerState NormalSampler = SamplerDescriptorHeap[SamplerStartIndex + 4];
 
     MaterialProperties MatProps;
-    MatProps.BaseColor = baseColorFactor * SampleTextureWithDerivs(vsOutput, BaseColorTexture, BaseColorSampler, BASECOLOR_UV_OFFSET, flags, meshletConstant.psoFlags);
+    MatProps.BaseColor = baseColorFactor * SampleTextureWithDerivs(vsOutput, BaseColorTexture, BaseColorSampler, BASECOLOR_UV_OFFSET, flags, psoFlags);
     float2 metallicRoughness = metallicRoughnessFactor *
-        SampleTextureWithDerivs(vsOutput, MetallicRoughnessTexture, MetallicRoughnessSampler, METALLICROUGHNESS_UV_OFFSET, flags, meshletConstant.psoFlags).bg;
+        SampleTextureWithDerivs(vsOutput, MetallicRoughnessTexture, MetallicRoughnessSampler, METALLICROUGHNESS_UV_OFFSET, flags, psoFlags).bg;
     metallicRoughness.y = max(0.001, metallicRoughness.y);
     MatProps.Metallic = metallicRoughness.x;
     MatProps.Roughness = metallicRoughness.y;
-    MatProps.Occlusion = SampleTextureWithDerivs(vsOutput, OcclusionTexture, OcclusionSampler, OCCLUSION_UV_OFFSET, flags, meshletConstant.psoFlags).r;
-    MatProps.Emissive = emissiveFactor * SampleTextureWithDerivs(vsOutput, EmissiveTexture, EmissiveSampler, EMISSIVE_UV_OFFSET, flags, meshletConstant.psoFlags).rgb;
-    MatProps.Normal = ComputeNormal(vsOutput, NormalTexture, NormalSampler);
+    MatProps.Occlusion = SampleTextureWithDerivs(vsOutput, OcclusionTexture, OcclusionSampler, OCCLUSION_UV_OFFSET, flags, psoFlags).r;
+    MatProps.Emissive = emissiveFactor * SampleTextureWithDerivs(vsOutput, EmissiveTexture, EmissiveSampler, EMISSIVE_UV_OFFSET, flags, psoFlags).rgb;
+    MatProps.Normal = ComputeNormal(vsOutput, NormalTexture, NormalSampler, meshletHeader);
     return MatProps;
 }
 
@@ -259,59 +263,59 @@ Derivs InterpolateWithDerivs(float2 val[3], BarycentricDerivs bary)
     return d;
 }
 
-struct PrimitiveAttributes
-{
-    float3 position;
-    float3 normal;
-    float4 tangent;
-    float2 uv0;
-    float2 uv1;
-};
+//struct PrimitiveAttributes
+//{
+//    float3 position;
+//    float3 normal;
+//    float4 tangent;
+//    float2 uv0;
+//    float2 uv1;
+//};
 
-PrimitiveAttributes LoadPrimitiveAttributes(
-    ByteAddressBuffer geometryData, 
-    uint vertexBufferOffset,
-    uint psoFlags
-    )
-{
-    PrimitiveAttributes attr;
-    attr.position = asfloat(geometryData.Load3(vertexBufferOffset));
-    vertexBufferOffset += 12;
+//PrimitiveAttributes LoadPrimitiveAttributes(
+//    ByteAddressBuffer geometryData, 
+//    uint vertexBufferOffset,
+//    uint psoFlags
+//    )
+//{
+//    PrimitiveAttributes attr;
+//    attr.position = asfloat(geometryData.Load3(vertexBufferOffset));
+//    vertexBufferOffset += 12;
     
-    uint PackedNormal = geometryData.Load(vertexBufferOffset);
-    attr.normal = DecodeR10G10B10A2UNORMToFloat4(PackedNormal).xyz * 2 - 1;
-    vertexBufferOffset += 4;
+//    uint PackedNormal = geometryData.Load(vertexBufferOffset);
+//    attr.normal = DecodeR10G10B10A2UNORMToFloat4(PackedNormal).xyz * 2 - 1;
+//    vertexBufferOffset += 4;
     
-    if (psoFlags & PSO_HAS_TANGENT)
-    {
-        uint PackedTangent = geometryData.Load(vertexBufferOffset);
-        attr.tangent = DecodeR10G10B10A2UNORMToFloat4(PackedTangent) * 2 - 1;
-        vertexBufferOffset += 4;
-    }
-    else
-    {
-        attr.tangent = float4(0, 0, 1, 1);
-    }
+//    if (psoFlags & PSO_HAS_TANGENT)
+//    {
+//        uint PackedTangent = geometryData.Load(vertexBufferOffset);
+//        attr.tangent = DecodeR10G10B10A2UNORMToFloat4(PackedTangent) * 2 - 1;
+//        vertexBufferOffset += 4;
+//    }
+//    else
+//    {
+//        attr.tangent = float4(0, 0, 1, 1);
+//    }
     
-    uint PackedUV = geometryData.Load(vertexBufferOffset);
-    vertexBufferOffset += 4;
-    attr.uv0 = DecodeR16G16FLOATToFloat2(PackedUV);
+//    uint PackedUV = geometryData.Load(vertexBufferOffset);
+//    vertexBufferOffset += 4;
+//    attr.uv0 = DecodeR16G16FLOATToFloat2(PackedUV);
     
-    if (psoFlags & PSO_HAS_UV1)
-    {
-        uint PackedUV1 = geometryData.Load(vertexBufferOffset);
-        vertexBufferOffset += 4;
-        attr.uv1 = DecodeR16G16FLOATToFloat2(PackedUV1);
-    }
-    else
-    {
-        attr.uv1 = attr.uv0;
-    }
+//    if (psoFlags & PSO_HAS_UV1)
+//    {
+//        uint PackedUV1 = geometryData.Load(vertexBufferOffset);
+//        vertexBufferOffset += 4;
+//        attr.uv1 = DecodeR16G16FLOATToFloat2(PackedUV1);
+//    }
+//    else
+//    {
+//        attr.uv1 = attr.uv0;
+//    }
 
-    // TODO: skinning normal and tangent
+//    // TODO: skinning normal and tangent
     
-    return attr;
-}
+//    return attr;
+//}
 
 [RootSignature(Renderer_RootSig)]
 [numthreads(8, 8, 1)]
@@ -333,37 +337,36 @@ void main( uint2 DTid : SV_DispatchThreadID )
             float depth = asfloat(VBufferRaw.g);
             uint primitiveIndex = VBufferRaw.r & 0x7F;
             uint commandIndex = (VBufferRaw.r >> 7);
-            IndirectCommand command = GetIndirectCommandsBufferSRV(PSO_IDX_MAIN, commandIndex);
-            vsOutput.meshletIndex = command.MeshletIndex;
-            MeshletConstant mlet = GetMeshletConstantSRV(command.MeshletIndex);
-            InstanceConstant inst = GetInstanceConstantSRV(command.InstanceIndex);
-            MaterialConstant materilConstant = GetMaterialConstantSRV(mlet.MaterialConstantsIndex);
-            MeshConstant meshInstance = GetMeshConstantSRV(inst.MeshConstantsBase + mlet.MeshConstantsIndexOffset);
-            ByteAddressBuffer geometryData = GetGeometryBufferSRV();
-            uint packedTri = geometryData.Load(mlet.MeshletPrimitivesOffset + primitiveIndex * 4);
-            uint i0 = packedTri & 0xFF;
-            uint i1 = (packedTri >> 8) & 0xFF;
-            uint i2 = (packedTri >> 16) & 0xFF;
-            uint3 localIndices = uint3(i0, i1, i2);
-            uint localVertex0 = geometryData.Load(mlet.MeshletVerticesOffset + localIndices.x * 4);
-            uint localVertex1 = geometryData.Load(mlet.MeshletVerticesOffset + localIndices.y * 4);
-            uint localVertex2 = geometryData.Load(mlet.MeshletVerticesOffset + localIndices.z * 4);
-            uint3 verticesOffset = uint3(
-                mlet.VertexBufferOffset + localVertex0 * mlet.VertexStride,
-                mlet.VertexBufferOffset + localVertex1 * mlet.VertexStride,
-                mlet.VertexBufferOffset + localVertex2 * mlet.VertexStride);
             
-            PrimitiveAttributes primAttrs[3];
-            primAttrs[0] = LoadPrimitiveAttributes(geometryData, verticesOffset.x, mlet.psoFlags);
-            primAttrs[1] = LoadPrimitiveAttributes(geometryData, verticesOffset.y, mlet.psoFlags);
-            primAttrs[2] = LoadPrimitiveAttributes(geometryData, verticesOffset.z, mlet.psoFlags);
+            VisibleMeshletPayload payload = GetVisibleMeshletPayload(commandIndex);
+            InstanceConstant inst = GetInstanceConstantSRV(payload.InstanceIndex);
+            MeshConstant meshInstance = GetMeshConstantSRV(inst.MeshBufferIdx);
+    
+            StructuredBuffer<GroupDataLocation> groupDataLocationSRV = GetGroupDataLocationBufferSRV();
+            GroupDataLocation groupDataLocation = groupDataLocationSRV[payload.GetGroupIndex()];
+            uint groupByteOffset = groupDataLocation.ByteOffset;
+            ByteAddressBuffer geometryChunksBuffer = GetGeometryChunksBufferSRV(groupDataLocation.ChunkIndex);
+            MeshletHeader meshletHeader = geometryChunksBuffer.Load < MeshletHeader > (
+            groupByteOffset + sizeof(GroupHeader) + payload.GetMeshletIndex() * sizeof(MeshletHeader));
+            MaterialConstant materilConstant = GetMaterialConstantSRV(meshletHeader.GetMaterialBufferIndex());
+            uint psoFlags = meshletHeader.GetPSOFlags();
+            vsOutput.meshletIndex = payload.GetMeshletIndex();
+            
+            uint vertexByteOffset = groupByteOffset + meshletHeader.VertexOffset;
+            uint indexByteOffset = groupByteOffset + meshletHeader.TriangleOffset;
+            uint vertexStride = meshletHeader.GetVertexStride();
+            uint3 triIndices = LoadAndUnpackTriangle(geometryChunksBuffer, indexByteOffset, primitiveIndex);
+            VertexAttributes vertexAttrs[3];
+            vertexAttrs[0] = LoadVertexAttributes(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.x, psoFlags);
+            vertexAttrs[1] = LoadVertexAttributes(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.y, psoFlags);
+            vertexAttrs[2] = LoadVertexAttributes(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.z, psoFlags);
             
             float4x4 WorldMatrix = meshInstance.WorldMatrix;
             float4x3 WorldIT = meshInstance.WorldIT;
             
-            float4 localPosition0 = float4(primAttrs[0].position, 1.0);
-            float4 localPosition1 = float4(primAttrs[1].position, 1.0);
-            float4 localPosition2 = float4(primAttrs[2].position, 1.0);
+            float4 localPosition0 = float4(vertexAttrs[0].position, 1.0);
+            float4 localPosition1 = float4(vertexAttrs[1].position, 1.0);
+            float4 localPosition2 = float4(vertexAttrs[2].position, 1.0);
             float3 worldPos[3];
             worldPos[0] = mul(WorldMatrix, localPosition0).xyz;
             worldPos[1] = mul(WorldMatrix, localPosition1).xyz;
@@ -373,31 +376,31 @@ void main( uint2 DTid : SV_DispatchThreadID )
                 ViewProjMatrix, float2(ViewportWidth, ViewportHeight));
 
             float4 normals[3] = {
-                float4(primAttrs[0].normal, 0),
-                float4(primAttrs[1].normal, 0),
-                float4(primAttrs[2].normal, 0)
+                float4(vertexAttrs[0].normal, 0),
+                float4(vertexAttrs[1].normal, 0),
+                float4(vertexAttrs[2].normal, 0)
             };
             float3 normal = InterpolateOnly(normals, barycentricDerivs).xyz;
 
             float4 tangents[3] = {
-                primAttrs[0].tangent,
-                primAttrs[1].tangent,
-                primAttrs[2].tangent
+                vertexAttrs[0].tangent,
+                vertexAttrs[1].tangent,
+                vertexAttrs[2].tangent
             };
             
             float4 tangent = InterpolateOnly(tangents, barycentricDerivs);
             float2 uvs0[3] = {
-                primAttrs[0].uv0,
-                primAttrs[1].uv0,
-                primAttrs[2].uv0
+                vertexAttrs[0].uv0,
+                vertexAttrs[1].uv0,
+                vertexAttrs[2].uv0
             };
             
             Derivs derivs0 = InterpolateWithDerivs(uvs0, barycentricDerivs);
 
             float2 uvs1[3] = {
-                primAttrs[0].uv1,
-                primAttrs[1].uv1,
-                primAttrs[2].uv1
+                vertexAttrs[0].uv1,
+                vertexAttrs[1].uv1,
+                vertexAttrs[2].uv1
             };
             Derivs derivs1 = InterpolateWithDerivs(uvs1, barycentricDerivs);
             
@@ -410,7 +413,7 @@ void main( uint2 DTid : SV_DispatchThreadID )
             vsOutput.uv1_dx = derivs1.uv_dx;
             vsOutput.uv1_dy = derivs1.uv_dy;
             
-            MaterialProperties MatProps = GetMaterialProperties(vsOutput);
+            MaterialProperties MatProps = GetMaterialProperties(vsOutput, meshletHeader);
             SceneColorUAV[DTid] = float4(MatProps.Emissive, 1.0f);
             GBufferAUAV[DTid] = float4(MatProps.Normal, 1.0);
             GBufferBUAV[DTid] = MatProps.BaseColor;
@@ -418,7 +421,7 @@ void main( uint2 DTid : SV_DispatchThreadID )
             GBufferDUAV[DTid] = float4(0, 0, 0, ViewMode);
             if (ViewMode == VIEW_MODE_SHOW_MESHLET_LOD)
             {
-                GBufferDUAV[DTid].rgb = Uint32ToColorR16G16B16(mlet.lodLevel);
+                GBufferDUAV[DTid].rgb = Uint32ToColorR16G16B16(meshletHeader.GetLODLevel());
             }
             else if (ViewMode == VIEW_MODE_SHOW_MESHLET_ID)
             {

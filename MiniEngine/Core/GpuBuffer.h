@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -41,7 +41,8 @@ public:
         const void* initialData = nullptr);
 
     const D3D12_CPU_DESCRIPTOR_HANDLE& GetUAV(void) const { return m_UAV; }
-    const D3D12_CPU_DESCRIPTOR_HANDLE& GetSRV(void) const { return m_SRV; }
+	const D3D12_CPU_DESCRIPTOR_HANDLE& GetSRV(void) const { return m_SRV; }
+	const D3D12_CPU_DESCRIPTOR_HANDLE& GetRawUAV(void) const { return m_RawUAV; }
 
     D3D12_GPU_VIRTUAL_ADDRESS RootConstantBufferView(void) const { return m_GpuVirtualAddress; }
 
@@ -72,6 +73,7 @@ protected:
         m_ResourceFlags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
         m_UAV.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
         m_SRV.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
+		m_RawUAV.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
     }
 
     D3D12_RESOURCE_DESC DescribeBuffer(void);
@@ -79,6 +81,7 @@ protected:
 
     D3D12_CPU_DESCRIPTOR_HANDLE m_UAV;
     D3D12_CPU_DESCRIPTOR_HANDLE m_SRV;
+    D3D12_CPU_DESCRIPTOR_HANDLE m_RawUAV;
 
     size_t m_BufferSize;
     uint32_t m_ElementCount;

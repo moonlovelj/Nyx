@@ -63,16 +63,29 @@ namespace Renderer
 		}
 		return Math::Vector3(x, y, z);
 	}
+
+    inline Math::Vector4 DecodeR10G10B10A2UNORMToFloat4(uint32_t packed)
+	{
+        const uint32_t r = (packed >> 0) & 0x3FF; // 10 bits
+        const uint32_t g = (packed >> 10) & 0x3FF;
+        const uint32_t b = (packed >> 20) & 0x3FF;
+        const uint32_t a = (packed >> 30) & 0x3;
+        return Math::Vector4(r / 1023.f, g / 1023.f, b / 1023.f, a / 3.f) * 2.f - Math::Vector4(1.0);
+	}
+
+	inline std::tuple<float, float> DecodeR16G16FLOATToFloat2(uint32_t packed)
+	{
+        return { F16ToF32(packed & 0xFFFF), F16ToF32(packed >> 16) };
+	}
 }
 
 void Renderer::CompileMesh(
-    std::vector<Mesh*>& meshList,
-    std::vector<unsigned char>& bufferMemory,
-    glTF::Mesh& srcMesh,
-    uint32_t matrixIdx,
-    const Matrix4& localToObject,
-    BoundingSphere& boundingSphere,
-    AxisAlignedBox& boundingBox
+	ModelData& modelData,
+	glTF::Mesh& srcMesh,
+	uint32_t matrixIdx,
+	const Matrix4& localToObject,
+	Math::BoundingSphere& boundingSphere,
+	Math::AxisAlignedBox& boundingBox
     )
 {
     // We still have a lot of work to do.  Now that we know about all of the primitives in this mesh
@@ -108,25 +121,26 @@ void Renderer::CompileMesh(
         totalIndexSize += Math::AlignUp(prim.IB->size(), 4);
     }
 
-	uint32_t curVBOffset = 0;
+    uint32_t baseGroupIndex = static_cast<uint32_t>(modelData.m_GroupInfos.size());
+    uint32_t baseNodeIndex = static_cast<uint32_t>(modelData.m_Nodes.size());
+	MeshletBuildArgs buildArgs = {};
+	buildArgs.meshBufferIndex = static_cast<uint16_t>(matrixIdx);
+	ASSERT(matrixIdx <= 0xFFFF, "Too many scene graph nodes for meshlet system.");
+
     for (auto& iter : renderMeshes)
     {
-		size_t vbSize = 0;
-		size_t vbDepthSize = 0;
-		size_t ibSize = 0;
-		size_t totalDrawsAfterSplit = 0;
-		uint32_t totalBufferSize = 0;
+        buildArgs.materialBufferIndex = iter.second[0]->materialIdx;
+        buildArgs.psoFlags = iter.second[0]->psoFlags;
 
-		size_t meshletVBSize = 0; // 存储meshlet的unique顶点，实际是顶点buffer的索引
-		size_t meshletIBSize = 0; // 存储meshlet的局部三角形索引，也就是meshletVB的索引
+		size_t numDraws = iter.second.size();
+		Mesh* mesh = (Mesh*)malloc(sizeof(Mesh) + sizeof(Mesh::Draw) * (numDraws - 1));
+        mesh->numDraws = (uint32_t)numDraws;
+		mesh->matrixIdx = static_cast<uint16_t>(matrixIdx);
 
-		// Compute local space bounding sphere for all submeshes
-		BoundingSphere collectiveSphere(kZero);
-
-        MeshletBuildSettings settings;
-        std::vector<std::vector<TempMeshlet>> preInfo;
-        for (Primitive* draw : iter.second)
+        for (size_t primitiveIndex = 0; primitiveIndex < iter.second.size(); primitiveIndex++)
         {
+            Primitive* draw = iter.second[primitiveIndex];
+			buildArgs.vertexStride = draw->vertexStride;
 			const uint32_t vertexCount = static_cast<uint32_t>(draw->VB->size() / draw->vertexStride);
 			std::vector<RawVertex> rawVertices;
             rawVertices.reserve(vertexCount);
@@ -138,6 +152,28 @@ void Renderer::CompileMesh(
 				rv.Position = Vector3(position[0], position[1], position[2]);
 				const uint32_t* normalPtr = reinterpret_cast<const uint32_t*>(vertexPtr + 12);
                 rv.Normal = DecodeNormal_R10G10B10A2(normalPtr[0]);
+                rv.VertexData.resize(draw->vertexStride);
+				std::memcpy(rv.VertexData.data(), vertexPtr, draw->vertexStride);
+                if (buildArgs.psoFlags & PSOFlags::kHasTangent)
+                {
+					uint32_t tangentOffset = 16;
+					const uint32_t* tangentPtr = reinterpret_cast<const uint32_t*>(vertexPtr + tangentOffset);
+					rv.Tangent = DecodeR10G10B10A2UNORMToFloat4(tangentPtr[0]);
+
+                }
+                if (buildArgs.psoFlags & PSOFlags::kHasUV0)
+                {
+                    uint32_t uv0Offset = 16;
+                    if (buildArgs.psoFlags & PSOFlags::kHasTangent)
+                    {
+                        uv0Offset += 4;
+                    }
+                    const uint32_t* uv0Ptr = reinterpret_cast<const uint32_t*>(vertexPtr + uv0Offset);
+					auto [unpackedU, unpackedV] = DecodeR16G16FLOATToFloat2(uv0Ptr[0]);
+					rv.UV0[0] = unpackedU;
+					rv.UV0[1] = unpackedV;
+                }
+
                 rawVertices.push_back(rv);
             }
 
@@ -155,171 +191,88 @@ void Renderer::CompileMesh(
                     indices32[i] = uint32_t(src[i]);
             }
 
-			
-            std::vector<TempMeshlet> buildResult = MeshletBuilder::Build(rawVertices, indices32, settings);
-            //Utility::Printf(L"buildResult \n");
-            //for (const auto& lod : buildResult.LODs)
-            //{
-            //    Utility::Printf(L"LOD: %d, num of meshlet: %d \n", lod.LODLevel, (uint32_t)lod.MeshletIndices.size());
-            //}
+			buildArgs.vertices = std::span<const RawVertex>(rawVertices.data(), rawVertices.size());
+			buildArgs.indices = std::span<const uint32_t>(indices32.data(), indices32.size());
+			buildArgs.baseGroupIndex = baseGroupIndex;
+			buildArgs.baseNodeIndex = baseNodeIndex;
+            // 构建
+            const auto buildResult = MeshletBuilder::Build(buildArgs);
+            // 记录根节点
+			mesh->draw[primitiveIndex].rootNodeIndex = baseNodeIndex;
 
-			// 汇总统计
-			vbSize += draw->VB->size();
-			vbDepthSize += draw->DepthVB->size();
+			mesh->draw[primitiveIndex].boundingSphere[0] = draw->m_BoundsLS.GetCenter().GetX();
+			mesh->draw[primitiveIndex].boundingSphere[1] = draw->m_BoundsLS.GetCenter().GetY();
+			mesh->draw[primitiveIndex].boundingSphere[2] = draw->m_BoundsLS.GetCenter().GetZ();
+			mesh->draw[primitiveIndex].boundingSphere[3] = draw->m_BoundsLS.GetRadius();
 
-			// 计算所有 LOD 的 IB 总大小
-            for (const auto& m : buildResult)
+            for (uint32_t buildGroupIndex = 0; buildGroupIndex < buildResult.Groups.size(); ++buildGroupIndex)
             {
-				ASSERT(m.Triangles.size() % 3 == 0);
-                ibSize += m.Triangles.size() * 4;
-				meshletVBSize += m.Vertices.size() * 4;
-				meshletIBSize += (m.Triangles.size() / 3 * 4);// 为了兼容byteaddressbuffer的4字节对齐
-            }
-				
-			collectiveSphere = collectiveSphere.Union(draw->m_BoundsLS);
-			totalDrawsAfterSplit += buildResult.size();
+				const auto& group = buildResult.Groups[buildGroupIndex];
+				const uint32_t groupSize = static_cast<uint32_t>(group.Blob.size());
+				ASSERT(groupSize % 4 == 0, "Group blob must be 4-byte aligned");
+				ASSERT(groupSize <= Renderer::kPageSizeInBytes, "Single group exceeds page size limit.");
 
-            preInfo.emplace_back(std::move(buildResult));
-        }
+                GroupMetadata metadata = group.Metadata;
+                uint64_t currentGlobalSize = modelData.m_GlobalGeometryBlob.size();
+				// ===== 计算当前和目标所属的 Page 索引 =====
+				const uint32_t currentPageNumber = static_cast<uint32_t>(modelData.m_Pages.size());
+				const uint32_t targetPageNumber = static_cast<uint32_t>(
+					(currentGlobalSize + groupSize + Renderer::kPageSizeInBytes - 1) / Renderer::kPageSizeInBytes);
 
-		ibSize = Math::AlignUp(ibSize, 4);
-        meshletIBSize = Math::AlignUp(meshletIBSize, 4);
-		totalBufferSize = (uint32_t)(vbSize + vbDepthSize + ibSize + meshletVBSize + meshletIBSize);
+				if (targetPageNumber > currentPageNumber)
+				{
+					// ===== 封装当前 Page =====
+					PageMetadata page;
+					page.StartGroupIndex = static_cast<uint32_t>(modelData.m_GroupInfos.size());
+					page.GroupCount = 1;
+					modelData.m_Pages.push_back(page);
 
-		Utility::ByteArray stagingBuffer;
-		stagingBuffer.reset(new std::vector<unsigned char>(totalBufferSize));
-		uint8_t* uploadMem = reinterpret_cast<uint8_t*>(stagingBuffer->data());
-		
-        // 分配 Mesh（使用 meshlet 粒度的 draw 数）
-        size_t numDraws = totalDrawsAfterSplit;
-        Mesh* mesh = (Mesh*)malloc(sizeof(Mesh) + sizeof(Mesh::Draw) * (numDraws - 1));
-
-        mesh->bounds[0] = collectiveSphere.GetCenter().GetX();
-        mesh->bounds[1] = collectiveSphere.GetCenter().GetY();
-        mesh->bounds[2] = collectiveSphere.GetCenter().GetZ();
-        mesh->bounds[3] = collectiveSphere.GetRadius();
-        mesh->vbOffset = (uint32_t)bufferMemory.size();
-        mesh->vbSize = (uint32_t)vbSize;
-        mesh->vbDepthOffset = (uint32_t)(bufferMemory.size() + vbSize);
-        mesh->vbDepthSize = (uint32_t)vbDepthSize;
-        mesh->ibOffset = (uint32_t)(bufferMemory.size() + vbSize + vbDepthSize);
-        mesh->ibSize = (uint32_t)ibSize;
-        mesh->vbStride = (uint8_t)iter.second[0]->vertexStride;
-        mesh->ibFormat = uint8_t(iter.second[0]->index32 ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT);
-        mesh->meshCBV = (uint16_t)matrixIdx;
-        mesh->materialCBV = iter.second[0]->materialIdx;
-        mesh->psoFlags = iter.second[0]->psoFlags;
-        mesh->pso = 0xFFFF;
-        if (srcMesh.skin >= 0)
-        {
-            mesh->numJoints = 0xFFFF;
-            mesh->startJoint = (uint16_t)srcMesh.skin;
-        }
-        else
-        {
-            mesh->numJoints = 0;
-            mesh->startJoint = 0xFFFF;
-        }
-
-        mesh->numDraws = (uint16_t)numDraws;
-
-		// ========== 填充 Draw ==========
-        uint32_t drawIdx = 0;
-        uint32_t curPrimVBOffset = 0;
-        uint32_t curVertOffset = 0;
-        uint32_t curMeshletIBOffset = 0;
-        uint32_t curIndexOffset = 0;
-        uint32_t curPrimDepthVBOffset = 0;
-		uint32_t curMeshletVBOffset = 0;
-		uint32_t curMeshletPrimOffset = 0;
-
-		for (size_t iPrim = 0; iPrim < preInfo.size(); ++iPrim)
-		{
-			const std::vector<TempMeshlet>& info = preInfo[iPrim];
-
-			for (const auto& m : info)
-			{
-				Mesh::Draw& d = mesh->draw[drawIdx];
-
-				d.primCount = (uint32_t)m.Triangles.size();
-				d.baseVertex = curVertOffset;
-				d.startIndex = curIndexOffset;
-				std::memcpy(d.bounds, m.Sphere, sizeof(d.bounds));
-                if (mesh->psoFlags & PSOFlags::kHasSkin)
-                {
-					d.bounds[3] *= 2.f; // TODO 蒙皮的包围球需要更精确计算
-                }
-
-				d.meshletVertexCount = (uint32_t)m.Vertices.size();
-                d.meshletVertexOffset = (uint32_t)(bufferMemory.size() + vbSize + vbDepthSize + ibSize + curMeshletVBOffset);
-
-				d.meshletPrimCount = (uint32_t)m.Triangles.size();
-				d.meshletPrimOffset = (uint32_t)(bufferMemory.size() + vbSize + vbDepthSize + ibSize + meshletVBSize + curMeshletPrimOffset);
-
-				// LOD 数据
-				d.parentError = m.ParentError;
-				std::memcpy(d.parentBounds, m.ParentBounds, sizeof(d.parentBounds));
-				d.lodError = m.LodError;
-				std::memcpy(d.lodBounds, m.LodBounds, sizeof(d.lodBounds));
-				d.lodLevel = m.LODLevel;
-
-				std::memcpy(uploadMem + vbSize + vbDepthSize + ibSize + curMeshletVBOffset,
-					m.Vertices.data(), m.Vertices.size() * 4);
-
-				std::vector<uint8_t> meshletTriangles8(m.Triangles.size() / 3 * 4);
-                for (size_t t = 0; t < m.Triangles.size() / 3; ++t)
-                {
-                    meshletTriangles8[t * 4 + 0] = m.Triangles[t * 3 + 0];
-                    meshletTriangles8[t * 4 + 1] = m.Triangles[t * 3 + 1];
-                    meshletTriangles8[t * 4 + 2] = m.Triangles[t * 3 + 2];
-                    meshletTriangles8[t * 4 + 3] = 0; // padding
+					metadata.OffsetInPage = 0;
+					if (currentPageNumber > 0) // 不是第一个 Page，则需要扩展全局 Blob 到 Page 边界
+                    {
+                        modelData.m_GlobalGeometryBlob.resize(
+                            Math::AlignUp(currentGlobalSize, Renderer::kPageSizeInBytes)
+                        );
+                    }
+					currentGlobalSize = modelData.m_GlobalGeometryBlob.size();
 				}
-				std::memcpy(uploadMem + vbSize + vbDepthSize + ibSize + meshletVBSize + curMeshletPrimOffset,
-                    meshletTriangles8.data(), meshletTriangles8.size());
-
-				++drawIdx;
-				curIndexOffset += (uint32_t)m.Triangles.size();
-				curMeshletVBOffset += (uint32_t)m.Vertices.size() * 4;
-                curMeshletPrimOffset += (uint32_t)m.Triangles.size() / 3 * 4;
-			}
-
-			// 拷贝 VB
-			std::memcpy(uploadMem + curPrimVBOffset,
-                iter.second[iPrim]->VB->data(), iter.second[iPrim]->VB->size());
-			curPrimVBOffset += (uint32_t)iter.second[iPrim]->VB->size();
-			curVertOffset += (uint32_t)(iter.second[iPrim]->VB->size() / iter.second[iPrim]->vertexStride);
-
-			// 拷贝 DepthVB
-			std::memcpy(uploadMem + vbSize + curPrimDepthVBOffset,
-                iter.second[iPrim]->DepthVB->data(), iter.second[iPrim]->DepthVB->size());
-			curPrimDepthVBOffset += (uint32_t)iter.second[iPrim]->DepthVB->size();
-
-			// 拷贝所有 LOD 的 IB
-            std::vector<uint32_t> meshletIndices32;
-            meshletIndices32.reserve(settings.MaxMeshletTriangles * 3);
-            for (const auto& m : info)
-			{
-                meshletIndices32.clear();
-                for (const auto& localIndex : m.Triangles)
+                else
                 {
-                    meshletIndices32.push_back(m.Vertices[localIndex]);
+					auto& page = modelData.m_Pages.back();
+					page.GroupCount++;
+					// 计算当前 Group 所属 Page 的起始位置
+					metadata.OffsetInPage = static_cast<uint32_t>(currentGlobalSize - Math::AlignDown(currentGlobalSize, kPageSizeInBytes));
                 }
-				std::memcpy(uploadMem + vbSize + vbDepthSize + curMeshletIBOffset,
-					meshletIndices32.data(), meshletIndices32.size() * 4);
-				curMeshletIBOffset += (uint32_t)meshletIndices32.size() * 4;
-			}
-		}
+				metadata.PageIndex = static_cast<uint32_t>(modelData.m_Pages.size() - 1);
+                //metadata.OffsetInGlobalBuffer = modelData.m_GlobalGeometryBlob.size();
+                modelData.m_GroupInfos.push_back(std::move(metadata));
+                modelData.m_GlobalGeometryBlob.insert(modelData.m_GlobalGeometryBlob.end(), group.Blob.begin(), group.Blob.end());
+            }
 
-        meshList.push_back(mesh);
+			baseGroupIndex += (uint32_t)buildResult.Groups.size();
+			baseNodeIndex += (uint32_t)buildResult.Hierarchy.size();
 
-		bufferMemory.insert(bufferMemory.end(), stagingBuffer->begin(), stagingBuffer->end());
+			modelData.m_Nodes.insert(modelData.m_Nodes.end(), buildResult.Hierarchy.begin(), buildResult.Hierarchy.end());
+        }
 
-		curVBOffset += totalBufferSize;
+        //if (srcMesh.skin >= 0)
+        //{
+        //    mesh->numJoints = 0xFFFF;
+        //    mesh->startJoint = (uint16_t)srcMesh.skin;
+        //}
+        //else
+        //{
+        //    mesh->numJoints = 0;
+        //    mesh->startJoint = 0xFFFF;
+        //}
+
+		modelData.m_Meshes.push_back(mesh);
     }
 }
 
 
 static uint32_t WalkGraph(
+	ModelData& modelData,
     std::vector<GraphNode>& sceneGraph,
     BoundingSphere& modelBSphere,
     AxisAlignedBox& modelBBox,
@@ -366,7 +319,7 @@ static uint32_t WalkGraph(
         {
             BoundingSphere sphereOS;
             AxisAlignedBox boxOS;
-            CompileMesh(meshList, bufferMemory, *curNode->mesh, curPos, LocalXform, sphereOS, boxOS);
+            CompileMesh(modelData, *curNode->mesh, curPos, LocalXform, sphereOS, boxOS);
             modelBSphere = modelBSphere.Union(sphereOS);
             modelBBox.AddBoundingBox(boxOS);
         }
@@ -387,7 +340,7 @@ static uint32_t WalkGraph(
         if (curNode->children.size() > 0)
         {
             thisGraphNode.hasChildren = 1;
-            nextPos = WalkGraph(sceneGraph, modelBSphere, modelBBox, meshList, bufferMemory, cameraData, curNode->children, nextPos, LocalXform);
+            nextPos = WalkGraph(modelData, sceneGraph, modelBSphere, modelBBox, meshList, bufferMemory, cameraData, curNode->children, nextPos, LocalXform);
         }
 
         // Are there more siblings?
@@ -593,15 +546,15 @@ void BuildSkins(ModelData& model, const glTF::Asset& asset)
     }
 
     // Assign skinned meshes the proper joint offset and count
-    for (Mesh* mesh : model.m_Meshes)
-    {
-        if (mesh->numJoints != 0)
-        {
-            std::pair<uint16_t, uint16_t> offsetAndCount = skinMap[mesh->startJoint];
-            mesh->startJoint = offsetAndCount.first;
-            mesh->numJoints = offsetAndCount.second;
-        }
-    }
+    //for (Mesh* mesh : model.m_Meshes)
+    //{
+    //    if (mesh->numJoints != 0)
+    //    {
+    //        std::pair<uint16_t, uint16_t> offsetAndCount = skinMap[mesh->startJoint];
+    //        mesh->startJoint = offsetAndCount.first;
+    //        mesh->numJoints = offsetAndCount.second;
+    //    }
+    //}
 }
 
 bool Renderer::BuildModel(ModelData& model, const glTF::Asset& asset, int sceneIdx)
@@ -615,11 +568,13 @@ bool Renderer::BuildModel(ModelData& model, const glTF::Asset& asset, int sceneI
         return false;
 
     // Aggregate all of the vertex and index buffers in this unified buffer
-    std::vector<unsigned char>& bufferMemory = model.m_GeometryData;
+    //std::vector<unsigned char>& bufferMemory = model.m_GeometryData;
+
+    std::vector<unsigned char> bufferMemory;
 
     model.m_BoundingSphere = BoundingSphere(kZero);
     model.m_BoundingBox = AxisAlignedBox(kZero);
-    uint32_t numNodes = WalkGraph(model.m_SceneGraph, model.m_BoundingSphere, model.m_BoundingBox, model.m_Meshes, bufferMemory, model.m_Cameras, scene->nodes, 0, Matrix4(kIdentity));
+    uint32_t numNodes = WalkGraph(model, model.m_SceneGraph, model.m_BoundingSphere, model.m_BoundingBox, model.m_Meshes, bufferMemory, model.m_Cameras, scene->nodes, 0, Matrix4(kIdentity));
     model.m_SceneGraph.resize(numNodes);
 
     BuildAnimations(model, asset);
@@ -640,14 +595,17 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data)
     header.numNodes = (uint32_t)data.m_SceneGraph.size();
     header.numMeshes = (uint32_t)data.m_Meshes.size();
     header.numMaterials = (uint32_t)data.m_MaterialConstants.size();
-    header.meshDataSize = 0;
-    for (const Mesh* mesh : data.m_Meshes)
-        header.meshDataSize += (uint32_t)sizeof(Mesh) + (mesh->numDraws - 1) * (uint32_t)sizeof(Mesh::Draw);
     header.numTextures = (uint32_t)data.m_TextureNames.size();
+
+	// Cluster 数据
+	header.geometryBlobSize = data.m_GlobalGeometryBlob.size();
+	header.groupCount = (uint32_t)data.m_GroupInfos.size();
+	header.hierarchyNodeCount = (uint32_t)data.m_Nodes.size();
+	header.pageCount = (uint32_t)data.m_Pages.size();
+
     header.stringTableSize = 0;
     for (const std::string& str : data.m_TextureNames)
         header.stringTableSize += (uint32_t)str.size() + 1;
-    header.geometrySize = (uint32_t)data.m_GeometryData.size();
     header.keyFrameDataSize = (uint32_t)data.m_AnimationKeyFrameData.size();
     header.numAnimationCurves = (uint32_t)data.m_AnimationCurves.size();
     header.numAnimations = (uint32_t)data.m_Animations.size();
@@ -665,10 +623,14 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data)
     header.maxPos[2] = data.m_BoundingBox.GetMax().GetZ();
 
     outFile.write((char*)&header, sizeof(FileHeader));
-    outFile.write((char*)data.m_GeometryData.data(), header.geometrySize);
     outFile.write((char*)data.m_SceneGraph.data(), header.numNodes * sizeof(GraphNode));
+
     for (const Mesh* mesh : data.m_Meshes)
-        outFile.write((char*)mesh, sizeof(Mesh) + (mesh->numDraws - 1) * sizeof(Mesh::Draw));
+    {
+		const size_t meshSize = sizeof(Mesh) + sizeof(Mesh::Draw) * (mesh->numDraws - 1);
+		outFile.write(reinterpret_cast<const char*>(mesh), meshSize);
+    }
+
     outFile.write((char*)data.m_MaterialConstants.data(), header.numMaterials * sizeof(MaterialConstantData));
     outFile.write((char*)data.m_MaterialTextures.data(), header.numMaterials * sizeof(MaterialTextureData));
     for (uint32_t i = 0; i < header.numTextures; ++i)
@@ -698,6 +660,52 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data)
     {
         outFile.write((char*)data.m_Cameras.data(), header.numCameras * sizeof(CameraData));
     }
+
+	// --- Cluster LOD Data ---
+	// Group Infos
+	if (header.groupCount > 0)
+		outFile.write((char*)data.m_GroupInfos.data(), header.groupCount * sizeof(GroupMetadata));
+
+	// BVH Nodes
+	if (header.hierarchyNodeCount > 0)
+		outFile.write((char*)data.m_Nodes.data(), header.hierarchyNodeCount * sizeof(HierarchyNode));
+
+	// Page Metadatas
+    if (header.pageCount > 0)
+		outFile.write((char*)data.m_Pages.data(), header.pageCount * sizeof(PageMetadata));
+
+	// 记录 blob 起始偏移
+	const std::streampos blobPos = outFile.tellp();
+	header.geometryBlobOffset = static_cast<uint64_t>(blobPos);
+
+	// Geometry Blob (放在最后，支持流式写入/读取)
+    if (header.geometryBlobSize > 0)
+    {
+		const uint32_t pageSize = Renderer::kPageSizeInBytes;
+		const size_t   blobSize = data.m_GlobalGeometryBlob.size();
+		const size_t   alignedSize = Math::AlignUp(blobSize, pageSize);
+		if (alignedSize != blobSize)
+		{
+			// 最后一页剩余空间被零填充，方便页对齐读取
+			std::vector<uint8_t> padded(alignedSize - blobSize, 0);
+			outFile.write(reinterpret_cast<const char*>(data.m_GlobalGeometryBlob.data()), blobSize);
+			outFile.write(reinterpret_cast<const char*>(padded.data()), padded.size());
+			header.geometryBlobSize = static_cast<uint64_t>(alignedSize);
+		}
+        else
+        {
+            outFile.write((char*)data.m_GlobalGeometryBlob.data(), header.geometryBlobSize);
+        }
+    }
+
+	// 回写头部，补齐 geometryBlobOffset
+	outFile.seekp(0, std::ios::beg);
+	outFile.write(reinterpret_cast<const char*>(&header), sizeof(FileHeader));
+
+    Utility::Printf("Build geometry result:\n");
+    Utility::Printf("Group count: %d\n", header.groupCount);
+	Utility::Printf("BVH node count: %d\n", header.hierarchyNodeCount);
+	Utility::Printf("Page count: %d\n", header.pageCount);
 
     return true;
 }
