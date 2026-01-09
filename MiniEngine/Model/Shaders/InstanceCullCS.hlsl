@@ -26,13 +26,15 @@ void main(uint3 DTid : SV_DispatchThreadID)
         bool bVisible = bInFrustrum;
 #ifdef INSTANCE_CULL_PASS0
         bVisible = bVisible && 
-            IsSphereNotOccluded(GetPrevSceneHZBSRV(FrameIndexMod2), PrevViewerPos, PrevViewProjMatrix, 
-                            meshConstant.WorldMatrix, instanceConstant.BoundingSphere);
+            IsSphereNotOccluded(GetPrevSceneHZBSRV(FrameIndexMod2), PrevViewerPos, 
+                            meshConstant.WorldMatrix, 
+        PrevViewMatrix, PrevProjMatrix, PrevViewProjMatrix, instanceConstant.BoundingSphere);
 #endif         
 #ifdef INSTANCE_CULL_PASS1
         bVisible = bVisible && 
-            IsSphereNotOccluded(GetCurrentSceneHZBSRV(FrameIndexMod2), ViewerPos, ViewProjMatrix, 
-                            meshConstant.WorldMatrix, instanceConstant.BoundingSphere);
+            IsSphereNotOccluded(GetCurrentSceneHZBSRV(FrameIndexMod2), ViewerPos, 
+                            meshConstant.WorldMatrix, 
+        ViewMatrix, ProjMatrix, ViewProjMatrix, instanceConstant.BoundingSphere);
 #endif
         
         uint WaveVisibleCount = WaveActiveCountBits(bVisible);

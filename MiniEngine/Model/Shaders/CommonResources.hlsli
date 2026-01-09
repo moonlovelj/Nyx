@@ -29,9 +29,11 @@ cbuffer GlobalConstants : register(b2)
     float4 ViewSpaceFrustumPlanes4;
     float4 ViewSpaceFrustumPlanes5;
     float4x4 ViewProjMatrix;
+    float4x4 ProjMatrix;
     float4x4 InverseViewProjMatrix;
     float4x4 PrevViewMatrix;
     float4x4 PrevViewProjMatrix;
+    float4x4 PrevProjMatrix;
     float4x4 SunShadowMatrix;
     float3 ViewerPos;
     float3 PrevViewerPos;
@@ -443,4 +445,8 @@ RWStructuredBuffer<VisibleMeshletPayload> GetVisibleMeshletBufferUAV()
     return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_VISIBLE_MESHLET_BUFFER];
 }
 
+RWTexture2D<uint64_t> GetVBufferUAV()
+{
+	return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_VBUFFER];
+}
 #endif

@@ -143,6 +143,8 @@ namespace Renderer
     uint32_t GetBindlessResourcesBaseOffset();
 	void SetBindlessResourceDescriptor(uint32_t bindlessIndex, const D3D12_CPU_DESCRIPTOR_HANDLE& handle);
 
+	void ExportDepth(GraphicsContext& gfxContext, const GlobalConstants& inGlobals,
+		const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor);
 	void ResolveVBufferToGBuffer(GraphicsContext& gfxContext, const GlobalConstants& inGlobals);
 
 	HierarchicalDepthBuffer& GetPrevHZB();

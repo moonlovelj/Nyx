@@ -56,15 +56,15 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
     InstanceConstant inst = GetInstanceConstantSRV(instanceIndex);
     MeshConstant meshInstance = GetMeshConstantSRV(inst.MeshBufferIdx);
     const bool bInFrustrum = IsSphereInFrustum(meshInstance.WorldMatrix, node.BoundSphere);
-    const bool bTestForLod= !TestForLod(meshInstance.WorldMatrix, ViewerPos, node.MaxParrentError, node.BoundSphere);
+    const bool bTestForLod = !TestForLod(meshInstance.WorldMatrix, ViewerPos, node.MaxParrentError, node.BoundSphere);
     bool bNotOccluded = true;
 #ifdef DAG_CULL_PASS0
-    bNotOccluded = IsSphereNotOccluded(GetPrevSceneHZBSRV(FrameIndexMod2), PrevViewerPos, PrevViewProjMatrix, 
-                            meshInstance.WorldMatrix, node.BoundSphere);
+    bNotOccluded = IsSphereNotOccluded(GetPrevSceneHZBSRV(FrameIndexMod2), PrevViewerPos, 
+                            meshInstance.WorldMatrix, PrevViewMatrix, PrevProjMatrix, PrevViewProjMatrix, node.BoundSphere);
 #endif
 #ifdef DAG_CULL_PASS1
-    bNotOccluded = IsSphereNotOccluded(GetCurrentSceneHZBSRV(FrameIndexMod2), ViewerPos, ViewProjMatrix, 
-                            meshInstance.WorldMatrix, node.BoundSphere);
+    bNotOccluded = IsSphereNotOccluded(GetCurrentSceneHZBSRV(FrameIndexMod2), ViewerPos, 
+                            meshInstance.WorldMatrix, ViewMatrix, ProjMatrix, ViewProjMatrix, node.BoundSphere);
 #endif
     
     
@@ -184,15 +184,15 @@ void ProcessClusterBatch(uint clusterBatchStartIndex, uint clusterBatchReadySize
         const bool bIsInFustrum = IsSphereInFrustum(meshInstance.WorldMatrix, meshletHeader.BoundSphere);
         bool bNotOccluded = true;
 #ifdef DAG_CULL_PASS0
-        bNotOccluded = IsSphereNotOccluded(GetPrevSceneHZBSRV(FrameIndexMod2), PrevViewerPos, PrevViewProjMatrix, 
-                            meshInstance.WorldMatrix, meshletHeader.BoundSphere);
+        bNotOccluded = IsSphereNotOccluded(GetPrevSceneHZBSRV(FrameIndexMod2), PrevViewerPos, 
+                            meshInstance.WorldMatrix, PrevViewMatrix, PrevProjMatrix, PrevViewProjMatrix, meshletHeader.BoundSphere);
 #endif
 #ifdef DAG_CULL_PASS1
-        const bool bNotOccludedPass0 = IsSphereNotOccluded(GetPrevSceneHZBSRV(FrameIndexMod2), PrevViewerPos, PrevViewProjMatrix, 
-                            meshInstance.WorldMatrix, meshletHeader.BoundSphere);
+        const bool bNotOccludedPass0 = IsSphereNotOccluded(GetPrevSceneHZBSRV(FrameIndexMod2), PrevViewerPos, 
+                            meshInstance.WorldMatrix, PrevViewMatrix, PrevProjMatrix, PrevViewProjMatrix, meshletHeader.BoundSphere);
         
-        bNotOccluded = (!bNotOccludedPass0) && IsSphereNotOccluded(GetCurrentSceneHZBSRV(FrameIndexMod2), ViewerPos, ViewProjMatrix, 
-                            meshInstance.WorldMatrix, meshletHeader.BoundSphere);
+        bNotOccluded = (!bNotOccludedPass0) && IsSphereNotOccluded(GetCurrentSceneHZBSRV(FrameIndexMod2), ViewerPos, 
+                            meshInstance.WorldMatrix, ViewMatrix, ProjMatrix, ViewProjMatrix, meshletHeader.BoundSphere);
 #endif
         
         bool bTestForLod = true;

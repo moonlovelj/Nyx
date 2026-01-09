@@ -8,18 +8,14 @@ struct VSOutput
     nointerpolation uint commandIndex : TEXCOORD1;
 };
 
-struct MRT
-{
-    uint2 VBuffer : SV_Target0;
-};
-
 [RootSignature(Renderer_RootSig)]
-MRT main(VSOutput vsOutput, uint primID : SV_PrimitiveID)
+void main(VSOutput vsOutput, uint primID : SV_PrimitiveID)
 {
-    // TODO: alpha test support
-    MRT mrt;
-    mrt.VBuffer.g = asuint(vsOutput.position.z);
-    mrt.VBuffer.r = ((vsOutput.commandIndex & 0x01FFFFFF) << 7) | (primID & 0x7F);
-    return mrt;
+    uint64_t packed = (((uint64_t) asuint(vsOutput.position.z)) << 32) | 
+    ((vsOutput.commandIndex & 0x01FFFFFF) << 7) | (primID & 0x7F);
+    
+    RWTexture2D<uint64_t> vbufferUAV = GetVBufferUAV();
+    
+    InterlockedMax(vbufferUAV[uint2(vsOutput.position.xy)], packed);
 }
 

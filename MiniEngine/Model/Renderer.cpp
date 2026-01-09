@@ -67,6 +67,8 @@
 #include "CompiledShaders/DAGCullPass0CS.h"
 #include "CompiledShaders/DAGCullPass1CS.h"
 #include "CompiledShaders/FreezeCullCS.h"
+#include "CompiledShaders/ExportDepthVS.h"
+#include "CompiledShaders/ExportDepthPS.h"
 
 #pragma warning(disable:4319) // '~': zero extending 'uint32_t' to 'uint64_t' of greater size
 
@@ -135,6 +137,8 @@ namespace Renderer
 	};
 
 	ComputePSO m_FreezeCullPSO(L"Renderer: Freeze Cull PSO");
+
+    GraphicsPSO m_ExportDepthPSO(L"Renderer: Export Depth PSO");
 }
 
 void Renderer::Initialize(void)
@@ -206,7 +210,7 @@ void Renderer::Initialize(void)
     // Mesh shader PSO
     m_UberMeshPSO[0].SetRootSignature(m_RootSig);
 	m_UberMeshPSO[0].SetRasterizerState(RasterizerTwoSided);
-    m_UberMeshPSO[0].SetDepthStencilState(DepthStateReadWrite);
+    m_UberMeshPSO[0].SetDepthStencilState(DepthStateDisabled);
 	m_UberMeshPSO[0].SetBlendState(BlendDisable);
 	DXGI_FORMAT RTVFormats[] = {
 		g_SceneColorBuffer.GetFormat(),
@@ -376,6 +380,16 @@ void Renderer::Initialize(void)
     m_FreezeCullPSO.SetRootSignature(m_RootSig);
 	m_FreezeCullPSO.SetComputeShader(g_pFreezeCullCS, sizeof(g_pFreezeCullCS));
 	m_FreezeCullPSO.Finalize();
+
+
+	m_ExportDepthPSO = m_DefaultPSO;
+	m_ExportDepthPSO.SetRasterizerState(RasterizerTwoSided);
+	m_ExportDepthPSO.SetDepthStencilState(DepthStateReadWrite);
+	m_ExportDepthPSO.SetInputLayout(0, nullptr);
+	m_ExportDepthPSO.SetVertexShader(g_pExportDepthVS, sizeof(g_pExportDepthVS));
+	m_ExportDepthPSO.SetPixelShader(g_pExportDepthPS, sizeof(g_pExportDepthPS));
+	m_ExportDepthPSO.Finalize();
+
 
     // 初始化bindless资源描述符绑定
     {
@@ -817,6 +831,24 @@ void Renderer::DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlo
 	context.Dispatch1D(2048 * 128);
 }
 
+
+void Renderer::ExportDepth(GraphicsContext& gfxContext, const GlobalConstants& inGlobals,
+	const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
+{
+	ScopedTimer _prof(L"Renderer::ExportDepth", gfxContext);
+	gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+	gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
+	gfxContext.SetRootSignature(m_RootSig);
+	gfxContext.SetPipelineState(m_ExportDepthPSO);
+
+	gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+	gfxContext.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+	gfxContext.SetDepthStencilTarget(g_SceneDepthBuffer.GetDSV());
+	gfxContext.SetViewportAndScissor(viewport, scissor);
+    gfxContext.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
+	gfxContext.Draw(3);
+}
+
 void Renderer::ResolveVBufferToGBuffer(GraphicsContext& gfxContext, const GlobalConstants& inGlobals)
 {
 	ScopedTimer _prof(L"Renderer::ResolveVBufferToGBuffer", gfxContext);
@@ -1001,7 +1033,11 @@ void MeshSorter::RenderMeshedInternal(
         }
 
         {
-            context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            ExportDepth(context, inGlobals, m_Viewport, m_Scissor);
+        }
+
+        {
+            context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             Renderer::GetCurrentHZB().GenerateHZB(context, g_SceneDepthBuffer);
         }
 
@@ -1029,8 +1065,12 @@ void MeshSorter::RenderMeshedInternal(
             context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), 0, 1);
         }
 
+		{
+            ExportDepth(context, inGlobals, m_Viewport, m_Scissor);
+		}
+
         {
-            context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             Renderer::GetCurrentHZB().GenerateHZB(context, g_SceneDepthBuffer);
         }
     }
@@ -1057,6 +1097,10 @@ void MeshSorter::RenderMeshedInternal(
 			context.SetConstants(kCommandConstants, 0, 0, psoIdx);
 			context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
 			context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, CommandBucketer::Get().GetIndirectDispatchMeshGPU(), 0, 1);
+		}
+
+		{
+			ExportDepth(context, inGlobals, m_Viewport, m_Scissor);
 		}
 
 		{
