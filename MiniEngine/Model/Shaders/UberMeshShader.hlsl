@@ -19,6 +19,15 @@ struct PrimitiveAttributes
     uint primitiveIndex : SV_PrimitiveID;
 };
 
+groupshared float4 s_ClipPositions[MAX_VERTS];
+
+groupshared uint s_VisiblePrimitiveCount;
+
+bool isFrontFacingHW(float4 ha, float4 hb, float4 hc)
+{
+    return determinant(float3x3(ha.xyw, hb.xyw, hc.xyw)) >= 0;
+}
+
 [RootSignature(Renderer_RootSig)]
 [NumThreads(MS_GROUP_SIZE, 1, 1)]
 [OutputTopology("triangle")]
@@ -29,6 +38,13 @@ void main(
     out indices uint3 outIndices[MAX_PRIMS],
     out primitives PrimitiveAttributes sharedPrimitives[MAX_PRIMS])
 {
+    if (gtid == 0)
+    {
+        s_VisiblePrimitiveCount = 0;
+    }
+    
+    GroupMemoryBarrierWithGroupSync();
+    
 #ifdef UBER_MESH_SHADER_PASS1
     StructuredBuffer<QueueState> taskStateSRV = GetTaskQueueStateBufferSRV();
     const uint commandStart = taskStateSRV[0].PassState[0].VisibleMeshletCount;
@@ -51,8 +67,7 @@ void main(
     
     uint vertexCount = meshletHeader.GetVertexCount();
     uint primitiveCount = meshletHeader.GetTriangleCount();
-    SetMeshOutputCounts(vertexCount, primitiveCount);
-    
+
     uint vertexByteOffset = groupByteOffset + meshletHeader.VertexOffset;
     uint indexByteOffset = groupByteOffset + meshletHeader.TriangleOffset;
     uint vertexStride = meshletHeader.GetVertexStride();
@@ -109,20 +124,65 @@ void main(
             float4x4 WorldMatrix = meshInstance.WorldMatrix;
             float4x3 WorldIT = meshInstance.WorldIT;
             float3 worldPos = mul(WorldMatrix, position).xyz;
-            verts[localVertexIdx].position = mul(ViewProjMatrix, float4(worldPos, 1.0));
-            //verts[localVertexIdx].uv0 = uv0;
-            verts[localVertexIdx].commandIndex = commandIndex;
+            float4 clipPos = mul(ViewProjMatrix, float4(worldPos, 1.0));
+            
+            s_ClipPositions[localVertexIdx] = clipPos;
         }
     }
+    
+    GroupMemoryBarrierWithGroupSync();
     
     // --------------------------------------------------------
     // 图元处理 (Primitive Processing)
     // --------------------------------------------------------
+    bool isVisible = false;
+    uint3 triIndices;
     if (gtid < primitiveCount)
     {
-        uint3 triIndices = LoadAndUnpackTriangle(geometryChunksBuffer, indexByteOffset, gtid);
+        triIndices = LoadAndUnpackTriangle(geometryChunksBuffer, indexByteOffset, gtid);
 
-        outIndices[gtid] = triIndices;
-        sharedPrimitives[gtid].primitiveIndex = gtid;
+        float4 h0 = s_ClipPositions[triIndices.x];
+        float4 h1 = s_ClipPositions[triIndices.y];
+        float4 h2 = s_ClipPositions[triIndices.z];
+
+        // 背面剔除
+        bool twoSided = (meshletHeader.GetPSOFlags() & PSO_TWO_SIDED) > 0;
+        isVisible = twoSided || isFrontFacingHW(h0, h1, h2);
+    }
+    
+    uint4 ballot = WaveActiveBallot(isVisible);
+    uint waveOffset = WavePrefixCountBits(isVisible);
+    uint waveTotalVisible = countbits(ballot.x) + countbits(ballot.y) + countbits(ballot.z) + countbits(ballot.w);
+
+    uint threadGroupOffset;
+    if (WaveIsFirstLane())
+    {
+        InterlockedAdd(s_VisiblePrimitiveCount, waveTotalVisible, threadGroupOffset);
+    }
+    
+    threadGroupOffset = WaveReadLaneFirst(threadGroupOffset);
+
+    GroupMemoryBarrierWithGroupSync();
+    
+    SetMeshOutputCounts(vertexCount, s_VisiblePrimitiveCount);
+    
+     // 写入顶点输出
+    [unroll]
+    for (uint j = 0; j < 2; ++j)
+    {
+        uint vIdx = gtid * 2 + j;
+        if (vIdx < vertexCount)
+        {
+            verts[vIdx].position = s_ClipPositions[vIdx];
+            verts[vIdx].commandIndex = commandIndex;
+        }
+    }
+
+    // 写入图元输出 (流压缩后的位置)
+    if (isVisible)
+    {
+        uint finalOutIndex = threadGroupOffset + waveOffset;
+        outIndices[finalOutIndex] = triIndices;
+        sharedPrimitives[finalOutIndex].primitiveIndex = gtid;
     }
 }
