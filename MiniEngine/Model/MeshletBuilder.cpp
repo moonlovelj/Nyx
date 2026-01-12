@@ -427,75 +427,114 @@ bool MeshletBuilder::SimplifyGroup(
 	std::vector<Meshlet>& outNewMeshlets,
 	float& outError)
 {
-	// 拼接组三角（原始顶点索引）
-	std::vector<uint32_t> expanded;
-	// 预估容量：每个 meshlet <= MaxMeshletTriangles
-	expanded.reserve(g.MeshletIDs.size() * buildArgs.settings.MaxMeshletTriangles * 3);
+	// 收集组内用到的所有唯一顶点索引，构建 Global->Local 映射
+	// 预估最大顶点数 = Meshlet数 * MaxVerts
+	// 这里使用 Vector + Sort + Unique 比 unordered_map 快且省内存
+	std::vector<uint32_t> usedGlobalIndices;
+	usedGlobalIndices.reserve(g.MeshletIDs.size() * buildArgs.settings.MaxMeshletVertices);
 
 	for (uint32_t mid : g.MeshletIDs)
 	{
 		const auto& m = current[mid];
-		// micro tri -> 原始索引
-		for (size_t t = 0; t < m.Triangles.size(); t += 3)
-		{
-			uint32_t l0 = m.Triangles[t + 0];
-			uint32_t l1 = m.Triangles[t + 1];
-			uint32_t l2 = m.Triangles[t + 2];
-			expanded.push_back(m.Vertices[l0]);
-			expanded.push_back(m.Vertices[l1]);
-			expanded.push_back(m.Vertices[l2]);
-		}
+		usedGlobalIndices.insert(usedGlobalIndices.end(), m.Vertices.begin(), m.Vertices.end());
 	}
-	if (expanded.empty())
+	std::sort(usedGlobalIndices.begin(), usedGlobalIndices.end());
+	auto last = std::unique(usedGlobalIndices.begin(), usedGlobalIndices.end());
+	usedGlobalIndices.erase(last, usedGlobalIndices.end());
+
+	if (usedGlobalIndices.empty())
 		return false;
 
-	// 顶点位置/法线属性（法线用于 attribute metric）
-	const float* pos = reinterpret_cast<const float*>(&vertices[0].Position);
-	const size_t stride = sizeof(RawVertex);
+	// Global Index -> Local Index 的查找表 (因为 global index 很大，无法用直接数组，这里用二分查找代替 map)
+	auto GetLocalIndex = [&](uint32_t globalIdx) -> uint32_t {
+		auto it = std::lower_bound(usedGlobalIndices.begin(), usedGlobalIndices.end(), globalIdx);
+		if (it != usedGlobalIndices.end() && *it == globalIdx)
+			return static_cast<uint32_t>(std::distance(usedGlobalIndices.begin(), it));
+		return 0xFFFFFFFF;
+		};
 
-	uint32_t attributeValueCount = 3; // 只有法线
-	if (buildArgs.psoFlags & PSOFlags::kHasTangent)
+	// 构建局部顶点/索引数据
+	// 拼接组三角（使用 Local 索引）
+	std::vector<uint32_t> localIndices;
+	localIndices.reserve(g.MeshletIDs.size() * buildArgs.settings.MaxMeshletTriangles * 3);
+
+	for (uint32_t mid : g.MeshletIDs)
 	{
-		attributeValueCount += 4;
+		const auto& m = current[mid];
+		for (size_t t = 0; t < m.Triangles.size(); t += 3)
+		{
+			uint32_t g0 = m.Vertices[m.Triangles[t + 0]];
+			uint32_t g1 = m.Vertices[m.Triangles[t + 1]];
+			uint32_t g2 = m.Vertices[m.Triangles[t + 2]];
+			localIndices.push_back(GetLocalIndex(g0));
+			localIndices.push_back(GetLocalIndex(g1));
+			localIndices.push_back(GetLocalIndex(g2));
+		}
 	}
-	if (buildArgs.psoFlags & PSOFlags::kHasUV0)
+
+	if (localIndices.empty())
+		return false;
+
+	// 准备局部属性缓冲 (Position + Attributes)
+	size_t localVertexCount = usedGlobalIndices.size();
+
+	std::vector<float> localPositions(localVertexCount * 3);
+
+	uint32_t attributeValueCount = 3; // Normal
+	if (buildArgs.psoFlags & PSOFlags::kHasTangent) attributeValueCount += 4;
+	if (buildArgs.psoFlags & PSOFlags::kHasUV0) attributeValueCount += 2;
+
+	std::vector<float> localAttrs(localVertexCount * attributeValueCount);
+
+	for (size_t i = 0; i < localVertexCount; ++i)
 	{
-		attributeValueCount += 2;
-	}
-	std::vector<float> attrs;
-	attrs.resize(vertices.size() * attributeValueCount);
-	for (size_t i = 0; i < vertices.size(); ++i)
-	{
-		size_t baseIdx = i * attributeValueCount;
-		attrs[baseIdx++] = vertices[i].Normal.GetX();
-		attrs[baseIdx++] = vertices[i].Normal.GetY();
-		attrs[baseIdx++] = vertices[i].Normal.GetZ();
+		uint32_t globalIdx = usedGlobalIndices[i];
+		const RawVertex& v = vertices[globalIdx];
+
+		// Position
+		localPositions[i * 3 + 0] = v.Position.GetX();
+		localPositions[i * 3 + 1] = v.Position.GetY();
+		localPositions[i * 3 + 2] = v.Position.GetZ();
+
+		// Attributes
+		size_t attrBase = i * attributeValueCount;
+		size_t attrOffset = 0;
+
+		localAttrs[attrBase + attrOffset++] = v.Normal.GetX();
+		localAttrs[attrBase + attrOffset++] = v.Normal.GetY();
+		localAttrs[attrBase + attrOffset++] = v.Normal.GetZ();
 
 		if (buildArgs.psoFlags & PSOFlags::kHasTangent)
 		{
-			attrs[baseIdx++] = vertices[i].Tangent.GetX();
-			attrs[baseIdx++] = vertices[i].Tangent.GetY();
-			attrs[baseIdx++] = vertices[i].Tangent.GetZ();
-			attrs[baseIdx++] = vertices[i].Tangent.GetW();
+			localAttrs[attrBase + attrOffset++] = v.Tangent.GetX();
+			localAttrs[attrBase + attrOffset++] = v.Tangent.GetY();
+			localAttrs[attrBase + attrOffset++] = v.Tangent.GetZ();
+			localAttrs[attrBase + attrOffset++] = v.Tangent.GetW();
 		}
-
 		if (buildArgs.psoFlags & PSOFlags::kHasUV0)
 		{
-			attrs[baseIdx++] = vertices[i].UV0[0];
-			attrs[baseIdx++] = vertices[i].UV0[1];
+			localAttrs[attrBase + attrOffset++] = v.UV0[0];
+			localAttrs[attrBase + attrOffset++] = v.UV0[1];
 		}
 	}
+
 	std::vector<float> attributeWeights(attributeValueCount, 0.5f);
-	if (buildArgs.psoFlags & PSOFlags::kHasTangent)
+	if (buildArgs.psoFlags & PSOFlags::kHasTangent) attributeWeights[6] = 1.f;
+
+	// 处理 Lock 数组 (局部化)
+	std::vector<unsigned char> localLocks;
+	if (!vertexLock.empty())
 	{
-		// 切线符号权重更高
-		attributeWeights[6] = 1.f;
+		localLocks.resize(localVertexCount);
+		for (size_t i = 0; i < localVertexCount; ++i)
+		{
+			localLocks[i] = vertexLock[usedGlobalIndices[i]];
+		}
 	}
 
-	// 目标索引数（保留 ~50%）
-	const size_t targetIndexCount = size_t(expanded.size() * buildArgs.settings.TargetSimplifyRatio);
-
-	std::vector<uint32_t> simplified(expanded.size());
+	// 执行简化 (使用局部数据)
+	const size_t targetIndexCount = size_t(localIndices.size() * buildArgs.settings.TargetSimplifyRatio);
+	std::vector<uint32_t> simplifiedLocal(localIndices.size());
 	float resultError = 0.0f;
 
 	unsigned int options =
@@ -504,33 +543,47 @@ bool MeshletBuilder::SimplifyGroup(
 		(buildArgs.settings.bUseSimplifyPermissive ? meshopt_SimplifyPermissive : 0);
 
 	size_t newCount = meshopt_simplifyWithAttributes(
-		simplified.data(),
-		expanded.data(), expanded.size(),
-		pos, vertices.size(), stride,
-		attrs.data(), sizeof(float) * attributeValueCount,
+		simplifiedLocal.data(),
+		localIndices.data(), localIndices.size(),
+		localPositions.data(), localVertexCount, sizeof(float) * 3, // pos stride = 12
+		localAttrs.data(), sizeof(float) * attributeValueCount,
 		attributeWeights.data(), attributeValueCount,
-		vertexLock.data(),                    // 锁边
+		localLocks.empty() ? nullptr : localLocks.data(),
 		targetIndexCount,
-		FLT_MAX,                              // 绝对误差上限
+		FLT_MAX,
 		options,
 		&resultError);
 
-	simplified.resize(newCount);
+	simplifiedLocal.resize(newCount);
 
 	// 简化失败判定
-	float ratio = float(newCount) / float(expanded.size());
+	float ratio = float(newCount) / float(localIndices.size());
 	if (ratio > buildArgs.settings.SimplificationFailurePercentage)
 		return false;
 
 	outError = resultError;
 
-	// 用简化后的索引重建新 meshlet
-	BuildMeshletsFromIndices(simplified.data(), simplified.size(), vertices, buildArgs.settings, outNewMeshlets);
+	// 将简化后的 Local 索引 remap 回 Global 索引
+	// BuildMeshletsFromIndices 需要原始顶点数据流，所以我们要给它 global indices
+	// 这里通过 usedGlobalIndices[localIdx] 转换
+	std::vector<uint32_t> simplifiedGlobal(newCount);
+	for (size_t i = 0; i < newCount; ++i)
+	{
+		uint32_t localIdx = simplifiedLocal[i];
+		// 确保安全访问
+		if (localIdx < usedGlobalIndices.size())
+			simplifiedGlobal[i] = usedGlobalIndices[localIdx];
+		else
+			ASSERT(false, "Local index out of bounds in SimplifyGroup");
+	}
+
+	// 用全局索引重建 meshlet
+	BuildMeshletsFromIndices(simplifiedGlobal.data(), simplifiedGlobal.size(), vertices, buildArgs.settings, outNewMeshlets);
 	for (auto& ml : outNewMeshlets)
 	{
-		// 分配精细组ID
 		ml.RefineGroupID = g.GroupID;
 	}
+
 	return !outNewMeshlets.empty();
 }
 
@@ -606,7 +659,7 @@ GroupPackage MeshletBuilder::SerializeGroup(
 		for (uint32_t mvIdx = 0; mvIdx < m.Vertices.size(); mvIdx++)
 		{
 			const RawVertex& srcV = buildArgs.vertices[m.Vertices[mvIdx]];
-			std::memcpy(pVerticesCursor + buildArgs.vertexStride * mvIdx, srcV.VertexData.data(), buildArgs.vertexStride);
+			std::memcpy(pVerticesCursor + buildArgs.vertexStride * mvIdx, srcV.VertexData, buildArgs.vertexStride);
 		}
 
 		pVerticesCursor += Math::AlignUp(static_cast<uint32_t>(m.Vertices.size() * buildArgs.vertexStride), 4u);

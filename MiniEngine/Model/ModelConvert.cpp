@@ -152,8 +152,7 @@ void Renderer::CompileMesh(
 				rv.Position = Vector3(position[0], position[1], position[2]);
 				const uint32_t* normalPtr = reinterpret_cast<const uint32_t*>(vertexPtr + 12);
                 rv.Normal = DecodeNormal_R10G10B10A2(normalPtr[0]);
-                rv.VertexData.resize(draw->vertexStride);
-				std::memcpy(rv.VertexData.data(), vertexPtr, draw->vertexStride);
+                rv.VertexData = vertexPtr;
                 if (buildArgs.psoFlags & PSOFlags::kHasTangent)
                 {
 					uint32_t tangentOffset = 16;

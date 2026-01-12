@@ -17,7 +17,7 @@ struct RawVertex
 	Math::Vector3 Normal;
 	Math::Vector4 Tangent;
 	float UV0[2];
-	std::vector<unsigned char> VertexData; //完整顶点数据（用于最终序列化）
+	const unsigned char* VertexData; //完整顶点数据（用于最终序列化）
 };
 
 struct MeshletBuildSettings
