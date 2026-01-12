@@ -19,13 +19,27 @@ struct PrimitiveAttributes
     uint primitiveIndex : SV_PrimitiveID;
 };
 
-groupshared float4 s_ClipPositions[MAX_VERTS];
-
-groupshared uint s_VisiblePrimitiveCount;
+//groupshared float4 s_ClipPositions[MAX_VERTS];
+//groupshared uint s_VisiblePrimitiveCount;
 
 bool isFrontFacingHW(float4 ha, float4 hb, float4 hc)
 {
     return determinant(float3x3(ha.xyw, hb.xyw, hc.xyw)) >= 0;
+}
+
+float4 GetClipPosition(ByteAddressBuffer geometryChunksBuffer, 
+    uint vertexByteOffset,
+    uint vertexStride,
+    uint localVertexIdx,
+    float4x4 worldMatrix,
+    float4x4 vpMatrix)
+{
+    uint vertexOffset = vertexByteOffset + vertexStride * localVertexIdx;
+    float4 position = float4(asfloat(geometryChunksBuffer.Load3(vertexOffset)), 1.0);
+    
+    float3 worldPos = mul(worldMatrix, position).xyz;
+    float4 clipPos = mul(vpMatrix, float4(worldPos, 1.0));
+    return clipPos;         
 }
 
 [RootSignature(Renderer_RootSig)]
@@ -38,12 +52,12 @@ void main(
     out indices uint3 outIndices[MAX_PRIMS],
     out primitives PrimitiveAttributes sharedPrimitives[MAX_PRIMS])
 {
-    if (gtid == 0)
-    {
-        s_VisiblePrimitiveCount = 0;
-    }
+    //if (gtid == 0)
+    //{
+    //    s_VisiblePrimitiveCount = 0;
+    //}
     
-    GroupMemoryBarrierWithGroupSync();
+    //GroupMemoryBarrierWithGroupSync();
     
 #ifdef UBER_MESH_SHADER_PASS1
     StructuredBuffer<QueueState> taskStateSRV = GetTaskQueueStateBufferSRV();
@@ -71,6 +85,8 @@ void main(
     uint vertexByteOffset = groupByteOffset + meshletHeader.VertexOffset;
     uint indexByteOffset = groupByteOffset + meshletHeader.TriangleOffset;
     uint vertexStride = meshletHeader.GetVertexStride();
+    
+    SetMeshOutputCounts(vertexCount, primitiveCount);
     
     // --------------------------------------------------------
     // 顶点处理 (Vertex Processing)
@@ -122,67 +138,74 @@ void main(
             //}
 
             float4x4 WorldMatrix = meshInstance.WorldMatrix;
-            float4x3 WorldIT = meshInstance.WorldIT;
+            //float4x3 WorldIT = meshInstance.WorldIT;
             float3 worldPos = mul(WorldMatrix, position).xyz;
             float4 clipPos = mul(ViewProjMatrix, float4(worldPos, 1.0));
             
-            s_ClipPositions[localVertexIdx] = clipPos;
+            //s_ClipPositions[localVertexIdx] = clipPos;
+            
+            verts[localVertexIdx].position = clipPos;
+            verts[localVertexIdx].commandIndex = commandIndex;
         }
     }
     
-    GroupMemoryBarrierWithGroupSync();
+    //GroupMemoryBarrierWithGroupSync();
     
     // --------------------------------------------------------
     // 图元处理 (Primitive Processing)
     // --------------------------------------------------------
-    bool isVisible = false;
-    uint3 triIndices;
+    //bool isVisible = false;
+    //uint3 triIndices;
     if (gtid < primitiveCount)
     {
-        triIndices = LoadAndUnpackTriangle(geometryChunksBuffer, indexByteOffset, gtid);
-
-        float4 h0 = s_ClipPositions[triIndices.x];
-        float4 h1 = s_ClipPositions[triIndices.y];
-        float4 h2 = s_ClipPositions[triIndices.z];
+        uint3 triIndices = LoadAndUnpackTriangle(geometryChunksBuffer, indexByteOffset, gtid);
+        
+        // 这里重新Load并且计算，要比使用group shared memory性能好
+        float4 h0 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.x, meshInstance.WorldMatrix, ViewProjMatrix);
+        float4 h1 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.y, meshInstance.WorldMatrix, ViewProjMatrix);
+        float4 h2 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.z, meshInstance.WorldMatrix, ViewProjMatrix);
 
         // 背面剔除
         bool twoSided = (meshletHeader.GetPSOFlags() & PSO_TWO_SIDED) > 0;
-        isVisible = twoSided || isFrontFacingHW(h0, h1, h2);
+        bool isVisible = twoSided || isFrontFacingHW(h0, h1, h2);
+        
+        outIndices[gtid] = isVisible ? triIndices : uint3(0, 0, 0);
+        sharedPrimitives[gtid].primitiveIndex = gtid;
     }
     
-    uint4 ballot = WaveActiveBallot(isVisible);
-    uint waveOffset = WavePrefixCountBits(isVisible);
-    uint waveTotalVisible = countbits(ballot.x) + countbits(ballot.y) + countbits(ballot.z) + countbits(ballot.w);
+    //uint4 ballot = WaveActiveBallot(isVisible);
+    //uint waveOffset = WavePrefixCountBits(isVisible);
+    //uint waveTotalVisible = countbits(ballot.x) + countbits(ballot.y) + countbits(ballot.z) + countbits(ballot.w);
 
-    uint threadGroupOffset;
-    if (WaveIsFirstLane())
-    {
-        InterlockedAdd(s_VisiblePrimitiveCount, waveTotalVisible, threadGroupOffset);
-    }
+    //uint threadGroupOffset;
+    //if (WaveIsFirstLane())
+    //{
+    //    InterlockedAdd(s_VisiblePrimitiveCount, waveTotalVisible, threadGroupOffset);
+    //}
     
-    threadGroupOffset = WaveReadLaneFirst(threadGroupOffset);
+    //threadGroupOffset = WaveReadLaneFirst(threadGroupOffset);
 
-    GroupMemoryBarrierWithGroupSync();
+    //GroupMemoryBarrierWithGroupSync();
     
-    SetMeshOutputCounts(vertexCount, s_VisiblePrimitiveCount);
+    //SetMeshOutputCounts(vertexCount, s_VisiblePrimitiveCount);
     
-     // 写入顶点输出
-    [unroll]
-    for (uint j = 0; j < 2; ++j)
-    {
-        uint vIdx = gtid * 2 + j;
-        if (vIdx < vertexCount)
-        {
-            verts[vIdx].position = s_ClipPositions[vIdx];
-            verts[vIdx].commandIndex = commandIndex;
-        }
-    }
+    // // 写入顶点输出
+    //[unroll]
+    //for (uint j = 0; j < 2; ++j)
+    //{
+    //    uint vIdx = gtid * 2 + j;
+    //    if (vIdx < vertexCount)
+    //    {
+    //        verts[vIdx].position = s_ClipPositions[vIdx];
+    //        verts[vIdx].commandIndex = commandIndex;
+    //    }
+    //}
 
-    // 写入图元输出 (流压缩后的位置)
-    if (isVisible)
-    {
-        uint finalOutIndex = threadGroupOffset + waveOffset;
-        outIndices[finalOutIndex] = triIndices;
-        sharedPrimitives[finalOutIndex].primitiveIndex = gtid;
-    }
+    //// 写入图元输出 (流压缩后的位置)
+    //if (isVisible)
+    //{
+    //    uint finalOutIndex = threadGroupOffset + waveOffset;
+    //    outIndices[finalOutIndex] = triIndices;
+    //    sharedPrimitives[finalOutIndex].primitiveIndex = gtid;
+    //}
 }
