@@ -10,6 +10,8 @@ void ModelInstanceManager::Initialize(std::shared_ptr<Model> sourceModel, uint32
 	ASSERT(sourceModel != nullptr, "Source model is null");
 	ASSERT(instanceCount > 0, "Instance count must be greater than zero");
 
+	m_SourceModel = sourceModel;
+
 	InstanceResourceManager::Get().Initialize(
 		std::max(sourceModel->m_NumNodes * instanceCount, 1u),
 		std::max(sourceModel->m_NumJoints * instanceCount, 1u),
@@ -65,12 +67,15 @@ void ModelInstanceManager::Initialize(std::shared_ptr<Model> sourceModel, uint32
 
 	GeometryStreaming::Initialize(
 		sourceModel->m_Nodes,
-		static_cast<uint32_t>(sourceModel->m_GroupMetadatas.size()));
-	GeometryStreaming::LoadAllGeometries(
-		sourceModel->m_StreamingFilePath,
-		sourceModel->m_GeometryBlobOffsetInFile,
-		sourceModel->m_PageMetadatas,
-		sourceModel->m_GroupMetadatas);
+		static_cast<uint32_t>(sourceModel->m_GroupMetadatas.size()),
+		static_cast<uint32_t>(sourceModel->m_PageMetadatas.size()));
+	//GeometryStreaming::LoadAllGeometries(
+	//	sourceModel->m_StreamingFilePath,
+	//	sourceModel->m_GeometryBlobOffsetInFile,
+	//	sourceModel->m_PageMetadatas,
+	//	sourceModel->m_GroupMetadatas);
+
+	GeometryStreaming::PinRootPages(sourceModel.get());
 }
 
 void ModelInstanceManager::Render(Renderer::MeshSorter& sorter) const

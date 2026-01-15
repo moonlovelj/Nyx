@@ -103,51 +103,64 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
     // 处理叶子节点 (Cluster)
     if (bVisible && bIsLeaf)
     {
-        uint NumClusters = node.GetMeshletCount();
-        uint ClusterIndex = 0;
-        WaveInterlockedAdd(taskStateUAV[0].PassState[passIndex].TotalMeshlets, NumClusters, ClusterIndex);
-
-        // 溢出检查：如果当前分配的索引加上要添加的数量超过了 Buffer 最大容量
-        const uint ClusterIndexEnd = min(ClusterIndex + NumClusters, MAX_CANDIDATE_MESHLETS);
-        // 重新计算实际能存入的数量（防止把 Buffer 写爆导致 GPU 挂起）
-        NumClusters = (uint) max((int) ClusterIndexEnd - (int) ClusterIndex, 0);
-        
-        uint CandidateClustersOffset = 0;
-        // 在 CandidateClusters 队列中申请一段连续的空间
-        WaveInterlockedAdd(taskStateUAV[0].PassState[passIndex].CandidateMeshletWriteOffset, NumClusters, CandidateClustersOffset);
-        
-        const uint StartIndex = CandidateClustersOffset;
-        const uint EndIndex = min(CandidateClustersOffset + NumClusters, MAX_CANDIDATE_MESHLETS);
-        for (uint Index = StartIndex; Index < EndIndex; Index++)
+        StructuredBuffer<GroupDataLocation> groupDataLocationSRV = GetGroupDataLocationBufferSRV();
+        GroupDataLocation groupDataLocation = groupDataLocationSRV[node.GetGroupIndex()];
+        if (groupDataLocation.ChunkIndex == INVALID_ID)
         {
-            VisibleMeshletPayload meshletPayload;
-            meshletPayload.InstanceIndex = instanceIndex;
-            meshletPayload.PackedData = meshletPayload.PackData(node.GetGroupIndex(), (Index - StartIndex));
-            globallycoherent RWByteAddressBuffer candicateMeshletBufferUAV = GetCandidateMeshletBufferUAV();
-            candicateMeshletBufferUAV.Store2(Index * MESHLET_BYTE_STRIDE, uint2(meshletPayload.InstanceIndex, meshletPayload.PackedData));
+            globallycoherent AppendStructuredBuffer<GeometryStreamingRequest> requestUAV = GetGeometryStreamingRequestBufferUAV();
+            GeometryStreamingRequest request;
+            request.PackedData = request.PackData(node.GetGroupIndex(), 0);
+            requestUAV.Append(request);
         }
-        
-        DeviceMemoryBarrier();
-        
-        for (uint Index = StartIndex; Index < EndIndex;)
+        else
         {
+        
+            uint NumClusters = node.GetMeshletCount();
+            uint ClusterIndex = 0;
+            WaveInterlockedAdd(taskStateUAV[0].PassState[passIndex].TotalMeshlets, NumClusters, ClusterIndex);
+
+            // 溢出检查：如果当前分配的索引加上要添加的数量超过了 Buffer 最大容量
+            const uint ClusterIndexEnd = min(ClusterIndex + NumClusters, MAX_CANDIDATE_MESHLETS);
+            // 重新计算实际能存入的数量（防止把 Buffer 写爆导致 GPU 挂起）
+            NumClusters = (uint) max((int) ClusterIndexEnd - (int) ClusterIndex, 0);
+        
+            uint CandidateClustersOffset = 0;
+            // 在 CandidateClusters 队列中申请一段连续的空间
+            WaveInterlockedAdd(taskStateUAV[0].PassState[passIndex].CandidateMeshletWriteOffset, NumClusters, CandidateClustersOffset);
+        
+            const uint StartIndex = CandidateClustersOffset;
+            const uint EndIndex = min(CandidateClustersOffset + NumClusters, MAX_CANDIDATE_MESHLETS);
+            for (uint Index = StartIndex; Index < EndIndex; Index++)
+            {
+                VisibleMeshletPayload meshletPayload;
+                meshletPayload.InstanceIndex = instanceIndex;
+                meshletPayload.PackedData = meshletPayload.PackData(node.GetGroupIndex(), (Index - StartIndex));
+                globallycoherent RWByteAddressBuffer candicateMeshletBufferUAV = GetCandidateMeshletBufferUAV();
+                candicateMeshletBufferUAV.Store2(Index * MESHLET_BYTE_STRIDE, uint2(meshletPayload.InstanceIndex, meshletPayload.PackedData));
+            }
+        
+            DeviceMemoryBarrier();
+        
+            for (uint Index = StartIndex; Index < EndIndex;)
+            {
             // 计算当前索引属于哪一个 Batch (每 64 个一箱)
-            const uint BatchIndex = Index / DAG_CULL_GROUP_SIZE;
+                const uint BatchIndex = Index / DAG_CULL_GROUP_SIZE;
     
             // 计算下一个对齐到 64 的位置 (即下一个箱子的开头)
-            const uint NextIndex = (Index & ~(64 - 1u)) + 64;
+                const uint NextIndex = (Index & ~(64 - 1u)) + 64;
     
             // 计算在当前箱子里占了几个坑位
-            const uint MaxIndex = min(NextIndex, EndIndex);
-            const uint Num = MaxIndex - Index;
+                const uint MaxIndex = min(NextIndex, EndIndex);
+                const uint Num = MaxIndex - Index;
     
             // 更新该 Batch 的就绪计数器
-            globallycoherent RWByteAddressBuffer meshletBatchBufferUAV = GetMeshletBatchBufferUAV();
-            uint temp;
-            meshletBatchBufferUAV.InterlockedAdd(BatchIndex * 4, Num, temp);
+                globallycoherent RWByteAddressBuffer meshletBatchBufferUAV = GetMeshletBatchBufferUAV();
+                uint temp;
+                meshletBatchBufferUAV.InterlockedAdd(BatchIndex * 4, Num, temp);
     
             // 步进到下一个箱子
-            Index = NextIndex;
+                Index = NextIndex;
+            }
         }
     }
     
@@ -209,6 +222,14 @@ void ProcessClusterBatch(uint clusterBatchStartIndex, uint clusterBatchReadySize
             //bLodCulled = projectError > PIXEL_ERROR_THRESHOLD;
             
             bTestForLod = TestForLod(meshInstance.WorldMatrix, ViewerPos, refineGroupHeader.ParrentError, refineGroupHeader.BoundSphere);
+        }
+        
+        if (!bTestForLod)
+        {
+            StructuredBuffer<GroupDataLocation> groupDataLocationSRV = GetGroupDataLocationBufferSRV();
+            GroupDataLocation groupDataLocation = groupDataLocationSRV[meshletHeader.RefineGroupIndex];
+            if (groupDataLocation.ChunkIndex == INVALID_ID)
+                bTestForLod = true;
         }
         
         uint level = meshletHeader.GetLODLevel();

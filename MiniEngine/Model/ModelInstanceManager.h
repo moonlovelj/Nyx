@@ -24,8 +24,10 @@ public:
 
 	uint32_t GetNumModelInstances() const { return (uint32_t)m_ModelInstances.size(); }
 	ModelInstance& GetModelInstance(uint32_t index);
+	Model* GetSourceModel() const { return m_SourceModel.get(); }
 
 private:
+	std::shared_ptr<Model> m_SourceModel;
 	std::vector<ModelInstance> m_ModelInstances;
 	UploadBuffer m_InstanceConstantsCPU;
 	ByteAddressBuffer m_InstanceConstantsGPU;

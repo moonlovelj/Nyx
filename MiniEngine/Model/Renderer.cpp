@@ -25,6 +25,7 @@
 #include "../Core/TemporalEffects.h"
 
 #include "CommandBucketer.h"
+#include "GeometryStreaming.h"
 
 #include "Shaders/SharedHeader.hlsli"
 
@@ -809,6 +810,9 @@ void Renderer::DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlo
 	context.TransitionResource(CommandBucketer::Get().GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource(CommandBucketer::Get().GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource(CommandBucketer::Get().GetMeshletBatchGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	context.TransitionResource(GeometryStreaming::m_GPURequestBuffer.GetCounterBuffer(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	context.TransitionResource(GeometryStreaming::m_GPURequestBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	context.ClearBufferUAV(GeometryStreaming::m_GPURequestBuffer.GetCounterBuffer(), 4, 0);
 
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
@@ -999,6 +1003,13 @@ void MeshSorter::RenderMeshedInternal(
     Renderer::PsoIdx psoIdx,
     bool bOcclusionCull)
 {
+    for (auto& chunksGPU : GeometryStreaming::m_GeometryChunksGPU)
+    {
+        context.TransitionResource(chunksGPU, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+    }
+    
+    context.TransitionResource(GeometryStreaming::m_GroupDataLocationGPU, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+
     if (!FreezeCull)
     {
         context.GetComputeContext().ClearBufferUAV(CommandBucketer::Get().GetTaskQueueStateGPU(),

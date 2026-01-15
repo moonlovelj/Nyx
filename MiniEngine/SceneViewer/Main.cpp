@@ -24,6 +24,7 @@
 #include "IBL.h"
 #include "TextureConvert.h"
 #include "ModelInstanceManager.h"
+#include "GeometryStreaming.h"
 
 extern "C" {
 	__declspec(dllexport) extern const UINT D3D12SDKVersion = 616; // 对应Agility SDK版本
@@ -192,7 +193,7 @@ void SceneViewer::Startup( void )
 
     std::wstring gltfFileName;
 
-    bool forceRebuild = true;
+    bool forceRebuild = false;
     uint32_t rebuildValue;
     if (CommandLineArgs::GetInteger(L"rebuild", rebuildValue))
         forceRebuild = rebuildValue != 0;
@@ -201,13 +202,13 @@ void SceneViewer::Startup( void )
     {
         //auto model = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
 		//m_ModelInst = Renderer::LoadModel(L"Assets/old_federal_building/scene.gltf", forceRebuild);
-		//m_ModelInst = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
+        //auto model = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/DamagedHelmet/glTF/DamagedHelmet.gltf", forceRebuild);
-        //auto model = Renderer::LoadModel(L"Assets/AnimTest/AnimTest.gltf", forceRebuild);
-        auto model = Renderer::LoadModel(L"Assets/lumber_mill_wood_factory_gltf/scene.gltf", forceRebuild);
-		//auto model = Renderer::LoadModel(L"Assets/Jinx/scene.gltf", forceRebuild);
+        auto model = Renderer::LoadModel(L"Assets/Jinx/scene.gltf", forceRebuild);
+        //auto model = Renderer::LoadModel(L"Assets/lumber_mill_wood_factory_gltf/scene.gltf", forceRebuild);
+		//auto model = Renderer::LoadModel(L"Assets/zorah_main_public.gltf/zorah_main_public.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/Monkey/monkey.gltf", forceRebuild);
-		//auto model = Renderer::LoadModel(L"Assets/cube/cube.gltf", forceRebuild);
+		//auto model = Renderer::LoadModel(L"Assets/OcclusionTest/scene.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/japanese_metal_lantern_vfvjccaqx_gltf_raw/Japanese_Metal_Lantern_vfvjccaqx_Raw.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/OcclusionTest/scene.gltf", forceRebuild);
         //m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
@@ -216,7 +217,7 @@ void SceneViewer::Startup( void )
 		OrientedBox obb = ModelInstanceManager::Get().GetModelInstance(0).GetBoundingBox();
 		//OrientedBox obb = ModelInstanceManager::Get().GetModelInstance(0).GetBoundingBox();
         float modelRadius = Length(obb.GetDimensions()) * 0.5f;
-		const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 2.5f, 0.0f, 0.0f);
+		const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 0.5f, 0.0f, 0.0f);
 		m_Camera.SetEyeAtUp(eye, obb.GetCenter(), Vector3(kYUnitVector));
 		//const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 10.f, modelRadius * 10.f, modelRadius * 10.f);
 		//m_Camera.SetEyeAtUp(eye, Vector3(-modelRadius * 10.f, 0, -modelRadius * 10.f), Vector3(kYUnitVector));
@@ -312,6 +313,8 @@ void SceneViewer::Update( float deltaT )
     m_MainScissor.top = 0;
     m_MainScissor.right = (LONG)g_SceneColorBuffer.GetWidth();
     m_MainScissor.bottom = (LONG)g_SceneColorBuffer.GetHeight();
+
+	GeometryStreaming::Update(TemporalEffects::GetFrameIndex());
 }
 
 void SceneViewer::RenderScene( void )
@@ -348,6 +351,7 @@ void SceneViewer::RenderScene( void )
 
         GlobalConstants globals;
         globals.ViewProjMatrix = m_Camera.GetViewProjMatrix();
+		globals.ProjMatrix = m_Camera.GetProjMatrix();
 		globals.InverseViewProjMatrix = Invert(m_Camera.GetViewProjMatrix());
         globals.SunShadowMatrix = m_SunShadowCamera.GetShadowMatrix();
         globals.ViewerPos = m_Camera.GetPosition();
@@ -356,6 +360,7 @@ void SceneViewer::RenderScene( void )
 
 		globals.PrevViewMatrix = m_PrevCamera.GetViewMatrix();
 		globals.PrevViewProjMatrix = m_PrevCamera.GetViewProjMatrix();
+		globals.PrevProjMatrix = m_PrevCamera.GetProjMatrix();
 		globals.PrevViewerPos = m_PrevCamera.GetPosition();
 		globals.HZBSizeAndInv[0] = (float)Renderer::GetCurrentHZB().GetWidth();
 		globals.HZBSizeAndInv[1] = (float)Renderer::GetCurrentHZB().GetHeight();

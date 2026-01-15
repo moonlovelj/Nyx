@@ -21,6 +21,8 @@
 
 #define MAX_VISIBLE_MESHLETS 4 * 1024 * 1024
 
+#define MAX_STREAMING_REQUESTS 16384
+
 struct DrawItem
 {
 #ifdef __cplusplus
@@ -91,5 +93,32 @@ struct QueueState
 	QueuePassState PassState[2];
 };
 
+struct GeometryStreamingRequest
+{
+#ifdef __cplusplus
+	union {
+		uint32_t PackedData;
+		struct {
+			uint32_t GroupIndex : 24;
+			uint32_t Priority : 8;
+		};
+	};
+#else
+	uint PackedData;
+	uint GetGroupIndex()
+	{
+		return PackedData & 0xFFFFFF; // 24 bits
+	}
+	uint GetPriority()
+	{
+		return (PackedData >> 24) & 0xFF; // 8 bits
+	}
+
+	uint PackData(uint groupIndex, uint priority)
+	{
+		return (priority << 24) | (groupIndex & 0xFFFFFF);
+	}	
+#endif
+};
 
 
