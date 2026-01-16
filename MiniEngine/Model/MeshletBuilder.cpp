@@ -12,23 +12,90 @@ using namespace Renderer;
 
 static constexpr float kInfinity = std::numeric_limits<float>::infinity();
 
-static constexpr uint32_t kMaxHierarchyChildren = 255;
+// 解码 DXGI_FORMAT_R10G10B10A2_UNORM 到 float3 法线（[-1,1]）
+inline Math::Vector3 DecodeNormal_R10G10B10A2(uint32_t packed)
+{
+	constexpr float inv10 = 1.0f / 1023.0f;
+	const uint32_t r = (packed) & 0x3FFu;
+	const uint32_t g = (packed >> 10) & 0x3FFu;
+	const uint32_t b = (packed >> 20) & 0x3FFu;
+
+	float x = float(r) * inv10;
+	float y = float(g) * inv10;
+	float z = float(b) * inv10;
+
+	x = x * 2.0f - 1.0f;
+	y = y * 2.0f - 1.0f;
+	z = z * 2.0f - 1.0f;
+
+	const float len2 = x * x + y * y + z * z;
+	if (len2 > 0.0f)
+	{
+		const float invLen = 1.0f / std::sqrt(len2);
+		x *= invLen; y *= invLen; z *= invLen;
+	}
+	return Math::Vector3(x, y, z);
+}
+
+inline Math::Vector4 DecodeR10G10B10A2UNORMToFloat4(uint32_t packed)
+{
+	const uint32_t r = (packed >> 0) & 0x3FF; // 10 bits
+	const uint32_t g = (packed >> 10) & 0x3FF;
+	const uint32_t b = (packed >> 20) & 0x3FF;
+	const uint32_t a = (packed >> 30) & 0x3;
+	return Math::Vector4(r / 1023.f, g / 1023.f, b / 1023.f, a / 3.f) * 2.f - Math::Vector4(1.0);
+}
+
+inline std::tuple<float, float> DecodeR16G16FLOATToFloat2(uint32_t packed)
+{
+	return { F16ToF32(packed & 0xFFFF), F16ToF32(packed >> 16) };
+}
+
+struct LocalIndexCache {
+	short cache[1024]; // 2KB，完美放入 L1 Cache
+	LocalIndexCache() { memset(cache, -1, sizeof(cache)); }
+
+	uint32_t Get(uint32_t globalIdx, const std::vector<uint32_t>& usedIndices) {
+		// 取模（由于是 1024，编译器会优化成位与 & 1023）
+		uint32_t h = globalIdx & 1023;
+		short slot = cache[h];
+
+		// 检查缓存命中：slot 记录的是 usedIndices 的下标
+		if (slot >= 0 && usedIndices[slot] == globalIdx) {
+			return (uint32_t)slot;
+		}
+
+		// 缓存未命中（哈希冲突或首次访问）：执行线性查找
+		// 提示：一个 Group 里的顶点通常只有几百到几千个，
+		// 对于现代 CPU，这几百个元素的线性查找（顺序内存访问）往往比二分查找（随机内存跳跃）快得多。
+		for (size_t i = 0; i < usedIndices.size(); ++i) {
+			if (usedIndices[i] == globalIdx) {
+				cache[h] = (short)i; // 更新缓存
+				return (uint32_t)i;
+			}
+		}
+		return 0xFFFFFFFF;
+	}
+};
 
 MeshletBuildProducts MeshletBuilder::Build(
 	const MeshletBuildArgs& buildArgs)
 {
-	if (buildArgs.indices.empty() || buildArgs.vertices.empty())
+	//if (buildArgs.indices.empty() || buildArgs.vertices.empty())
+	//	return {};
+
+	if (buildArgs.IBData == nullptr || buildArgs.VBData == nullptr || buildArgs.indexCount == 0)
 		return {};
 
 	Utility::Printf(L"[MeshletBuilder] Start building meshlets for meshBufferIndex=%u, materialBufferIndex=%u\n",
 		buildArgs.meshBufferIndex, buildArgs.materialBufferIndex);
 
 	// 生成 position-only remap（供后续锁边用）
-	std::vector<uint32_t> posRemap(buildArgs.vertices.size());
-	GeneratePositionRemap(buildArgs.vertices, posRemap);
+	std::vector<uint32_t> posRemap(buildArgs.vertexCount);
+	GeneratePositionRemap(buildArgs, posRemap);
 
 	// LOD0：整网格 -> meshlet
-	std::vector<Meshlet> current = BuildLOD0Meshlets(buildArgs.vertices, buildArgs.indices, buildArgs.settings);
+	std::vector<Meshlet> current = BuildLOD0Meshlets(buildArgs);
 
 	// LOD0：初始化待简化队列
 	std::vector<uint32_t> activeIds(current.size());
@@ -51,7 +118,7 @@ MeshletBuildProducts MeshletBuilder::Build(
 	while (true)
 	{
 		// 基于共享顶点 / 空间接近度分组
-		auto groupIds= GroupMeshlets(current, activeIds, buildArgs.vertices, buildArgs.settings.TargetMeshletsPerGroup, lodLevel-1, currentGroups);
+		auto groupIds= GroupMeshlets(buildArgs, current, activeIds, lodLevel-1, currentGroups);
 		if (groupIds.empty())
 			break;
 
@@ -66,8 +133,8 @@ MeshletBuildProducts MeshletBuilder::Build(
 		}
 
 		// 构建顶点锁（跨组共享 position-only 顶点全部上锁）
-		std::vector<unsigned char> vertexLock(buildArgs.vertices.size(), 0);
-		BuildVertexLocksByGroups(currentGroups, groupIds, current, posRemap, buildArgs.vertices.size(), vertexLock);
+		std::vector<unsigned char> vertexLock(buildArgs.vertexCount, 0);
+		BuildVertexLocksByGroups(currentGroups, groupIds, current, posRemap, buildArgs.vertexCount, vertexLock);
 
 		// 对每个组尝试简化 -> 生成下一层 meshlets
 		struct GroupResult
@@ -104,7 +171,7 @@ MeshletBuildProducts MeshletBuilder::Build(
 
 				float err = 0.0f;
 				std::vector<Meshlet> generated;
-				if (SimplifyGroup(g, current, buildArgs.vertices, buildArgs, vertexLock, generated, err))
+				if (SimplifyGroup(buildArgs, g, current, vertexLock, generated, err))
 				{
 					r.simplified = true;
 					r.err = err;
@@ -137,7 +204,7 @@ MeshletBuildProducts MeshletBuilder::Build(
 			for (auto& nm : const_cast<std::vector<Meshlet>&>(r.generated))
 			{
 				Meshlet out = std::move(nm);
-				ComputeMeshletSphere(out, buildArgs.vertices, out.BoundSphere);
+				ComputeMeshletSphere(buildArgs, out, out.BoundSphere);
 				newMeshlets.emplace_back(std::move(out));
 			}
 
@@ -191,35 +258,29 @@ MeshletBuildProducts MeshletBuilder::Build(
 
 std::vector<MeshletBuilder::Meshlet>
 MeshletBuilder::BuildLOD0Meshlets(
-	std::span<const RawVertex> vertices,
-	std::span<const uint32_t> indices,
-	const MeshletBuildSettings& s)
+	const MeshletBuildArgs& buildArgs)
 {
 	std::vector<Meshlet> out;
-	if (indices.empty())
-		return out;
-
-	BuildMeshletsFromIndices(indices.data(), indices.size(), vertices, s, out);
+	BuildMeshletsFromIndices(buildArgs, reinterpret_cast<uint32_t*>(buildArgs.IBData), buildArgs.indexCount, out);
 
 	// LOD0 误差 = 0
 	for (auto& m : out)
 	{
-		ComputeMeshletSphere(m, vertices, m.BoundSphere);
+		ComputeMeshletSphere(buildArgs, m, m.BoundSphere);
 	}
 	return out;
 }
 
 void MeshletBuilder::BuildMeshletsFromIndices(
+	const MeshletBuildArgs& buildArgs,
 	const uint32_t* indices, size_t indexCount,
-	std::span<const RawVertex> vertices,
-	const MeshletBuildSettings& s,
 	std::vector<Meshlet>& out)
 {
-	const float* pos = reinterpret_cast<const float*>(&vertices[0].Position);
-	const size_t stride = sizeof(RawVertex);
+	const float* pos = reinterpret_cast<const float*>(buildArgs.VBData);
+	const size_t stride = buildArgs.vertexStride;
 
 	// 申请上界缓冲
-	size_t maxMeshlets = meshopt_buildMeshletsBound(indexCount, s.MaxMeshletVertices, s.MaxMeshletTriangles);
+	size_t maxMeshlets = meshopt_buildMeshletsBound(indexCount, buildArgs.settings.MaxMeshletVertices, buildArgs.settings.MaxMeshletTriangles);
 	std::vector<meshopt_Meshlet> mlets(maxMeshlets);
 	std::vector<uint32_t> mlVertices(indexCount); 
 	std::vector<unsigned char> mlTriangles(indexCount);
@@ -227,8 +288,8 @@ void MeshletBuilder::BuildMeshletsFromIndices(
 	size_t mlCount = meshopt_buildMeshlets(
 		mlets.data(), mlVertices.data(), mlTriangles.data(),
 		indices, indexCount,
-		pos, vertices.size(), stride,
-		s.MaxMeshletVertices, s.MaxMeshletTriangles, 0.0f);
+		pos, buildArgs.vertexCount, stride,
+		buildArgs.settings.MaxMeshletVertices, buildArgs.settings.MaxMeshletTriangles, 0.0f);
 
 	// 转为 TempMeshlet
 	out.reserve(out.size() + mlCount);
@@ -254,17 +315,16 @@ void MeshletBuilder::BuildMeshletsFromIndices(
 }
 
 void MeshletBuilder::ComputeMeshletSphere(
+	const MeshletBuildArgs& buildArgs,
 	const Meshlet& m,
-	std::span<const RawVertex> vertices,
 	float outSphere[4])
 {
-	const float* pos = reinterpret_cast<const float*>(&vertices[0].Position);
-	const size_t stride = sizeof(RawVertex);
+	const float* pos = reinterpret_cast<const float*>(buildArgs.VBData);
 
 	meshopt_Bounds b = meshopt_computeMeshletBounds(
 		m.Vertices.data(), m.Triangles.data(),
 		m.Triangles.size() / 3,
-		pos, vertices.size(), stride);
+		pos, buildArgs.vertexCount, buildArgs.vertexStride);
 
 	outSphere[0] = b.center[0];
 	outSphere[1] = b.center[1];
@@ -291,19 +351,16 @@ void MeshletBuilder::MergeSphere(const float a[4], const float b[4], float out[4
 }
 
 void MeshletBuilder::GeneratePositionRemap(
-	std::span<const RawVertex> vertices,
+	const MeshletBuildArgs& buildArgs,
 	std::vector<uint32_t>& outPosRemap)
 {
-	const float* pos = reinterpret_cast<const float*>(&vertices[0].Position);
-	const size_t stride = sizeof(RawVertex);
-	meshopt_generatePositionRemap(outPosRemap.data(), pos, vertices.size(), stride);
+	meshopt_generatePositionRemap(outPosRemap.data(), reinterpret_cast<const float*>(buildArgs.VBData), buildArgs.vertexCount, buildArgs.vertexStride);
 }
 
 std::vector<uint32_t> MeshletBuilder::GroupMeshlets(
+	const MeshletBuildArgs& buildArgs,
 	const std::vector<Meshlet>& current,
 	std::span<const uint32_t> subsetIds,
-	std::span<const RawVertex> vertices,
-	uint32_t targetGroupSize,
 	uint32_t LODLevel,
 	std::vector<Group>& groups)
 {
@@ -337,15 +394,14 @@ std::vector<uint32_t> MeshletBuilder::GroupMeshlets(
 	}
 
 	std::vector<unsigned int> partition(clusterCount);
-	const float* pos = reinterpret_cast<const float*>(&vertices[0].Position);
-	const size_t stride = sizeof(RawVertex);
+	const float* pos = reinterpret_cast<const float*>(buildArgs.VBData);
 
 	size_t partCount = meshopt_partitionClusters(
 		partition.data(),
 		clusterIndices.data(), clusterIndices.size(),
 		clusterCounts.data(), clusterCount,
-		pos, vertices.size(), stride,
-		targetGroupSize);
+		pos, buildArgs.vertexCount, buildArgs.vertexStride,
+		buildArgs.settings.TargetMeshletsPerGroup);
 
 	// 聚合为组
 	std::vector<Group> newGroups(partCount);
@@ -362,7 +418,7 @@ std::vector<uint32_t> MeshletBuilder::GroupMeshlets(
 		for (uint32_t mid : g.MeshletIDs)
 		{
 			float bs[4];
-			ComputeMeshletSphere(current[mid], vertices, bs);
+			ComputeMeshletSphere(buildArgs, current[mid], bs);
 			if (first) { std::copy(bs, bs + 4, acc); first = false; }
 			else MergeSphere(acc, bs, acc);
 		}
@@ -419,10 +475,9 @@ void MeshletBuilder::BuildVertexLocksByGroups(
 }
 
 bool MeshletBuilder::SimplifyGroup(
+	const MeshletBuildArgs& buildArgs,
 	const Group& g,
 	const std::vector<Meshlet>& current,
-	std::span<const RawVertex> vertices,
-	const MeshletBuildArgs& buildArgs,
 	const std::vector<unsigned char>& vertexLock,
 	std::vector<Meshlet>& outNewMeshlets,
 	float& outError)
@@ -445,18 +500,12 @@ bool MeshletBuilder::SimplifyGroup(
 	if (usedGlobalIndices.empty())
 		return false;
 
-	// Global Index -> Local Index 的查找表 (因为 global index 很大，无法用直接数组，这里用二分查找代替 map)
-	auto GetLocalIndex = [&](uint32_t globalIdx) -> uint32_t {
-		auto it = std::lower_bound(usedGlobalIndices.begin(), usedGlobalIndices.end(), globalIdx);
-		if (it != usedGlobalIndices.end() && *it == globalIdx)
-			return static_cast<uint32_t>(std::distance(usedGlobalIndices.begin(), it));
-		return 0xFFFFFFFF;
-		};
-
 	// 构建局部顶点/索引数据
 	// 拼接组三角（使用 Local 索引）
 	std::vector<uint32_t> localIndices;
 	localIndices.reserve(g.MeshletIDs.size() * buildArgs.settings.MaxMeshletTriangles * 3);
+
+	LocalIndexCache fastCache;
 
 	for (uint32_t mid : g.MeshletIDs)
 	{
@@ -466,55 +515,65 @@ bool MeshletBuilder::SimplifyGroup(
 			uint32_t g0 = m.Vertices[m.Triangles[t + 0]];
 			uint32_t g1 = m.Vertices[m.Triangles[t + 1]];
 			uint32_t g2 = m.Vertices[m.Triangles[t + 2]];
-			localIndices.push_back(GetLocalIndex(g0));
-			localIndices.push_back(GetLocalIndex(g1));
-			localIndices.push_back(GetLocalIndex(g2));
+			localIndices.push_back(fastCache.Get(g0, usedGlobalIndices));
+			localIndices.push_back(fastCache.Get(g1, usedGlobalIndices));
+			localIndices.push_back(fastCache.Get(g2, usedGlobalIndices));
 		}
 	}
 
 	if (localIndices.empty())
 		return false;
 
+	static thread_local std::vector<float> localPositions;
+	static thread_local std::vector<float> localAttrs;
+
 	// 准备局部属性缓冲 (Position + Attributes)
 	size_t localVertexCount = usedGlobalIndices.size();
-
-	std::vector<float> localPositions(localVertexCount * 3);
+	localPositions.resize(localVertexCount * 3);
 
 	uint32_t attributeValueCount = 3; // Normal
 	if (buildArgs.psoFlags & PSOFlags::kHasTangent) attributeValueCount += 4;
 	if (buildArgs.psoFlags & PSOFlags::kHasUV0) attributeValueCount += 2;
 
-	std::vector<float> localAttrs(localVertexCount * attributeValueCount);
+	localAttrs.resize(localVertexCount * attributeValueCount);
 
 	for (size_t i = 0; i < localVertexCount; ++i)
 	{
 		uint32_t globalIdx = usedGlobalIndices[i];
-		const RawVertex& v = vertices[globalIdx];
+		const unsigned char* vPtr = buildArgs.VBData + (globalIdx * buildArgs.vertexStride);
 
 		// Position
-		localPositions[i * 3 + 0] = v.Position.GetX();
-		localPositions[i * 3 + 1] = v.Position.GetY();
-		localPositions[i * 3 + 2] = v.Position.GetZ();
+		memcpy(&localPositions[i * 3], vPtr, 12);
 
 		// Attributes
 		size_t attrBase = i * attributeValueCount;
 		size_t attrOffset = 0;
+		uint32_t vertexByteOffset = 12;
 
-		localAttrs[attrBase + attrOffset++] = v.Normal.GetX();
-		localAttrs[attrBase + attrOffset++] = v.Normal.GetY();
-		localAttrs[attrBase + attrOffset++] = v.Normal.GetZ();
+		const uint32_t* nPacked = reinterpret_cast<const uint32_t*>(vPtr + vertexByteOffset);
+		Math::Vector3 norm = DecodeNormal_R10G10B10A2(*nPacked);
+		localAttrs[attrBase + attrOffset++] = norm.GetX();
+		localAttrs[attrBase + attrOffset++] = norm.GetY();
+		localAttrs[attrBase + attrOffset++] = norm.GetZ();
+		vertexByteOffset += 4;
 
 		if (buildArgs.psoFlags & PSOFlags::kHasTangent)
 		{
-			localAttrs[attrBase + attrOffset++] = v.Tangent.GetX();
-			localAttrs[attrBase + attrOffset++] = v.Tangent.GetY();
-			localAttrs[attrBase + attrOffset++] = v.Tangent.GetZ();
-			localAttrs[attrBase + attrOffset++] = v.Tangent.GetW();
+			const uint32_t* tPacked = reinterpret_cast<const uint32_t*>(vPtr + vertexByteOffset);
+			Math::Vector4 tangent = DecodeR10G10B10A2UNORMToFloat4(*tPacked);
+			localAttrs[attrBase + attrOffset++] = tangent.GetX();
+			localAttrs[attrBase + attrOffset++] = tangent.GetY();
+			localAttrs[attrBase + attrOffset++] = tangent.GetZ();
+			localAttrs[attrBase + attrOffset++] = tangent.GetW();
+			vertexByteOffset += 4;
 		}
 		if (buildArgs.psoFlags & PSOFlags::kHasUV0)
 		{
-			localAttrs[attrBase + attrOffset++] = v.UV0[0];
-			localAttrs[attrBase + attrOffset++] = v.UV0[1];
+			const uint32_t* uv0Ptr = reinterpret_cast<const uint32_t*>(vPtr + vertexByteOffset);
+			auto [unpackedU, unpackedV] = DecodeR16G16FLOATToFloat2(*uv0Ptr);
+			localAttrs[attrBase + attrOffset++] = unpackedU;
+			localAttrs[attrBase + attrOffset++] = unpackedV;
+			vertexByteOffset += 4;
 		}
 	}
 
@@ -578,7 +637,7 @@ bool MeshletBuilder::SimplifyGroup(
 	}
 
 	// 用全局索引重建 meshlet
-	BuildMeshletsFromIndices(simplifiedGlobal.data(), simplifiedGlobal.size(), vertices, buildArgs.settings, outNewMeshlets);
+	BuildMeshletsFromIndices(buildArgs, simplifiedGlobal.data(), simplifiedGlobal.size(), outNewMeshlets);
 	for (auto& ml : outNewMeshlets)
 	{
 		ml.RefineGroupID = g.GroupID;
@@ -596,7 +655,7 @@ GroupPackage MeshletBuilder::SerializeGroup(
 	const std::unordered_map<uint32_t, uint32_t>& groupIdToOrder)
 {
 	GroupPackage package;
-	if (meshlets.empty() || buildArgs.vertices.empty())
+	if (meshlets.empty())
 		return package;
 
 	const uint32_t count = static_cast<uint32_t>(group.MeshletIDs.size());
@@ -658,8 +717,8 @@ GroupPackage MeshletBuilder::SerializeGroup(
 		// 拷贝顶点数据
 		for (uint32_t mvIdx = 0; mvIdx < m.Vertices.size(); mvIdx++)
 		{
-			const RawVertex& srcV = buildArgs.vertices[m.Vertices[mvIdx]];
-			std::memcpy(pVerticesCursor + buildArgs.vertexStride * mvIdx, srcV.VertexData, buildArgs.vertexStride);
+			const unsigned char* srcV = &(buildArgs.VBData[m.Vertices[mvIdx] * buildArgs.vertexStride]);
+			std::memcpy(pVerticesCursor + buildArgs.vertexStride * mvIdx, srcV, buildArgs.vertexStride);
 		}
 
 		pVerticesCursor += Math::AlignUp(static_cast<uint32_t>(m.Vertices.size() * buildArgs.vertexStride), 4u);
@@ -681,7 +740,7 @@ MeshletBuildProducts MeshletBuilder::BuildStreamingData(
 {
 	MeshletBuildProducts products;
 
-	if (meshlets.empty() || buildArgs.vertices.empty())
+	if (meshlets.empty())
 		return products;
 
 	std::vector<size_t> groupOrder(groups.size());

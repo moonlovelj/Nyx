@@ -37,48 +37,6 @@ using namespace Graphics;
 
 #include "MeshletBuilder.h"
 
-namespace Renderer
-{
-	// 解码 DXGI_FORMAT_R10G10B10A2_UNORM 到 float3 法线（[-1,1]）
-	inline Math::Vector3 DecodeNormal_R10G10B10A2(uint32_t packed)
-	{
-		constexpr float inv10 = 1.0f / 1023.0f;
-		const uint32_t r = (packed) & 0x3FFu;
-		const uint32_t g = (packed >> 10) & 0x3FFu;
-		const uint32_t b = (packed >> 20) & 0x3FFu;
-
-		float x = float(r) * inv10;
-		float y = float(g) * inv10;
-		float z = float(b) * inv10;
-
-		x = x * 2.0f - 1.0f;
-		y = y * 2.0f - 1.0f;
-		z = z * 2.0f - 1.0f;
-
-		const float len2 = x * x + y * y + z * z;
-		if (len2 > 0.0f)
-		{
-			const float invLen = 1.0f / std::sqrt(len2);
-			x *= invLen; y *= invLen; z *= invLen;
-		}
-		return Math::Vector3(x, y, z);
-	}
-
-    inline Math::Vector4 DecodeR10G10B10A2UNORMToFloat4(uint32_t packed)
-	{
-        const uint32_t r = (packed >> 0) & 0x3FF; // 10 bits
-        const uint32_t g = (packed >> 10) & 0x3FF;
-        const uint32_t b = (packed >> 20) & 0x3FF;
-        const uint32_t a = (packed >> 30) & 0x3;
-        return Math::Vector4(r / 1023.f, g / 1023.f, b / 1023.f, a / 3.f) * 2.f - Math::Vector4(1.0);
-	}
-
-	inline std::tuple<float, float> DecodeR16G16FLOATToFloat2(uint32_t packed)
-	{
-        return { F16ToF32(packed & 0xFFFF), F16ToF32(packed >> 16) };
-	}
-}
-
 void Renderer::CompileMesh(
 	ModelData& modelData,
 	glTF::Mesh& srcMesh,
@@ -143,56 +101,10 @@ void Renderer::CompileMesh(
             Primitive* draw = iter.second[primitiveIndex];
 			buildArgs.vertexStride = draw->vertexStride;
 			const uint32_t vertexCount = static_cast<uint32_t>(draw->VB->size() / draw->vertexStride);
-			std::vector<RawVertex> rawVertices;
-            rawVertices.reserve(vertexCount);
-            for (size_t i = 0; i < vertexCount; i++)
-            {
-                const unsigned char* vertexPtr = &draw->VB->data()[draw->vertexStride * i];
-				const float* position = reinterpret_cast<const float*>(vertexPtr);
-				RawVertex rv;
-				rv.Position = Vector3(position[0], position[1], position[2]);
-				const uint32_t* normalPtr = reinterpret_cast<const uint32_t*>(vertexPtr + 12);
-                rv.Normal = DecodeNormal_R10G10B10A2(normalPtr[0]);
-                rv.VertexData = vertexPtr;
-                if (buildArgs.psoFlags & PSOFlags::kHasTangent)
-                {
-					uint32_t tangentOffset = 16;
-					const uint32_t* tangentPtr = reinterpret_cast<const uint32_t*>(vertexPtr + tangentOffset);
-					rv.Tangent = DecodeR10G10B10A2UNORMToFloat4(tangentPtr[0]);
-
-                }
-                if (buildArgs.psoFlags & PSOFlags::kHasUV0)
-                {
-                    uint32_t uv0Offset = 16;
-                    if (buildArgs.psoFlags & PSOFlags::kHasTangent)
-                    {
-                        uv0Offset += 4;
-                    }
-                    const uint32_t* uv0Ptr = reinterpret_cast<const uint32_t*>(vertexPtr + uv0Offset);
-					auto [unpackedU, unpackedV] = DecodeR16G16FLOATToFloat2(uv0Ptr[0]);
-					rv.UV0[0] = unpackedU;
-					rv.UV0[1] = unpackedV;
-                }
-
-                rawVertices.push_back(rv);
-            }
-
-            std::vector<uint32_t> indices32;
-			indices32.resize(draw->primCount);
-            if (draw->index32 != 0)
-            {
-                const uint32_t* src = reinterpret_cast<const uint32_t*>(draw->IB->data());
-                std::memcpy(indices32.data(), src, draw->primCount * sizeof(uint32_t));
-            }
-            else
-            {
-                const uint16_t* src = reinterpret_cast<const uint16_t*>(draw->IB->data());
-                for (uint32_t i = 0; i < draw->primCount; ++i)
-                    indices32[i] = uint32_t(src[i]);
-            }
-
-			buildArgs.vertices = std::span<const RawVertex>(rawVertices.data(), rawVertices.size());
-			buildArgs.indices = std::span<const uint32_t>(indices32.data(), indices32.size());
+			buildArgs.VBData = draw->VB->data();
+			buildArgs.IBData = draw->IB->data();
+			buildArgs.vertexCount = vertexCount;
+			buildArgs.indexCount = draw->primCount;
 			buildArgs.baseGroupIndex = baseGroupIndex;
 			buildArgs.baseNodeIndex = baseNodeIndex;
             // 构建

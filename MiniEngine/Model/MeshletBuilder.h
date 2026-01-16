@@ -11,15 +11,6 @@
 #include "MeshletStructs.h"
 #include "../Core/Math/Vector.h"
 
-struct RawVertex
-{
-	Math::Vector3 Position;
-	Math::Vector3 Normal;
-	Math::Vector4 Tangent;
-	float UV0[2];
-	const unsigned char* VertexData; //完整顶点数据（用于最终序列化）
-};
-
 struct MeshletBuildSettings
 {
 	uint32_t MaxMeshletVertices = 256;
@@ -51,8 +42,10 @@ struct MeshletBuildProducts
 
 struct MeshletBuildArgs
 {
-	std::span<const RawVertex> vertices;
-	std::span<const uint32_t> indices;
+	unsigned char* VBData = nullptr;
+	unsigned char* IBData = nullptr;
+	uint32_t vertexCount = 0;
+	uint32_t indexCount = 0;
 	MeshletBuildSettings settings{};
 	uint16_t meshBufferIndex = 0;
 	uint16_t materialBufferIndex = 0;
@@ -91,21 +84,18 @@ private:
 
 	// LOD0：直接对整模型索引构建 meshlet
 	static std::vector<Meshlet> BuildLOD0Meshlets(
-		std::span<const RawVertex> vertices,
-		std::span<const uint32_t> indices,
-		const MeshletBuildSettings& s);
+		const MeshletBuildArgs& buildArgs);
 
 	// 从索引流构建一批 meshlet（简化后重建）
 	static void BuildMeshletsFromIndices(
+		const MeshletBuildArgs& buildArgs,
 		const uint32_t* indices, size_t indexCount,
-		std::span<const RawVertex> vertices,
-		const MeshletBuildSettings& s,
 		std::vector<Meshlet>& out);
 
 	// 计算 meshlet 包围球（调用 meshopt 以保证准确）
 	static void ComputeMeshletSphere(
+		const MeshletBuildArgs& buildArgs,
 		const Meshlet& m,
-		std::span<const RawVertex> vertices,
 		float outSphere[4]);
 
 	// 合并两个球（Ritter 合并）
@@ -113,15 +103,14 @@ private:
 
 	// position-only remap
 	static void GeneratePositionRemap(
-		std::span<const RawVertex> vertices,
+		const MeshletBuildArgs& buildArgs,
 		std::vector<uint32_t>& outPosRemap);
 
 	// 用 partitionClusters 按共享顶点/空间接近分组
 	static std::vector<uint32_t> GroupMeshlets(
+		const MeshletBuildArgs& buildArgs,
 		const std::vector<Meshlet>& current,
 		std::span<const uint32_t> subsetIds,
-		std::span<const RawVertex> vertices,
-		uint32_t targetGroupSize,
 		uint32_t LODLevel,
 		std::vector<Group>& groups);
 
@@ -136,10 +125,9 @@ private:
 
 	// 组级简化：拼接组索引 -> simplifyWithAttributes(法线+锁) -> 重建 meshlet
 	static bool SimplifyGroup(
+		const MeshletBuildArgs& buildArgs,
 		const Group& g,
 		const std::vector<Meshlet>& current,
-		std::span<const RawVertex> vertices,
-		const MeshletBuildArgs& buildArgs,
 		const std::vector<unsigned char>& vertexLock, // 全局锁数组
 		std::vector<Meshlet>& outNewMeshlets,
 		float& outError);
