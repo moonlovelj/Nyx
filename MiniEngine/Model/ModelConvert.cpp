@@ -85,7 +85,8 @@ void Renderer::CompileMesh(
 	uint32_t matrixIdx,
 	const Matrix4& localToObject,
 	Math::BoundingSphere& boundingSphere,
-	Math::AxisAlignedBox& boundingBox
+	Math::AxisAlignedBox& boundingBox,
+    GlobalStreamingContext& streamCtx
     )
 {
     // We still have a lot of work to do.  Now that we know about all of the primitives in this mesh
@@ -211,41 +212,46 @@ void Renderer::CompileMesh(
 				ASSERT(groupSize % 4 == 0, "Group blob must be 4-byte aligned");
 				ASSERT(groupSize <= Renderer::kPageSizeInBytes, "Single group exceeds page size limit.");
 
-                GroupMetadata metadata = group.Metadata;
-                uint64_t currentGlobalSize = modelData.m_GlobalGeometryBlob.size();
-				// ===== 计算当前和目标所属的 Page 索引 =====
-				const uint32_t currentPageNumber = static_cast<uint32_t>(modelData.m_Pages.size());
-				const uint32_t targetPageNumber = static_cast<uint32_t>(
-					(currentGlobalSize + groupSize + Renderer::kPageSizeInBytes - 1) / Renderer::kPageSizeInBytes);
-
-				if (targetPageNumber > currentPageNumber)
+				if (streamCtx.CurrentOffsetInPage + groupSize > Renderer::kPageSizeInBytes)
 				{
-					// ===== 封装当前 Page =====
+					// 空间不足，执行 Page 填充（Padding）
+					uint32_t paddingSize = Renderer::kPageSizeInBytes - streamCtx.CurrentOffsetInPage;
+					if (paddingSize > 0 && paddingSize < Renderer::kPageSizeInBytes)
+					{
+						streamCtx.TempGeoFile.write(streamCtx.ZeroBuffer.data(), paddingSize);
+						streamCtx.TotalGeometrySize += paddingSize;
+					}
+
+					// 开启新 Page
 					PageMetadata page;
 					page.StartGroupIndex = static_cast<uint32_t>(modelData.m_GroupInfos.size());
-					page.GroupCount = 1;
+					page.GroupCount = 0; // 后面会自增
 					modelData.m_Pages.push_back(page);
 
-					metadata.OffsetInPage = 0;
-					if (currentPageNumber > 0) // 不是第一个 Page，则需要扩展全局 Blob 到 Page 边界
-                    {
-                        modelData.m_GlobalGeometryBlob.resize(
-                            Math::AlignUp(currentGlobalSize, Renderer::kPageSizeInBytes)
-                        );
-                    }
-					currentGlobalSize = modelData.m_GlobalGeometryBlob.size();
+					streamCtx.CurrentPageIndex = static_cast<uint32_t>(modelData.m_Pages.size() - 1);
+					streamCtx.CurrentOffsetInPage = 0;
 				}
-                else
-                {
-					auto& page = modelData.m_Pages.back();
-					page.GroupCount++;
-					// 计算当前 Group 所属 Page 的起始位置
-					metadata.OffsetInPage = static_cast<uint32_t>(currentGlobalSize - Math::AlignDown(currentGlobalSize, kPageSizeInBytes));
-                }
-				metadata.PageIndex = static_cast<uint32_t>(modelData.m_Pages.size() - 1);
-                //metadata.OffsetInGlobalBuffer = modelData.m_GlobalGeometryBlob.size();
-                modelData.m_GroupInfos.push_back(std::move(metadata));
-                modelData.m_GlobalGeometryBlob.insert(modelData.m_GlobalGeometryBlob.end(), group.Blob.begin(), group.Blob.end());
+				else if (modelData.m_Pages.empty()) 
+				{
+                    // 初始化第一个 Page
+					PageMetadata page = { 0, 0 };
+					modelData.m_Pages.push_back(page);
+				}
+
+				// 更新 Page 元数据
+				modelData.m_Pages.back().GroupCount++;
+
+				// 填充 GroupMetadata (用于 Runtime)
+				GroupMetadata metadata = group.Metadata;
+				metadata.PageIndex = streamCtx.CurrentPageIndex;
+				metadata.OffsetInPage = streamCtx.CurrentOffsetInPage;
+				modelData.m_GroupInfos.push_back(metadata);
+
+				// 直接写盘
+				streamCtx.TempGeoFile.write(reinterpret_cast<const char*>(group.Blob.data()), groupSize);
+
+				streamCtx.CurrentOffsetInPage += groupSize;
+				streamCtx.TotalGeometrySize += groupSize;
             }
 
 			baseGroupIndex += (uint32_t)buildResult.Groups.size();
@@ -280,7 +286,8 @@ static uint32_t WalkGraph(
     std::vector<CameraData>& cameraData,
     const std::vector<glTF::Node*>& siblings,
     uint32_t curPos,
-    const Matrix4& xform
+    const Matrix4& xform,
+    GlobalStreamingContext& streamCtx
     )
 {
     size_t numSiblings = siblings.size();
@@ -318,7 +325,7 @@ static uint32_t WalkGraph(
         {
             BoundingSphere sphereOS;
             AxisAlignedBox boxOS;
-            CompileMesh(modelData, *curNode->mesh, curPos, LocalXform, sphereOS, boxOS);
+            CompileMesh(modelData, *curNode->mesh, curPos, LocalXform, sphereOS, boxOS, streamCtx);
             modelBSphere = modelBSphere.Union(sphereOS);
             modelBBox.AddBoundingBox(boxOS);
         }
@@ -339,7 +346,7 @@ static uint32_t WalkGraph(
         if (curNode->children.size() > 0)
         {
             thisGraphNode.hasChildren = 1;
-            nextPos = WalkGraph(modelData, sceneGraph, modelBSphere, modelBBox, meshList, bufferMemory, cameraData, curNode->children, nextPos, LocalXform);
+            nextPos = WalkGraph(modelData, sceneGraph, modelBSphere, modelBBox, meshList, bufferMemory, cameraData, curNode->children, nextPos, LocalXform, streamCtx);
         }
 
         // Are there more siblings?
@@ -556,7 +563,7 @@ void BuildSkins(ModelData& model, const glTF::Asset& asset)
     //}
 }
 
-bool Renderer::BuildModel(ModelData& model, const glTF::Asset& asset, int sceneIdx)
+bool Renderer::BuildModel(ModelData& model, const glTF::Asset& asset, GlobalStreamingContext& streamCtx, int sceneIdx)
 {
     BuildMaterials(model, asset);
 
@@ -573,7 +580,7 @@ bool Renderer::BuildModel(ModelData& model, const glTF::Asset& asset, int sceneI
 
     model.m_BoundingSphere = BoundingSphere(kZero);
     model.m_BoundingBox = AxisAlignedBox(kZero);
-    uint32_t numNodes = WalkGraph(model, model.m_SceneGraph, model.m_BoundingSphere, model.m_BoundingBox, model.m_Meshes, bufferMemory, model.m_Cameras, scene->nodes, 0, Matrix4(kIdentity));
+    uint32_t numNodes = WalkGraph(model, model.m_SceneGraph, model.m_BoundingSphere, model.m_BoundingBox, model.m_Meshes, bufferMemory, model.m_Cameras, scene->nodes, 0, Matrix4(kIdentity), streamCtx);
     model.m_SceneGraph.resize(numNodes);
 
     BuildAnimations(model, asset);
@@ -582,7 +589,7 @@ bool Renderer::BuildModel(ModelData& model, const glTF::Asset& asset, int sceneI
     return true;
 }
 
-bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data)
+bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, GlobalStreamingContext& streamCtx)
 {
     std::ofstream outFile(filePath, std::ios::out | std::ios::binary);
     if (!outFile)
@@ -597,7 +604,6 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data)
     header.numTextures = (uint32_t)data.m_TextureNames.size();
 
 	// Cluster 数据
-	header.geometryBlobSize = data.m_GlobalGeometryBlob.size();
 	header.groupCount = (uint32_t)data.m_GroupInfos.size();
 	header.hierarchyNodeCount = (uint32_t)data.m_Nodes.size();
 	header.pageCount = (uint32_t)data.m_Pages.size();
@@ -673,31 +679,46 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data)
     if (header.pageCount > 0)
 		outFile.write((char*)data.m_Pages.data(), header.pageCount * sizeof(PageMetadata));
 
-	// 记录 blob 起始偏移
-	const std::streampos blobPos = outFile.tellp();
-	header.geometryBlobOffset = static_cast<uint64_t>(blobPos);
+	const std::streampos currentPos = outFile.tellp();
+	// 强制跳转到下一个 256KB 边界以保证整个 Blob 的页对齐
+	const uint64_t alignedOffset = Math::AlignUp(static_cast<uint64_t>(currentPos), Renderer::kPageSizeInBytes);
+	uint32_t startPadding = static_cast<uint32_t>(alignedOffset - static_cast<uint64_t>(currentPos));
+	if (startPadding > 0)
+	{
+		std::vector<char> pad(startPadding, 0);
+		outFile.write(pad.data(), startPadding);
+	}
 
-	// Geometry Blob (放在最后，支持流式写入/读取)
-    if (header.geometryBlobSize > 0)
-    {
+	header.geometryBlobOffset = alignedOffset;
+	header.geometryBlobSize = streamCtx.TotalGeometrySize;
+
+	if (streamCtx.TotalGeometrySize > 0)
+	{
+		streamCtx.TempGeoFile.close(); 
+		std::ifstream tempIn(streamCtx.FileName, std::ios::binary);
+		if (tempIn)
+		{
+			constexpr size_t copyBufferSize = 16 * 1024 * 1024;
+			std::unique_ptr<char[]> buffer(new char[copyBufferSize]);
+			while (tempIn.read(buffer.get(), copyBufferSize) || tempIn.gcount() > 0)
+			{
+				outFile.write(buffer.get(), tempIn.gcount());
+			}
+			tempIn.close();
+			
+		}
 		const uint32_t pageSize = Renderer::kPageSizeInBytes;
-		const size_t   blobSize = data.m_GlobalGeometryBlob.size();
+		const size_t   blobSize = streamCtx.TotalGeometrySize;
 		const size_t   alignedSize = Math::AlignUp(blobSize, pageSize);
 		if (alignedSize != blobSize)
 		{
 			// 最后一页剩余空间被零填充，方便页对齐读取
 			std::vector<uint8_t> padded(alignedSize - blobSize, 0);
-			outFile.write(reinterpret_cast<const char*>(data.m_GlobalGeometryBlob.data()), blobSize);
 			outFile.write(reinterpret_cast<const char*>(padded.data()), padded.size());
 			header.geometryBlobSize = static_cast<uint64_t>(alignedSize);
 		}
-        else
-        {
-            outFile.write((char*)data.m_GlobalGeometryBlob.data(), header.geometryBlobSize);
-        }
-    }
+	}
 
-	// 回写头部，补齐 geometryBlobOffset
 	outFile.seekp(0, std::ios::beg);
 	outFile.write(reinterpret_cast<const char*>(&header), sizeof(FileHeader));
 

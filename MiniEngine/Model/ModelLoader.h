@@ -30,6 +30,26 @@ namespace Renderer
 {
     using namespace Math;
 
+	struct GlobalStreamingContext {
+		const std::string FileName = "geometry_build_temp.bin";
+		std::ofstream TempGeoFile;          // 临时文件流
+		uint64_t TotalGeometrySize = 0;     // 已写入的总字节数
+		uint32_t CurrentPageIndex = 0;      // 当前 Page 索引
+		uint32_t CurrentOffsetInPage = 0;   // 当前 Page 内的偏移
+
+		std::vector<char> ZeroBuffer;
+
+		GlobalStreamingContext() {
+			ZeroBuffer.assign(Renderer::kPageSizeInBytes, 0);
+			// 创建临时文件
+			TempGeoFile.open(FileName, std::ios::binary | std::ios::out | std::ios::trunc);
+		}
+
+		~GlobalStreamingContext() {
+			if (TempGeoFile.is_open()) TempGeoFile.close();
+		}
+	};
+
     // Unaligned mirror of MaterialConstants
     struct MaterialConstantData
     {
@@ -54,7 +74,6 @@ namespace Renderer
         BoundingSphere m_BoundingSphere;
         AxisAlignedBox m_BoundingBox;
 
-		std::vector<uint8_t> m_GlobalGeometryBlob; // 巨大的几何数据 Blob
 		std::vector<GroupMetadata> m_GroupInfos;
 		std::vector<HierarchyNode> m_Nodes;
 		std::vector<PageMetadata> m_Pages;
@@ -105,11 +124,12 @@ namespace Renderer
 		uint32_t matrixIdx,
 		const Matrix4& localToObject,
 		Math::BoundingSphere& boundingSphere,
-		Math::AxisAlignedBox& boundingBox
+		Math::AxisAlignedBox& boundingBox,
+        GlobalStreamingContext& streamCtx
     );
 
-    bool BuildModel( ModelData& model, const glTF::Asset& asset, int sceneIdx = -1 );
-    bool SaveModel( const std::wstring& filePath, const ModelData& model );
+    bool BuildModel( ModelData& model, const glTF::Asset& asset, GlobalStreamingContext& streamCtx, int sceneIdx = -1 );
+    bool SaveModel( const std::wstring& filePath, const ModelData& model, GlobalStreamingContext& streamCtx);
     
     std::shared_ptr<Model> LoadModel( const std::wstring& filePath, bool forceRebuild = false );
 }

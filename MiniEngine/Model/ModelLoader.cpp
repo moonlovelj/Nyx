@@ -186,20 +186,21 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
         }
 
         ModelData modelData;
+        GlobalStreamingContext streamCtx;
 
         const std::wstring fileExt = Utility::ToLower(Utility::GetFileExtension(filePath));
 
         if (fileExt == L"gltf" || fileExt == L"glb")
         {
             glTF::Asset asset(filePath);
-            if (!BuildModel(modelData, asset))
+            if (!BuildModel(modelData, asset, streamCtx))
                 return nullptr;
         }
         else if (fileExt == L"h3d")
         {
             ModelH3D modelh3d;
             const std::wstring basePath = Utility::GetBasePath(filePath);
-            if (!modelh3d.Load(filePath) || !modelh3d.BuildModel(modelData, basePath))
+            if (!modelh3d.Load(filePath) || !modelh3d.BuildModel(modelData, streamCtx, basePath))
                 return nullptr;
         }
         else
@@ -208,7 +209,7 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
             return nullptr;
         }
 
-        if (!SaveModel(miniFileName, modelData))
+        if (!SaveModel(miniFileName, modelData, streamCtx))
             return nullptr;
 
         inFile = std::ifstream(miniFileName, std::ios::in | std::ios::binary);
@@ -357,18 +358,6 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
     {
         model->m_PageMetadatas.resize(header.pageCount);
         inFile.read((char*)model->m_PageMetadatas.data(), header.pageCount * sizeof(PageMetadata));
-	}
-
-	// Geometry Blob
-	// 关键：不读取到内存！只记录文件偏移。
-	// 流式系统会在运行时根据 m_GroupInfos[i].OffsetInGlobalBuffer 这里的偏移去读取文件
-
-	// 如果一定要一次性读取（小场景），可以加个开关
-
-	if (header.geometryBlobSize > 0) 
-    {
-		//model->m_GlobalGeometryBlob.resize(header.geometryBlobSize);
-		//inFile.read((char*)model->m_GlobalGeometryBlob.data(), header.geometryBlobSize);
 	}
 
     return model;

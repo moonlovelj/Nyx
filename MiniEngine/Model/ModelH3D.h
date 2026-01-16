@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -19,6 +19,7 @@
 #include "GpuBuffer.h"
 #include "DescriptorHeap.h"
 #include "../Core/Math/BoundingBox.h"
+#include "ModelLoader.h"
 
 namespace Renderer
 {
@@ -170,7 +171,7 @@ public:
 		return LoadH3D(filename);
     }
 
-    bool BuildModel(Renderer::ModelData& model, const std::wstring& basePath=L"") const;
+    bool BuildModel(Renderer::ModelData& model, Renderer::GlobalStreamingContext& streamCtx, const std::wstring& basePath=L"") const;
 
     uint32_t GetMeshCount() const { return m_Header.meshCount; }
     const Mesh& GetMesh(uint32_t meshIdx) const

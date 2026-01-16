@@ -25,6 +25,7 @@
 #include "TextureConvert.h"
 #include "ModelInstanceManager.h"
 #include "GeometryStreaming.h"
+#include <chrono>
 
 extern "C" {
 	__declspec(dllexport) extern const UINT D3D12SDKVersion = 616; // 对应Agility SDK版本
@@ -193,13 +194,14 @@ void SceneViewer::Startup( void )
 
     std::wstring gltfFileName;
 
-    bool forceRebuild = false;
+    bool forceRebuild = true;
     uint32_t rebuildValue;
     if (CommandLineArgs::GetInteger(L"rebuild", rebuildValue))
         forceRebuild = rebuildValue != 0;
 
     if (CommandLineArgs::GetString(L"model", gltfFileName) == false)
     {
+        auto startTime = std::chrono::steady_clock::now();
         //auto model = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
 		//m_ModelInst = Renderer::LoadModel(L"Assets/old_federal_building/scene.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
@@ -208,10 +210,14 @@ void SceneViewer::Startup( void )
         //auto model = Renderer::LoadModel(L"Assets/lumber_mill_wood_factory_gltf/scene.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/zorah_main_public.gltf/zorah_main_public.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/Monkey/monkey.gltf", forceRebuild);
-		//auto model = Renderer::LoadModel(L"Assets/OcclusionTest/scene.gltf", forceRebuild);
+		//auto model = Renderer::LoadModel(L"Assets/Dragon/Dragon.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/japanese_metal_lantern_vfvjccaqx_gltf_raw/Japanese_Metal_Lantern_vfvjccaqx_Raw.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/OcclusionTest/scene.gltf", forceRebuild);
         //m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
+
+        auto endTime = std::chrono::steady_clock::now();
+		auto durationTime = duration_cast<std::chrono::milliseconds>(endTime - startTime);
+		Utility::Printf("Model loading time: %lld ms\n", durationTime.count());
 
         ModelInstanceManager::Get().Initialize(model, 1);
 		OrientedBox obb = ModelInstanceManager::Get().GetModelInstance(0).GetBoundingBox();

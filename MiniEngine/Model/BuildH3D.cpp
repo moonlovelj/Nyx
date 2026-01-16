@@ -17,7 +17,7 @@ bool FileExists( const std::wstring& fileName )
     return _wstat64(fileName.c_str(), &fileStat) == 0;
 }
 
-bool ModelH3D::BuildModel(ModelData& model, const std::wstring& basePath) const
+bool ModelH3D::BuildModel(ModelData& model, Renderer::GlobalStreamingContext& streamCtx, const std::wstring& basePath) const
 {
     model.m_SceneGraph.resize(1);
 
@@ -207,7 +207,7 @@ bool ModelH3D::BuildModel(ModelData& model, const std::wstring& basePath) const
 
         BoundingSphere sphereOS;
         AxisAlignedBox boxOS;
-        Renderer::CompileMesh(model, gltfMesh, 0, Matrix4(kIdentity), sphereOS, boxOS); 
+        Renderer::CompileMesh(model, gltfMesh, 0, Matrix4(kIdentity), sphereOS, boxOS, streamCtx);
         model.m_BoundingSphere = model.m_BoundingSphere.Union(sphereOS);
         model.m_BoundingBox.AddBoundingBox(boxOS);
     }
