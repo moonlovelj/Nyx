@@ -107,6 +107,9 @@ void Renderer::CompileMesh(
 			buildArgs.indexCount = draw->primCount;
 			buildArgs.baseGroupIndex = baseGroupIndex;
 			buildArgs.baseNodeIndex = baseNodeIndex;
+#if defined(_DEBUG)
+			buildArgs.settings.bOutputDebugInfo = true;
+#endif
             // 构建
             const auto buildResult = MeshletBuilder::Build(buildArgs);
             // 记录根节点
@@ -170,6 +173,7 @@ void Renderer::CompileMesh(
 			baseNodeIndex += (uint32_t)buildResult.Hierarchy.size();
 
 			modelData.m_Nodes.insert(modelData.m_Nodes.end(), buildResult.Hierarchy.begin(), buildResult.Hierarchy.end());
+            modelData.m_TriangleCount += buildArgs.indexCount / 3;
         }
 
         //if (srcMesh.skin >= 0)
@@ -185,6 +189,8 @@ void Renderer::CompileMesh(
 
 		modelData.m_Meshes.push_back(mesh);
     }
+
+	Utility::Printf("Already build triangles count : %llu\n", modelData.m_TriangleCount);
 }
 
 

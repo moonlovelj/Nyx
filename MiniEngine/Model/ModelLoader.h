@@ -90,6 +90,8 @@ namespace Renderer
         std::vector<std::string> m_TextureNames;
         std::vector<uint8_t> m_TextureOptions;
         std::vector<CameraData> m_Cameras;
+
+		uint64_t m_TriangleCount = 0;
     };
 
     struct FileHeader

@@ -81,14 +81,13 @@ struct LocalIndexCache {
 MeshletBuildProducts MeshletBuilder::Build(
 	const MeshletBuildArgs& buildArgs)
 {
-	//if (buildArgs.indices.empty() || buildArgs.vertices.empty())
-	//	return {};
-
-	if (buildArgs.IBData == nullptr || buildArgs.VBData == nullptr || buildArgs.indexCount == 0)
+	if (buildArgs.IBData == nullptr || buildArgs.VBData == nullptr || 
+		buildArgs.indexCount == 0 || buildArgs.vertexCount == 0)
 		return {};
 
-	Utility::Printf(L"[MeshletBuilder] Start building meshlets for meshBufferIndex=%u, materialBufferIndex=%u\n",
-		buildArgs.meshBufferIndex, buildArgs.materialBufferIndex);
+	if (buildArgs.settings.bOutputDebugInfo)
+		Utility::Printf(L"[MeshletBuilder] Start building meshlets for meshBufferIndex=%u, materialBufferIndex=%u\n",
+			buildArgs.meshBufferIndex, buildArgs.materialBufferIndex);
 
 	// 生成 position-only remap（供后续锁边用）
 	std::vector<uint32_t> posRemap(buildArgs.vertexCount);
@@ -102,14 +101,12 @@ MeshletBuildProducts MeshletBuilder::Build(
 	std::iota(activeIds.begin(), activeIds.end(), 0u);
 
 	uint32_t lastTriCount = 0;
+	for (const auto& m : current) lastTriCount += static_cast<uint32_t>(m.Triangles.size() / 3);
+
 	// 打印 LOD0 统计
-	{
-		uint32_t triCount0 = 0;
-		for (const auto& m : current) triCount0 += static_cast<uint32_t>(m.Triangles.size() / 3);
+	if (buildArgs.settings.bOutputDebugInfo)
 		Utility::Printf(L"[MeshletBuilder] LOD %u: meshlets=%u, triangles=%u\n",
-			0u, static_cast<uint32_t>(current.size()), triCount0);
-		lastTriCount = triCount0;
-	}
+			0u, static_cast<uint32_t>(current.size()), lastTriCount);
 
 	std::vector<Group> currentGroups;
 
@@ -233,13 +230,15 @@ MeshletBuildProducts MeshletBuilder::Build(
 			uint32_t triCount = 0;
 			for (const auto& m : newMeshlets) triCount += static_cast<uint32_t>(m.Triangles.size() / 3);
 			float reduction = 1.0f - float(triCount) / float(lastTriCount);
-			Utility::Printf(L"[MeshletBuilder] LOD %u: meshlets=%u, triangles=%u\n",
-				lodLevel, static_cast<uint32_t>(newMeshlets.size()), triCount);
+			if (buildArgs.settings.bOutputDebugInfo)
+				Utility::Printf(L"[MeshletBuilder] LOD %u: meshlets=%u, triangles=%u\n",
+					lodLevel, static_cast<uint32_t>(newMeshlets.size()), triCount);
 			lastTriCount = triCount;
 			if (reduction < buildArgs.settings.minReductionRatio)
 			{
-				Utility::Printf(L"[MeshletBuilder]  Simplification reduction %.2f%% below threshold %.2f%%, stopping.\n",
-					reduction * 100.0f, buildArgs.settings.minReductionRatio * 100.0f);
+				if (buildArgs.settings.bOutputDebugInfo)
+					Utility::Printf(L"[MeshletBuilder]  Simplification reduction %.2f%% below threshold %.2f%%, stopping.\n",
+						reduction * 100.0f, buildArgs.settings.minReductionRatio * 100.0f);
 				break;
 			}
 		}
@@ -263,11 +262,12 @@ MeshletBuilder::BuildLOD0Meshlets(
 	std::vector<Meshlet> out;
 	BuildMeshletsFromIndices(buildArgs, reinterpret_cast<uint32_t*>(buildArgs.IBData), buildArgs.indexCount, out);
 
-	// LOD0 误差 = 0
-	for (auto& m : out)
-	{
-		ComputeMeshletSphere(buildArgs, m, m.BoundSphere);
-	}
+	std::for_each(std::execution::par, out.begin(), out.end(),
+		[&buildArgs](Meshlet& m)
+		{
+			ComputeMeshletSphere(buildArgs, m, m.BoundSphere);
+		});
+
 	return out;
 }
 
@@ -929,53 +929,62 @@ MeshletBuildProducts MeshletBuilder::BuildStreamingData(
 		}
 	}
 
-	// ========== 打印统计信息 ==========
-	Utility::Printf(L"[BuildStreamingData] Summary:\n");
-	Utility::Printf(L"Total Groups: %u\n", static_cast<uint32_t>(products.Groups.size()));
-	Utility::Printf(L"Total BVH Nodes: %u\n", static_cast<uint32_t>(products.Hierarchy.size()));
-	Utility::Printf(L"Top-level BVH Nodes: %u\n", topSize);
-	Utility::Printf(L"LOD Levels: %u\n", maxLodLevel + 1);
-
-	// 按 LOD 层统计
-	for (uint32_t lod = 0; lod <= maxLodLevel; ++lod)
+	if (buildArgs.settings.bOutputDebugInfo)
 	{
-		uint32_t groupCount = static_cast<uint32_t>(lodGroups[lod].size());
-		uint32_t bvhCount = static_cast<uint32_t>(lodBVHs[lod].size());
-		Utility::Printf(L"  LOD %u: %u groups, %u BVH nodes\n", lod, groupCount, bvhCount);
+		// ========== 打印统计信息 ==========
+		Utility::Printf(L"[BuildStreamingData] Summary:\n");
+		Utility::Printf(L"Total Groups: %u\n", static_cast<uint32_t>(products.Groups.size()));
+		Utility::Printf(L"Total BVH Nodes: %u\n", static_cast<uint32_t>(products.Hierarchy.size()));
+		Utility::Printf(L"Top-level BVH Nodes: %u\n", topSize);
+		Utility::Printf(L"LOD Levels: %u\n", maxLodLevel + 1);
 	}
 
-	// -------------------------------------------------------
-	// 打印 BVH 节点内容
-	// -------------------------------------------------------
-	Utility::Printf(L"--- BVH Nodes Dump (%u nodes) ---\n", static_cast<uint32_t>(products.Hierarchy.size()));
-	for (size_t i = 0; i < products.Hierarchy.size(); ++i)
+	if (buildArgs.settings.bOutputDebugInfo)
 	{
-		const auto& node = products.Hierarchy[i];
-
-		// 检查 IsGroup 标志 (位域在 union 中共享，访问 Internal.IsGroup 即可)
-		if (node.Internal.IsGroup)
+		// 按 LOD 层统计
+		for (uint32_t lod = 0; lod <= maxLodLevel; ++lod)
 		{
-			// 是 Group 节点 (Leaf)
-			// 此时 ChildStartIndex/ChildCount 字段无效，应打印 GroupIndex 等信息
-			Utility::Printf(L"Node[%u]: IsGroup=YES (Leaf), GroupIndex=%u, MeshletCount=%u, Bounds=(%.3f, %.3f, %.3f, %.3f), Error=%.5f\n",
-				static_cast<uint32_t>(i),
-				node.Leaf.GroupIndex,
-				node.Leaf.MeshletCountMinusOne + 1,
-				node.BoundSphere[0], node.BoundSphere[1], node.BoundSphere[2], node.BoundSphere[3],
-				node.MaxParrentError);
-		}
-		else
-		{
-			// 是内部节点 (Internal)
-			Utility::Printf(L"Node[%u]: IsGroup=NO,  ChildCount=%u, ChildStartIndex=%u, Bounds=(%.3f, %.3f, %.3f, %.3f), Error=%.5f\n",
-				static_cast<uint32_t>(i),
-				node.Internal.ChildCount,
-				node.Internal.ChildStartIndex,
-				node.BoundSphere[0], node.BoundSphere[1], node.BoundSphere[2], node.BoundSphere[3],
-				node.MaxParrentError);
+			uint32_t groupCount = static_cast<uint32_t>(lodGroups[lod].size());
+			uint32_t bvhCount = static_cast<uint32_t>(lodBVHs[lod].size());
+			Utility::Printf(L"  LOD %u: %u groups, %u BVH nodes\n", lod, groupCount, bvhCount);
 		}
 	}
-	Utility::Printf(L"-----------------------------------\n");
+
+	if (buildArgs.settings.bOutputDebugInfo)
+	{
+		// -------------------------------------------------------
+		// 打印 BVH 节点内容
+		// -------------------------------------------------------
+		Utility::Printf(L"--- BVH Nodes Dump (%u nodes) ---\n", static_cast<uint32_t>(products.Hierarchy.size()));
+		for (size_t i = 0; i < products.Hierarchy.size(); ++i)
+		{
+			const auto& node = products.Hierarchy[i];
+
+			// 检查 IsGroup 标志 (位域在 union 中共享，访问 Internal.IsGroup 即可)
+			if (node.Internal.IsGroup)
+			{
+				// 是 Group 节点 (Leaf)
+				// 此时 ChildStartIndex/ChildCount 字段无效，应打印 GroupIndex 等信息
+				Utility::Printf(L"Node[%u]: IsGroup=YES (Leaf), GroupIndex=%u, MeshletCount=%u, Bounds=(%.3f, %.3f, %.3f, %.3f), Error=%.5f\n",
+					static_cast<uint32_t>(i),
+					node.Leaf.GroupIndex,
+					node.Leaf.MeshletCountMinusOne + 1,
+					node.BoundSphere[0], node.BoundSphere[1], node.BoundSphere[2], node.BoundSphere[3],
+					node.MaxParrentError);
+			}
+			else
+			{
+				// 是内部节点 (Internal)
+				Utility::Printf(L"Node[%u]: IsGroup=NO,  ChildCount=%u, ChildStartIndex=%u, Bounds=(%.3f, %.3f, %.3f, %.3f), Error=%.5f\n",
+					static_cast<uint32_t>(i),
+					node.Internal.ChildCount,
+					node.Internal.ChildStartIndex,
+					node.BoundSphere[0], node.BoundSphere[1], node.BoundSphere[2], node.BoundSphere[3],
+					node.MaxParrentError);
+			}
+		}
+		Utility::Printf(L"-----------------------------------\n");
+	}
 
 	return products;
 }

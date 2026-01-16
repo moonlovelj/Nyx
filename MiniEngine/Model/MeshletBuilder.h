@@ -26,6 +26,8 @@ struct MeshletBuildSettings
 	float LODErrorMergePrevious = 1.5f; // 用来保证单调
 
 	bool bUseSimplifyPermissive = true;
+
+	bool bOutputDebugInfo = false;
 };
 
 struct GroupPackage
