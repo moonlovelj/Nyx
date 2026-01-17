@@ -36,8 +36,8 @@ namespace Renderer
 {
     class MeshSorter;
 
-	inline constexpr uint32_t kPageSizeInBytes = 256u * 1024u;             // 256 KB
-	inline constexpr uint32_t kChunkSizeInBytes = kPageSizeInBytes * 4u * 1024u; // 1 GB
+	inline constexpr uint32_t kPageSizeInBytes = 512u * 1024u;             // 256 KB
+	inline constexpr uint32_t kChunkSizeInBytes = kPageSizeInBytes * 2u * 1024u; // 1 GB
 }
 
 //

@@ -158,17 +158,92 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
         //    OptimizeFaces((uint32_t*)inPrim.indices->dataPtr, inPrim.indices->count, (uint16_t*)outPrim.IB->data(), 64);
         //}
 
-		if (inPrim.indices->componentType == glTF::Accessor::kUnsignedShort)
-		{
-            OptimizeFaces((uint16_t*)inPrim.indices->dataPtr, inPrim.indices->count, (uint32_t*)outPrim.IB->data(), 64);
-		}
-		else // kUnsignedInt
-		{
-            ASSERT(inPrim.indices->componentType == Accessor::kUnsignedInt);
-            OptimizeFaces((uint32_t*)inPrim.indices->dataPtr, inPrim.indices->count, (uint32_t*)outPrim.IB->data(), 64);
-		}
+		//if (inPrim.indices->componentType == glTF::Accessor::kUnsignedShort)
+		//{
+  //          OptimizeFaces((uint16_t*)inPrim.indices->dataPtr, inPrim.indices->count, (uint32_t*)outPrim.IB->data(), 64);
+		//}
+		//else // kUnsignedInt
+		//{
+  //          ASSERT(inPrim.indices->componentType == Accessor::kUnsignedInt);
+  //          OptimizeFaces((uint32_t*)inPrim.indices->dataPtr, inPrim.indices->count, (uint32_t*)outPrim.IB->data(), 64);
+		//}
+        if (inPrim.indices->componentType == glTF::Accessor::kUnsignedByte)
+        {
+            uint8_t* srcIB = (uint8_t*)inPrim.indices->dataPtr;
+            if (b32BitIndices)
+            {
+                uint32_t* dstIB = (uint32_t*)outPrim.IB->data();
+                for (uint32_t i = 0; i < indexCount; ++i)
+                    dstIB[i] = srcIB[i];
+            }
+            else
+            {
+                uint16_t* dstIB = (uint16_t*)outPrim.IB->data();
+                for (uint32_t i = 0; i < indexCount; ++i)
+                    dstIB[i] = srcIB[i];
+			}
+        }
+        else if (inPrim.indices->componentType == glTF::Accessor::kUnsignedShort)
+        {
+            uint16_t* srcIB = (uint16_t*)inPrim.indices->dataPtr;
+            if (b32BitIndices)
+            {
+                uint32_t* dstIB = (uint32_t*)outPrim.IB->data();
+                for (uint32_t i = 0; i < indexCount; ++i)
+                    dstIB[i] = srcIB[i];
+            }
+            else
+            {
+                uint16_t* dstIB = (uint16_t*)outPrim.IB->data();
+                std::memcpy(dstIB, srcIB, indexCount * sizeof(uint16_t));
+            }
+        }
+        else // kUnsignedInt
+        {
+            uint32_t* srcIB = (uint32_t*)inPrim.indices->dataPtr;
+            if (b32BitIndices)
+            {
+                uint32_t* dstIB = (uint32_t*)outPrim.IB->data();
+                std::memcpy(dstIB, srcIB, indexCount * sizeof(uint32_t));
+            }
+            else
+            {
+                uint16_t* dstIB = (uint16_t*)outPrim.IB->data();
+                for (uint32_t i = 0; i < indexCount; ++i)
+                    dstIB[i] = (uint16_t)srcIB[i];
+            }
+        }
+
         indices = outPrim.IB->data();
     }
+
+	{
+		uint32_t* ib32 = (uint32_t*)indices;
+		bool foundError = false;
+		uint32_t errorIndexValue = 0;
+		size_t errorPosition = 0;
+
+		for (uint32_t i = 0; i < indexCount; ++i)
+		{
+			if (ib32[i] >= vertexCount)
+			{
+				foundError = true;
+				errorIndexValue = ib32[i];
+				errorPosition = i;
+				// 强制修复
+				ib32[i] = 0;
+			}
+		}
+
+		if (foundError)
+		{
+			Utility::Printf("\n!!! [CRITICAL DATA ERROR] !!!\n");
+			Utility::Printf("Mesh contains out-of-bounds index!\n");
+			Utility::Printf("Index Value: %u, Vertex Count: %u\n", errorIndexValue, vertexCount);
+			Utility::Printf("Position in IB: %llu\n", (unsigned long long)errorPosition);
+			 //__debugbreak(); 
+		}
+}
 
     ASSERT(maxIndex > 0);
 

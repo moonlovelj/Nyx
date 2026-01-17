@@ -109,6 +109,7 @@ void Renderer::CompileMesh(
 			buildArgs.baseNodeIndex = baseNodeIndex;
 #if defined(_DEBUG)
 			buildArgs.settings.bOutputDebugInfo = true;
+            Utility::Printf("Start build meshlets of primitive with %llu triangles", buildArgs.indexCount / 3);
 #endif
             // 构建
             const auto buildResult = MeshletBuilder::Build(buildArgs);
