@@ -15,8 +15,11 @@ struct MeshletBuildSettings
 {
 	uint32_t MaxMeshletVertices = 256;
 	uint32_t MaxMeshletTriangles = 128;
+	uint32_t MinMeshletTriangles = 32;
 	uint32_t TargetMeshletsPerGroup = 32;
 	uint32_t MaxBVHNodeChildren = 8;
+
+	float ClusterSplitFactor = 2.0f;
 
 	// 简化目标与失败阈值
 	float TargetSimplifyRatio = 0.5f;

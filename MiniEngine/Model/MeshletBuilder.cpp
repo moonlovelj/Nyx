@@ -279,17 +279,16 @@ void MeshletBuilder::BuildMeshletsFromIndices(
 	const float* pos = reinterpret_cast<const float*>(buildArgs.VBData);
 	const size_t stride = buildArgs.vertexStride;
 
-	// 申请上界缓冲
-	size_t maxMeshlets = meshopt_buildMeshletsBound(indexCount, buildArgs.settings.MaxMeshletVertices, buildArgs.settings.MaxMeshletTriangles);
+	size_t maxMeshlets = meshopt_buildMeshletsBound(indexCount, buildArgs.settings.MaxMeshletVertices, buildArgs.settings.MinMeshletTriangles);
 	std::vector<meshopt_Meshlet> mlets(maxMeshlets);
 	std::vector<uint32_t> mlVertices(indexCount); 
 	std::vector<unsigned char> mlTriangles(indexCount);
 
-	size_t mlCount = meshopt_buildMeshlets(
+	size_t mlCount = meshopt_buildMeshletsFlex(
 		mlets.data(), mlVertices.data(), mlTriangles.data(),
 		indices, indexCount,
 		pos, buildArgs.vertexCount, stride,
-		buildArgs.settings.MaxMeshletVertices, buildArgs.settings.MaxMeshletTriangles, 0.0f);
+		buildArgs.settings.MaxMeshletVertices, buildArgs.settings.MinMeshletTriangles, buildArgs.settings.MaxMeshletTriangles, 0.0f, buildArgs.settings.ClusterSplitFactor);
 
 	// 转为 TempMeshlet
 	out.reserve(out.size() + mlCount);
@@ -305,7 +304,7 @@ void MeshletBuilder::BuildMeshletsFromIndices(
 		tm.Triangles.resize(ml.triangle_count * 3);
 		std::copy_n(mlTriangles.data() + ml.triangle_offset, ml.triangle_count * 3, tm.Triangles.begin());
 
-		// 可选优化局部性
+		//优化局部性
 		meshopt_optimizeMeshlet(
 			tm.Vertices.data(), tm.Triangles.data(),
 			ml.triangle_count, ml.vertex_count);
