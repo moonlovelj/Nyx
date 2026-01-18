@@ -1,0 +1,57 @@
+﻿#pragma once
+
+#include "cgltf.h"
+#include <string>
+#include <vector>
+#include <memory>
+#include <map>
+
+namespace glTF
+{
+	struct Accessor
+	{
+		enum { kByte, kUnsignedByte, kShort, kUnsignedShort, kSignedInt, kUnsignedInt, kFloat };
+		enum { kScalar, kVec2, kVec3, kVec4, kMat2, kMat3, kMat4 };
+
+		const uint8_t* dataPtr;
+		uint32_t stride;
+		uint32_t count;
+		uint16_t componentType;
+		uint16_t type;
+	};
+
+	struct Primitive
+	{
+		enum eAttribType { kPosition, kNormal, kTangent, kTexcoord0, kTexcoord1, kColor0, kJoints0, kWeights0, kNumAttribs };
+	};
+
+	struct Material
+	{
+		enum { kBaseColor, kMetallicRoughness, kOcclusion, kEmissive, kNormal, kSpecularColor, kNumTextures };
+	};
+
+	struct AnimChannel {
+		enum ePath { kTranslation, kRotation, kScale, kWeights };
+	};
+
+	struct AnimSampler {
+		enum eInterpolation { kLinear, kStep, kCatmullRomSpline, kCubicSpline };
+	};
+
+	class GltfAsset
+	{
+	public:
+		GltfAsset(const std::wstring& filePath);
+		~GltfAsset();
+
+		bool IsValid() const { return m_Data != nullptr; }
+
+		cgltf_data* m_Data = nullptr;
+		std::wstring m_BasePath;
+
+		// 辅助工具：将 cgltf 枚举转为兼容旧代码的枚举
+		static uint16_t MapComponentType(cgltf_component_type type);
+		static uint16_t MapType(cgltf_type type);
+		static Accessor MakeAccessor(const cgltf_accessor* src);
+	};
+}

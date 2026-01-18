@@ -18,6 +18,7 @@
 #include "ConstantBuffers.h"
 #include "../Core/Math/BoundingSphere.h"
 #include "../Core/Math/BoundingBox.h"
+#include "glTFLoader.h"
 
 #include <cstdint>
 #include <vector>
@@ -122,7 +123,8 @@ namespace Renderer
 
     void CompileMesh(
 		ModelData& modelData,
-		glTF::Mesh& srcMesh,
+        const cgltf_data* data,
+        const cgltf_mesh& srcMesh,
 		uint32_t matrixIdx,
 		const Matrix4& localToObject,
 		Math::BoundingSphere& boundingSphere,
@@ -130,7 +132,7 @@ namespace Renderer
         GlobalStreamingContext& streamCtx
     );
 
-    bool BuildModel( ModelData& model, const glTF::Asset& asset, GlobalStreamingContext& streamCtx, int sceneIdx = -1 );
+    bool BuildModel( ModelData& model, const glTF::GltfAsset& asset, GlobalStreamingContext& streamCtx, int sceneIdx = -1 );
     bool SaveModel( const std::wstring& filePath, const ModelData& model, GlobalStreamingContext& streamCtx);
     
     std::shared_ptr<Model> LoadModel( const std::wstring& filePath, bool forceRebuild = false );

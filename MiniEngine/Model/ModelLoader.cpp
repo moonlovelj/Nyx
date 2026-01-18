@@ -17,7 +17,7 @@
 #include "ModelLoader.h"
 #include "Renderer.h"
 #include "Model.h"
-#include "glTF.h"
+#include "glTFLoader.h"
 #include "ModelH3D.h"
 #include "TextureManager.h"
 #include "TextureConvert.h"
@@ -192,7 +192,7 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
 
         if (fileExt == L"gltf" || fileExt == L"glb")
         {
-            glTF::Asset asset(filePath);
+            glTF::GltfAsset asset(filePath);
             if (!BuildModel(modelData, asset, streamCtx))
                 return nullptr;
         }

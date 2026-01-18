@@ -2,7 +2,7 @@
 #include "ModelLoader.h"
 #include "MeshConvert.h"
 #include "TextureConvert.h"
-#include "glTF.h"
+#include "glTFLoader.h"
 #include <map>
 #include <vector>
 #include <string>
@@ -183,33 +183,33 @@ bool ModelH3D::BuildModel(ModelData& model, Renderer::GlobalStreamingContext& st
         IndexStream.componentType = glTF::Accessor::kUnsignedShort;
         IndexStream.type = glTF::Accessor::kScalar;
 
-        glTF::Material material;
-        material.flags = model.m_MaterialConstants[mesh.materialIndex].flags;
-        material.index = mesh.materialIndex;
-        
-        glTF::Mesh gltfMesh;
-        gltfMesh.primitives.resize(1);
+        //glTF::Material material;
+        //material.flags = model.m_MaterialConstants[mesh.materialIndex].flags;
+        //material.index = mesh.materialIndex;
+        //
+        //glTF::Mesh gltfMesh;
+        //gltfMesh.primitives.resize(1);
 
-        glTF::Primitive& prim = gltfMesh.primitives[0];
-        prim.attributes[glTF::Primitive::kPosition] = &PosStream;
-        prim.attributes[glTF::Primitive::kTexcoord0] = &UVStream;
-        prim.attributes[glTF::Primitive::kNormal] = &NormalStream;
-        prim.indices = &IndexStream;
-        prim.material = &material;
-        prim.attribMask = 0xB;
-        prim.mode = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-        const Vector3 BoxMin = mesh.boundingBox.GetMin();
-        const Vector3 BoxMax = mesh.boundingBox.GetMax();
-        memcpy(prim.minPos, &BoxMin, 12);
-        memcpy(prim.maxPos, &BoxMax, 12);
-        prim.minIndex = 0;
-        prim.maxIndex = 0;
+        //glTF::Primitive& prim = gltfMesh.primitives[0];
+        //prim.attributes[glTF::Primitive::kPosition] = &PosStream;
+        //prim.attributes[glTF::Primitive::kTexcoord0] = &UVStream;
+        //prim.attributes[glTF::Primitive::kNormal] = &NormalStream;
+        //prim.indices = &IndexStream;
+        //prim.material = &material;
+        //prim.attribMask = 0xB;
+        //prim.mode = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+        //const Vector3 BoxMin = mesh.boundingBox.GetMin();
+        //const Vector3 BoxMax = mesh.boundingBox.GetMax();
+        //memcpy(prim.minPos, &BoxMin, 12);
+        //memcpy(prim.maxPos, &BoxMax, 12);
+        //prim.minIndex = 0;
+        //prim.maxIndex = 0;
 
-        BoundingSphere sphereOS;
-        AxisAlignedBox boxOS;
-        Renderer::CompileMesh(model, gltfMesh, 0, Matrix4(kIdentity), sphereOS, boxOS, streamCtx);
-        model.m_BoundingSphere = model.m_BoundingSphere.Union(sphereOS);
-        model.m_BoundingBox.AddBoundingBox(boxOS);
+        //BoundingSphere sphereOS;
+        //AxisAlignedBox boxOS;
+        //Renderer::CompileMesh(model, gltfMesh, 0, Matrix4(kIdentity), sphereOS, boxOS, streamCtx);
+        //model.m_BoundingSphere = model.m_BoundingSphere.Union(sphereOS);
+        //model.m_BoundingBox.AddBoundingBox(boxOS);
     }
 
     return true;

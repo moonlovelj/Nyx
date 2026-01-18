@@ -16,7 +16,7 @@
 
 #include "MeshConvert.h"
 #include "TextureConvert.h"
-#include "glTF.h"
+#include "glTFLoader.h"
 #include "Model.h"
 #include "IndexOptimizePostTransform.h"
 #include "../Core/VectorMath.h"
@@ -70,189 +70,92 @@ static DXGI_FORMAT AccessorFormat(const Accessor& accessor)
     }
 }
 
-void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, const Math::Matrix4& localToObject )
+void OptimizeMesh(Renderer::Primitive& outPrim, 
+    const cgltf_data* data,
+    const cgltf_primitive& inPrim, 
+    const Math::Matrix4& localToObject)
 {
-    ASSERT(inPrim.attributes[0] != nullptr, "Must have POSITION");
-    uint32_t vertexCount = inPrim.attributes[0]->count;
+	// 获取 Position 属性查找
+	const cgltf_accessor* posAcc = nullptr;
+	for (size_t i = 0; i < inPrim.attributes_count; ++i)
+		if (inPrim.attributes[i].type == cgltf_attribute_type_position) posAcc = inPrim.attributes[i].data;
 
-    void* indices = nullptr;
-    uint32_t indexCount;
-    const bool b32BitIndices = true; // Force 32 bit indices
-    uint32_t maxIndex = inPrim.maxIndex;
+    ASSERT(posAcc != nullptr, "Must have POSITION");
 
-    if (inPrim.indices == nullptr)
+    uint32_t vertexCount = (uint32_t)posAcc->count;
+	// --- 处理索引 ---
+	uint32_t indexCount = inPrim.indices ? (uint32_t)inPrim.indices->count : vertexCount;
+	outPrim.IB = std::make_shared<std::vector<unsigned char>>(4 * indexCount);
+	if (inPrim.indices)
+	{
+		cgltf_accessor_unpack_indices(inPrim.indices, outPrim.IB->data(), 4, indexCount);
+	}
+	else
+	{
+		uint32_t* tmp = (uint32_t*)outPrim.IB->data();
+		for (uint32_t i = 0; i < indexCount; ++i) tmp[i] = i;
+	}
+
+	
+	outPrim.primCount = indexCount;
+	outPrim.index32 = 1;
+
+	// 解决 parent 属性不存在的问题：使用 cgltf_material_index
+	if (inPrim.material)
+		outPrim.materialIdx = (uint16_t)cgltf_material_index(data, inPrim.material);
+	else
+		outPrim.materialIdx = 0xFFFF;
+
+	const uint8_t* indices = outPrim.IB->data();
+
+    if (inPrim.indices)
     {
-        ASSERT(inPrim.mode == 4, "Impossible primitive topology when lacking indices");
-
-        indexCount = vertexCount * 3;
-        maxIndex = indexCount - 1;
-        if (indexCount > 0xFFFF)
-        {
-            //b32BitIndices = true;
-            outPrim.IB = std::make_shared<std::vector<unsigned char>>(4 * indexCount);
-            indices = outPrim.IB->data();
-            uint32_t* tmp = (uint32_t*)indices;
-            for (uint32_t i = 0; i < indexCount; ++i)
-                tmp[i] = i;
-        }
-        else
-        {
-            //b32BitIndices = false;
-            outPrim.IB = std::make_shared<std::vector<unsigned char>>(2 * indexCount);
-            indices = outPrim.IB->data();
-            uint16_t* tmp = (uint16_t*)indices;
-            for (uint16_t i = 0; i < indexCount; ++i)
-                tmp[i] = i;
-        }
-    }
-    else
-    {
-        switch (inPrim.mode)
+        switch (inPrim.type)
         {
         default:
-        case 0: // POINT LIST
-        case 1: // LINE LIST
-        case 2: // LINE LOOP
-        case 3: // LINE STRIP
+        case cgltf_primitive_type::cgltf_primitive_type_points :// POINT LIST
+        case cgltf_primitive_type::cgltf_primitive_type_lines : // LINE LIST
+        case cgltf_primitive_type::cgltf_primitive_type_line_loop: // LINE LOOP
+        case cgltf_primitive_type::cgltf_primitive_type_line_strip: // LINE STRIP
             Utility::Printf("Found unsupported primitive topology\n");
             return;
-        case 4: // TRIANGLE LIST
+        case cgltf_primitive_type::cgltf_primitive_type_triangles: // TRIANGLE LIST
             break;
-        case 5: // TODO: Convert TRIANGLE STRIP
-        case 6: // TODO: Convert TRIANGLE FAN
+        case cgltf_primitive_type::cgltf_primitive_type_triangle_strip: // TODO: Convert TRIANGLE STRIP
+        case cgltf_primitive_type::cgltf_primitive_type_triangle_fan: // TODO: Convert TRIANGLE FAN
             Utility::Printf("Found an index buffer that needs to be converted to a triangle list\n");
             return;
         }
-
-        indices = inPrim.indices->dataPtr;
-        indexCount = inPrim.indices->count;
-        if (maxIndex == 0)
-        {
-            if (inPrim.indices->componentType == Accessor::kUnsignedInt)
-            {
-                uint32_t* ib = (uint32_t*)inPrim.indices->dataPtr;
-                for (uint32_t k = 0; k < indexCount; ++k)
-                    maxIndex = std::max(ib[k], maxIndex);
-            }
-            else
-            {
-                uint16_t* ib = (uint16_t*)inPrim.indices->dataPtr;
-                for (uint32_t k = 0; k < indexCount; ++k)
-                    maxIndex = std::max<uint32_t>(ib[k], maxIndex);
-            }
-        }
-        //b32BitIndices = maxIndex > 0xFFFF;
-        uint32_t indexSize = b32BitIndices ? 4 : 2;
-        outPrim.IB = std::make_shared<std::vector<unsigned char>>(indexSize * indexCount);
-        //if (b32BitIndices)
-        //{
-        //    ASSERT(inPrim.indices->componentType == Accessor::kUnsignedInt);
-        //    OptimizeFaces((uint32_t*)inPrim.indices->dataPtr, inPrim.indices->count, (uint32_t*)outPrim.IB->data(), 64);
-        //}
-        //else if (inPrim.indices->componentType == Accessor::kUnsignedShort)
-        //{
-        //    OptimizeFaces((uint16_t*)inPrim.indices->dataPtr, inPrim.indices->count, (uint16_t*)outPrim.IB->data(), 64);
-        //}
-        //else
-        //{
-        //    OptimizeFaces((uint32_t*)inPrim.indices->dataPtr, inPrim.indices->count, (uint16_t*)outPrim.IB->data(), 64);
-        //}
-
-		//if (inPrim.indices->componentType == glTF::Accessor::kUnsignedShort)
-		//{
-  //          OptimizeFaces((uint16_t*)inPrim.indices->dataPtr, inPrim.indices->count, (uint32_t*)outPrim.IB->data(), 64);
-		//}
-		//else // kUnsignedInt
-		//{
-  //          ASSERT(inPrim.indices->componentType == Accessor::kUnsignedInt);
-  //          OptimizeFaces((uint32_t*)inPrim.indices->dataPtr, inPrim.indices->count, (uint32_t*)outPrim.IB->data(), 64);
-		//}
-        if (inPrim.indices->componentType == glTF::Accessor::kUnsignedByte)
-        {
-            uint8_t* srcIB = (uint8_t*)inPrim.indices->dataPtr;
-            if (b32BitIndices)
-            {
-                uint32_t* dstIB = (uint32_t*)outPrim.IB->data();
-                for (uint32_t i = 0; i < indexCount; ++i)
-                    dstIB[i] = srcIB[i];
-            }
-            else
-            {
-                uint16_t* dstIB = (uint16_t*)outPrim.IB->data();
-                for (uint32_t i = 0; i < indexCount; ++i)
-                    dstIB[i] = srcIB[i];
-			}
-        }
-        else if (inPrim.indices->componentType == glTF::Accessor::kUnsignedShort)
-        {
-            uint16_t* srcIB = (uint16_t*)inPrim.indices->dataPtr;
-            if (b32BitIndices)
-            {
-                uint32_t* dstIB = (uint32_t*)outPrim.IB->data();
-                for (uint32_t i = 0; i < indexCount; ++i)
-                    dstIB[i] = srcIB[i];
-            }
-            else
-            {
-                uint16_t* dstIB = (uint16_t*)outPrim.IB->data();
-                std::memcpy(dstIB, srcIB, indexCount * sizeof(uint16_t));
-            }
-        }
-        else // kUnsignedInt
-        {
-            uint32_t* srcIB = (uint32_t*)inPrim.indices->dataPtr;
-            if (b32BitIndices)
-            {
-                uint32_t* dstIB = (uint32_t*)outPrim.IB->data();
-                std::memcpy(dstIB, srcIB, indexCount * sizeof(uint32_t));
-            }
-            else
-            {
-                uint16_t* dstIB = (uint16_t*)outPrim.IB->data();
-                for (uint32_t i = 0; i < indexCount; ++i)
-                    dstIB[i] = (uint16_t)srcIB[i];
-            }
-        }
-
-        indices = outPrim.IB->data();
     }
 
-	{
-		uint32_t* ib32 = (uint32_t*)indices;
-		bool foundError = false;
-		uint32_t errorIndexValue = 0;
-		size_t errorPosition = 0;
+    const bool b32BitIndices = true;
 
-		for (uint32_t i = 0; i < indexCount; ++i)
-		{
-			if (ib32[i] >= vertexCount)
-			{
-				foundError = true;
-				errorIndexValue = ib32[i];
-				errorPosition = i;
-				// 强制修复
-				ib32[i] = 0;
+	std::unordered_map<glTF::Primitive::eAttribType, glTF::Accessor> accessors;
+
+	auto ProcessAccessor = [&](glTF::Primitive::eAttribType targetType, cgltf_attribute_type type, int index = 0) {
+		for (size_t i = 0; i < inPrim.attributes_count; ++i) {
+			if (inPrim.attributes[i].type == type && inPrim.attributes[i].index == index) {
+				accessors[targetType] = glTF::GltfAsset::MakeAccessor(inPrim.attributes[i].data);
+				break;
 			}
 		}
+		};
 
-		if (foundError)
-		{
-			Utility::Printf("\n!!! [CRITICAL DATA ERROR] !!!\n");
-			Utility::Printf("Mesh contains out-of-bounds index!\n");
-			Utility::Printf("Index Value: %u, Vertex Count: %u\n", errorIndexValue, vertexCount);
-			Utility::Printf("Position in IB: %llu\n", (unsigned long long)errorPosition);
-			 //__debugbreak(); 
-		}
-}
+	ProcessAccessor(glTF::Primitive::kPosition, cgltf_attribute_type_position);
+	ProcessAccessor(glTF::Primitive::kNormal, cgltf_attribute_type_normal);
+	ProcessAccessor(glTF::Primitive::kTangent, cgltf_attribute_type_tangent);
+	ProcessAccessor(glTF::Primitive::kTexcoord0, cgltf_attribute_type_texcoord, 0);
+	ProcessAccessor(glTF::Primitive::kTexcoord1, cgltf_attribute_type_texcoord, 1);
+	ProcessAccessor(glTF::Primitive::kJoints0, cgltf_attribute_type_joints, 0);
+	ProcessAccessor(glTF::Primitive::kWeights0, cgltf_attribute_type_weights, 0);
 
-    ASSERT(maxIndex > 0);
 
-    const bool HasNormals = inPrim.attributes[glTF::Primitive::kNormal] != nullptr;
-    const bool HasTangents = inPrim.attributes[glTF::Primitive::kTangent] != nullptr;
-    const bool HasUV0 = inPrim.attributes[glTF::Primitive::kTexcoord0] != nullptr;
-    const bool HasUV1 = inPrim.attributes[glTF::Primitive::kTexcoord1] != nullptr;
-    const bool HasJoints = inPrim.attributes[glTF::Primitive::kJoints0] != nullptr;
-    const bool HasWeights = inPrim.attributes[glTF::Primitive::kWeights0] != nullptr;
+    const bool HasNormals = accessors.contains(glTF::Primitive::kNormal);
+	const bool HasTangents = accessors.contains(glTF::Primitive::kTangent);
+	const bool HasUV0 = accessors.contains(glTF::Primitive::kTexcoord0);
+	const bool HasUV1 = accessors.contains(glTF::Primitive::kTexcoord1);
+	const bool HasJoints = accessors.contains(glTF::Primitive::kJoints0);
+	const bool HasWeights = accessors.contains(glTF::Primitive::kWeights0);
     const bool HasSkin = HasJoints && HasWeights;
     
     std::vector<D3D12_INPUT_ELEMENT_DESC> InputElements;
@@ -268,36 +171,50 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
     if (HasUV0)
     {
         InputElements.push_back({ "TEXCOORD", 0,
-            AccessorFormat(*inPrim.attributes[glTF::Primitive::kTexcoord0]),
+            AccessorFormat(accessors[glTF::Primitive::kTexcoord0]),
             glTF::Primitive::kTexcoord0 });
     }
     if (HasUV1)
     {
         InputElements.push_back({ "TEXCOORD", 1,
-            AccessorFormat(*inPrim.attributes[glTF::Primitive::kTexcoord1]),
+            AccessorFormat(accessors[glTF::Primitive::kTexcoord1]),
             glTF::Primitive::kTexcoord1 });
     }
     if (HasSkin)
     {
         InputElements.push_back({ "BLENDINDICES", 0,
-            JointIndexFormat(*inPrim.attributes[glTF::Primitive::kJoints0]),
+            JointIndexFormat(accessors[glTF::Primitive::kJoints0]),
             glTF::Primitive::kJoints0 });
         InputElements.push_back({ "BLENDWEIGHT", 0,
-            AccessorFormat(*inPrim.attributes[glTF::Primitive::kWeights0]), 
+            AccessorFormat(accessors[glTF::Primitive::kWeights0]),
             glTF::Primitive::kWeights0 });
     }
 
     VBReader vbr;
     vbr.Initialize({InputElements.data(), (uint32_t)InputElements.size()});
 
-    for (uint32_t i = 0; i < Primitive::kNumAttribs; ++i)
-    {
-        Accessor* attrib = inPrim.attributes[i];
-        if (attrib)
-            vbr.AddStream(attrib->dataPtr, vertexCount, i, attrib->stride);
-    }
+	for (uint32_t i = 0; i < Primitive::kNumAttribs; ++i)
+	{
+		auto it = accessors.find((Primitive::eAttribType)i);
+		if (it != accessors.end())
+		{
+			const Accessor& attrib = it->second;
+			vbr.AddStream(attrib.dataPtr, vertexCount, i, attrib.stride);
+		}
+	}
 
-    const glTF::Material& material = *inPrim.material;
+	// 准备材质，处理材质为空的情况
+	cgltf_material defaultIdentityMaterial = {}; // 默认为 opaque, double_sided=false
+	const cgltf_material& material = inPrim.material ? *inPrim.material : defaultIdentityMaterial;
+
+	outPrim.psoFlags = PSOFlags::kHasPosition | PSOFlags::kHasNormal;
+	if (HasTangents) outPrim.psoFlags |= PSOFlags::kHasTangent;
+	if (HasUV0)     outPrim.psoFlags |= PSOFlags::kHasUV0;
+	if (HasUV1)    outPrim.psoFlags |= PSOFlags::kHasUV1;
+	if (HasSkin) outPrim.psoFlags |= PSOFlags::kHasSkin;
+	if (material.alpha_mode == cgltf_alpha_mode_blend) outPrim.psoFlags |= PSOFlags::kAlphaBlend;
+	if (material.alpha_mode == cgltf_alpha_mode_mask) outPrim.psoFlags |= PSOFlags::kAlphaTest;
+	if (material.double_sided) outPrim.psoFlags |= PSOFlags::kTwoSided;
 
     std::unique_ptr<XMFLOAT3[]> position;
     std::unique_ptr<XMFLOAT3[]> normal;
@@ -312,7 +229,7 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
     ASSERT_SUCCEEDED(vbr.Read(position.get(), "POSITION", 0, vertexCount));
     {
         // Local space bounds
-        Vector3 sphereCenterLS = (Vector3(*(XMFLOAT3*)inPrim.minPos) + Vector3(*(XMFLOAT3*)inPrim.maxPos)) * 0.5f;
+        Vector3 sphereCenterLS = vertexCount > 0 ? Vector3(position[0]) : Vector3(kZero);
         Scalar maxRadiusLSSq(kZero);
 
         // Object space bounds
@@ -374,12 +291,21 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
     }
     else
     {
-        ASSERT(maxIndex < vertexCount);
+        //ASSERT(maxIndex < vertexCount);
         ASSERT(indexCount % 3 == 0);
 
         HRESULT hr = S_OK;
 
-        if (HasUV0 && material.normalUV == 0)
+		// 根据 glTF 标准，法线贴图的 texcoord 索引决定了切线空间基于哪套 UV
+        // 默认为 UV0 (索引0)
+		bool useUV1ForTangent = false;
+		if (material.normal_texture.texture && material.normal_texture.texcoord == 1)
+		{
+			useUV1ForTangent = true;
+		}
+
+
+        if (HasUV0 && !useUV1ForTangent)
         {
             tangent.reset(new XMFLOAT4[vertexCount]);
             if (b32BitIndices)
@@ -393,7 +319,7 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
                     vertexCount, tangent.get());
             }
         }
-        else if (HasUV1 && material.normalUV == 1)
+        else if (HasUV1 && useUV1ForTangent)
         {
             tangent.reset(new XMFLOAT4[vertexCount]);
             if (b32BitIndices)
@@ -446,12 +372,6 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
         OutputElements.push_back({ "BLENDWEIGHT", 0, DXGI_FORMAT_R16G16B16A16_UNORM, 0, D3D12_APPEND_ALIGNED_ELEMENT });
         outPrim.psoFlags |= PSOFlags::kHasSkin;
     }
-    if (material.alphaBlend)
-        outPrim.psoFlags |= PSOFlags::kAlphaBlend;
-    if (material.alphaTest)
-        outPrim.psoFlags |= PSOFlags::kAlphaTest;
-    if (material.twoSided)
-        outPrim.psoFlags |= PSOFlags::kTwoSided;
 
     D3D12_INPUT_LAYOUT_DESC layout = {OutputElements.data(), (uint32_t)OutputElements.size()};
 
@@ -484,7 +404,7 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
     uint32_t depthStride = 12;
     std::vector<D3D12_INPUT_ELEMENT_DESC> DepthElements;
     DepthElements.push_back({"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT});
-    if (material.alphaTest)
+    if (material.alpha_mode == cgltf_alpha_mode_mask)
     {
         depthStride += 4;
         DepthElements.push_back({"TEXCOORD", 0, DXGI_FORMAT_R16G16_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT});
@@ -503,9 +423,13 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
     ASSERT_SUCCEEDED(dvbw.AddStream(outPrim.DepthVB->data(), vertexCount, 0, depthStride));
 
     dvbw.Write( position.get(), "POSITION", 0, vertexCount );
-    if (material.alphaTest)
+    if (material.alpha_mode == cgltf_alpha_mode_mask)
     {
-        const XMFLOAT2* texcoordData = material.baseColorUV ? texcoord1.get() : texcoord0.get();
+		// 获取 Base Color 的 UV 索引，默认为 0
+		int texCoordIndex = material.pbr_metallic_roughness.base_color_texture.texture ?
+			material.pbr_metallic_roughness.base_color_texture.texcoord : 0;
+
+		const XMFLOAT2* texcoordData = (texCoordIndex == 1) ? texcoord1.get() : texcoord0.get();
         if (!texcoordData)
         {
             //TODO 暂时特殊处理，按理说alphatest的材质一定会有UV的
@@ -523,11 +447,11 @@ void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, 
         dvbw.Write(weights.get(), "BLENDWEIGHT", 0, vertexCount);
     }
 
-    ASSERT(material.index < 0x8000, "Only 15-bit material indices allowed");
+    ASSERT(outPrim.materialIdx < 0x8000, "Only 15-bit material indices allowed");
 
     outPrim.vertexStride = (uint16_t)stride;
     outPrim.index32 = b32BitIndices ? 1 : 0;
-    outPrim.materialIdx = material.index;
+    //outPrim.materialIdx = material.index;
 
     outPrim.primCount = indexCount;
 

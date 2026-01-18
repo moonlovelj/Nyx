@@ -147,18 +147,28 @@ float F16ToF32(uint32_t bits)
 
 std::wstring Utility::UTF8ToWideString( const std::string& str )
 {
-    wchar_t wstr[MAX_PATH];
-    if ( !MultiByteToWideChar(CP_ACP, MB_PRECOMPOSED, str.c_str(), -1, wstr, MAX_PATH) )
-        wstr[0] = L'\0';
-    return wstr;
+	if (str.empty()) return L"";
+
+	int size_needed = MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), NULL, 0);
+	if (size_needed <= 0) return L"";
+
+	std::wstring wstrTo(size_needed, 0);
+	MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), &wstrTo[0], size_needed);
+
+	return wstrTo;
 }
 
 std::string Utility::WideStringToUTF8( const std::wstring& wstr )
 {
-    char str[MAX_PATH];
-    if ( !WideCharToMultiByte(CP_ACP, MB_PRECOMPOSED, wstr.c_str(), -1, str, MAX_PATH, nullptr, nullptr) )
-        str[0] = L'\0';
-    return str;
+	if (wstr.empty()) return "";
+
+	int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), NULL, 0, NULL, NULL);
+	if (size_needed <= 0) return "";
+
+	std::string result(size_needed, 0);
+	WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), &result[0], size_needed, NULL, NULL);
+
+	return result;
 }
 
 std::string Utility::ToLower(const std::string& str)

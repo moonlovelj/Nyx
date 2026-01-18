@@ -90,10 +90,12 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Animation.h" />
+    <ClInclude Include="cgltf.h" />
     <ClInclude Include="ConstantBuffers.h" />
     <ClInclude Include="GeometryStreaming.h" />
     <ClInclude Include="glTF.h" />
     <ClInclude Include="CommandBucketer.h" />
+    <ClInclude Include="glTFLoader.h" />
     <ClInclude Include="IndexOptimizePostTransform.h" />
     <ClInclude Include="InstanceResourceManager.h" />
     <ClInclude Include="json.hpp" />
@@ -118,6 +120,7 @@
     <ClCompile Include="GeometryStreaming.cpp" />
     <ClCompile Include="glTF.cpp" />
     <ClCompile Include="CommandBucketer.cpp" />
+    <ClCompile Include="glTFLoader.cpp" />
     <ClCompile Include="IndexOptimizePostTransform.cpp" />
     <ClCompile Include="InstanceResourceManager.cpp" />
     <ClCompile Include="LightManager.cpp" />

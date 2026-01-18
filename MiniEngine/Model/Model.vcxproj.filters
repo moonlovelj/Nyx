@@ -102,6 +102,9 @@
     <ClCompile Include="GeometryStreaming.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="glTFLoader.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
@@ -173,6 +176,12 @@
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="StructsIO.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cgltf.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="glTFLoader.h">
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>

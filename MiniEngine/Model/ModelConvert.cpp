@@ -16,13 +16,14 @@
 
 #include "ModelLoader.h"
 #include "Renderer.h"
-#include "glTF.h"
+#include "glTFLoader.h"
 #include "TextureConvert.h"
 #include "MeshConvert.h"
 #include "TextureManager.h"
 #include "GraphicsCommon.h"
 #include "../Core/Utility.h"
 #include "../Core/Math/Common.h"
+#include "../Core/Math/Quaternion.h"
 #include "MeshOptimizer/MeshOptimizer.h"
 #include "metis.h"
 
@@ -39,7 +40,8 @@ using namespace Graphics;
 
 void Renderer::CompileMesh(
 	ModelData& modelData,
-	glTF::Mesh& srcMesh,
+	const cgltf_data* data,
+	const cgltf_mesh& srcMesh,
 	uint32_t matrixIdx,
 	const Matrix4& localToObject,
 	Math::BoundingSphere& boundingSphere,
@@ -59,10 +61,10 @@ void Renderer::CompileMesh(
     BoundingSphere sphereOS(kZero);
     AxisAlignedBox bboxOS(kZero);
 
-    std::vector<Primitive> primitives(srcMesh.primitives.size());
+    std::vector<Primitive> primitives(srcMesh.primitives_count);
     for (uint32_t i = 0; i < primitives.size(); ++i)
     {
-        OptimizeMesh(primitives[i], srcMesh.primitives[i], localToObject);
+		OptimizeMesh(primitives[i], data, srcMesh.primitives[i], localToObject);
         sphereOS = sphereOS.Union(primitives[i].m_BoundsOS);
         bboxOS.AddBoundingBox(primitives[i].m_BBoxOS);
     }
@@ -194,90 +196,88 @@ void Renderer::CompileMesh(
 	Utility::Printf("Already build triangles count : %llu\n", modelData.m_TriangleCount);
 }
 
+using NodeMap = std::unordered_map<const cgltf_node*, uint32_t>;
 
 static uint32_t WalkGraph(
 	ModelData& modelData,
+	const cgltf_data* data,
     std::vector<GraphNode>& sceneGraph,
     BoundingSphere& modelBSphere,
     AxisAlignedBox& modelBBox,
-    std::vector<Mesh*>& meshList,
-    std::vector<unsigned char>& bufferMemory,
-    std::vector<CameraData>& cameraData,
-    const std::vector<glTF::Node*>& siblings,
+    const cgltf_node* curNode,
     uint32_t curPos,
     const Matrix4& xform,
-    GlobalStreamingContext& streamCtx
+    GlobalStreamingContext& streamCtx,
+	NodeMap& nodeMap
     )
 {
-    size_t numSiblings = siblings.size();
+	nodeMap[curNode] = curPos;
 
-    for (size_t i = 0; i < numSiblings; ++i)
-    {
-        glTF::Node* curNode = siblings[i];
-        GraphNode& thisGraphNode = sceneGraph[curPos];
-        thisGraphNode.hasChildren = 0;
-        thisGraphNode.hasSibling = 0;
-        thisGraphNode.matrixIdx = curPos;
-        thisGraphNode.skeletonRoot = curNode->skeletonRoot;
-        curNode->linearIdx = curPos;
+	GraphNode& node = sceneGraph[curPos];
+	node.hasChildren = (curNode->children_count > 0);
+	node.matrixIdx = curPos;
 
-        // They might not be used, but we have space to hold the neutral values which could be
-        // useful when updating the matrix via animation.
-        std::memcpy((float*)&thisGraphNode.scale, curNode->scale, sizeof(curNode->scale));
-        std::memcpy((float*)&thisGraphNode.rotation, curNode->rotation, sizeof(curNode->rotation));
+	if (curNode->has_matrix) {
+		memcpy(&node.xform, curNode->matrix, sizeof(float) * 16);
+	}
+	else {
+		// 如果没有矩阵，使用 PRS 组合
+		Vector3 translation = curNode->has_translation ? Vector3(curNode->translation[0], curNode->translation[1], curNode->translation[2]) : Vector3(kOrigin);
+		Vector3 scale = curNode->has_scale ? Vector3(curNode->scale[0], curNode->scale[1], curNode->scale[2]) : Vector3(kOne);
+		Quaternion rotation = curNode->has_rotation ?
+			Quaternion(DirectX::XMVectorSet(curNode->rotation[0], curNode->rotation[1], curNode->rotation[2], curNode->rotation[3])) :
+			Quaternion(kIdentity);
+		node.xform = Matrix4(Matrix3(rotation) * Matrix3::MakeScale(scale), translation);
+		node.rotation = rotation;
+		node.scale = XMFLOAT3(curNode->scale[0], curNode->scale[1], curNode->scale[2]);
+	}
 
-        if (curNode->hasMatrix)
-        {
-            std::memcpy((float*)&thisGraphNode.xform, curNode->matrix, sizeof(curNode->matrix));
-        }
-        else
-        {
-            thisGraphNode.xform = Matrix4(
-                Matrix3(thisGraphNode.rotation) * Matrix3::MakeScale(thisGraphNode.scale),
-                Vector3(*(const XMFLOAT3*)curNode->translation)
-            );
-        }
+    const Matrix4 worldXform = xform * node.xform;
 
-        const Matrix4 LocalXform = xform * thisGraphNode.xform;
+	// 2. 处理 Mesh 数据
+	if (curNode->mesh) {
+		BoundingSphere sphereOS;
+		AxisAlignedBox boxOS;
+		// 需修改 CompileMesh 的签名，接受 cgltf_mesh
+		CompileMesh(modelData, data, *curNode->mesh, curPos, worldXform, sphereOS, boxOS, streamCtx);
+		modelBSphere = modelBSphere.Union(sphereOS);
+		modelBBox.AddBoundingBox(boxOS);
+	}
 
-        if (!curNode->pointsToCamera && curNode->mesh != nullptr)
-        {
-            BoundingSphere sphereOS;
-            AxisAlignedBox boxOS;
-            CompileMesh(modelData, *curNode->mesh, curPos, LocalXform, sphereOS, boxOS, streamCtx);
-            modelBSphere = modelBSphere.Union(sphereOS);
-            modelBBox.AddBoundingBox(boxOS);
-        }
-        else if (curNode->pointsToCamera && curNode->camera != nullptr)
-        {
-            CameraData camera;
-			camera.aspectRatio = curNode->camera->aspectRatio;
-			camera.yfov = curNode->camera->yfov;
-			camera.znear = curNode->camera->znear;
-			camera.zfar = curNode->camera->zfar;
-            camera.matrixIdx = curPos;
-            camera.type = curNode->camera->type == glTF::Camera::kPerspective ? CameraData::kPerspective : CameraData::kOrthographic;
-            cameraData.emplace_back(camera);
-        }
+	// 3. 处理 Camera
+	if (curNode->camera) {
+		CameraData cam;
+		if (curNode->camera->type == cgltf_camera_type_perspective) {
+			cam.type = CameraData::kPerspective;
+			cam.yfov = curNode->camera->data.perspective.yfov;
+			cam.aspectRatio = curNode->camera->data.perspective.aspect_ratio;
+			cam.znear = curNode->camera->data.perspective.znear;
+			cam.zfar = curNode->camera->data.perspective.zfar;
+		}
+		cam.matrixIdx = curPos;
+		modelData.m_Cameras.push_back(cam);
+	}
 
-        uint32_t nextPos = curPos + 1;
+	// 4. 递归子节点
+	uint32_t nextPos = curPos + 1;
+	for (size_t i = 0; i < curNode->children_count; ++i) {
+		// 标记是否有兄弟节点（除最后一个子节点外都有兄弟）
+		if (i < curNode->children_count - 1) {
+			// 注意：由于是深度优先扁平化存储，Sibling 标记逻辑需小心
+			// 在 Minigraph 的 WalkGraph 中，Sibling 意味着在同一层级还有后续节点
+		}
 
-        if (curNode->children.size() > 0)
-        {
-            thisGraphNode.hasChildren = 1;
-            nextPos = WalkGraph(modelData, sceneGraph, modelBSphere, modelBBox, meshList, bufferMemory, cameraData, curNode->children, nextPos, LocalXform, streamCtx);
-        }
+		// 深度优先遍历
+		nextPos = WalkGraph(modelData, data, sceneGraph, modelBSphere, modelBBox, curNode->children[i], nextPos, worldXform, streamCtx, nodeMap);
 
-        // Are there more siblings?
-        if (i + 1 < numSiblings)
-        {
-            thisGraphNode.hasSibling = 1;
-        }
-        
-        curPos = nextPos;
-    }
+		// 更新 hasSibling 状态：
+		// 这里的逻辑必须和渲染时的线性遍历匹配。
+		// 原本 sceneGraph[curPos] 如果有兄弟，渲染器会知道跳到哪里。
+		if (i < curNode->children_count - 1)
+			sceneGraph[nextPos - 1].hasSibling = 1;
+	}
 
-    return curPos;
+	return nextPos;
 }
 
 inline void CompileTexture(const std::wstring& basePath, const std::string& fileName, uint8_t flags)
@@ -285,189 +285,258 @@ inline void CompileTexture(const std::wstring& basePath, const std::string& file
     CompileTextureOnDemand(basePath + Utility::UTF8ToWideString(fileName), flags);
 }
 
-inline void SetTextureOptions(std::map<std::string, uint8_t>& optionsMap, glTF::Texture* texture, uint8_t options)
+//inline void SetTextureOptions(std::map<std::string, uint8_t>& optionsMap, glTF::Texture* texture, uint8_t options)
+//{
+//    if (texture && texture->source && optionsMap.find(texture->source->path) == optionsMap.end())
+//        optionsMap[texture->source->path] = options;
+//}
+
+void BuildMaterials(ModelData& model, const glTF::GltfAsset& asset)
 {
-    if (texture && texture->source && optionsMap.find(texture->source->path) == optionsMap.end())
-        optionsMap[texture->source->path] = options;
+	cgltf_data* data = asset.m_Data;
+
+	model.m_TextureNames.resize(data->images_count);
+
+	for (size_t i = 0; i < data->images_count; ++i)
+	{
+		if (data->images[i].uri)
+			model.m_TextureNames[i] = data->images[i].uri;
+		else
+			model.m_TextureNames[i] = "";
+	}
+
+	std::map<std::string, uint8_t> textureOptions;
+	model.m_MaterialConstants.resize(data->materials_count);
+	model.m_MaterialTextures.resize(data->materials_count);
+
+	for (size_t i = 0; i < data->materials_count; ++i)
+	{
+		const cgltf_material& srcMat = data->materials[i];
+		MaterialConstantData& matConst = model.m_MaterialConstants[i];
+		MaterialTextureData& matTex = model.m_MaterialTextures[i];
+
+		// 初始化默认值
+		matConst.baseColorFactor[0] = 1.0f;
+		matConst.baseColorFactor[1] = 1.0f;
+		matConst.baseColorFactor[2] = 1.0f;
+		matConst.baseColorFactor[3] = 1.0f;
+		matConst.metallicFactor = 1.0f;
+		matConst.roughnessFactor = 1.0f;
+		matConst.emissiveFactor[0] = 0.0f;
+		matConst.emissiveFactor[1] = 0.0f;
+		matConst.emissiveFactor[2] = 0.0f;
+		matConst.flags = 0;
+		matTex.addressModes = 0x55555; // 默认为所有贴图开启 Wrap (D3D12_TEXTURE_ADDRESS_MODE_WRAP = 1, 1 | 1<<2 = 5)
+
+		for (int j = 0; j < kNumTextures; ++j) matTex.stringIdx[j] = 0xFFFF;
+
+		// PBR 参数映射
+		if (srcMat.has_pbr_metallic_roughness)
+		{
+			const auto& pbr = srcMat.pbr_metallic_roughness;
+			memcpy(matConst.baseColorFactor, pbr.base_color_factor, sizeof(float) * 4);
+			matConst.metallicFactor = pbr.metallic_factor;
+			matConst.roughnessFactor = pbr.roughness_factor;
+
+			if (pbr.base_color_texture.texture) {
+				matTex.stringIdx[glTF::Material::kBaseColor] = (uint16_t)cgltf_image_index(data, pbr.base_color_texture.texture->image);
+				//matConst.baseColorUV = (uint32_t)pbr.base_color_texture.texcoord;
+			}
+			if (pbr.metallic_roughness_texture.texture) {
+				matTex.stringIdx[glTF::Material::kMetallicRoughness] = (uint16_t)cgltf_image_index(data, pbr.metallic_roughness_texture.texture->image);
+				//matConst.metallicRoughnessUV = (uint32_t)pbr.metallic_roughness_texture.texcoord;
+			}
+
+			// 其他贴图
+			if (srcMat.normal_texture.texture) {
+				matTex.stringIdx[glTF::Material::kNormal] = (uint16_t)cgltf_image_index(data, srcMat.normal_texture.texture->image);
+				matConst.normalTextureScale = srcMat.normal_texture.scale;
+				//matConst.normalUV = (uint32_t)srcMat.normal_texture.texcoord;
+			}
+			if (srcMat.emissive_texture.texture) {
+				matTex.stringIdx[glTF::Material::kEmissive] = (uint16_t)cgltf_image_index(data, srcMat.emissive_texture.texture->image);
+				memcpy(matConst.emissiveFactor, srcMat.emissive_factor, sizeof(float) * 3);
+				//matConst.emissiveUV = (uint32_t)srcMat.emissive_texture.texcoord;
+			}
+			if (srcMat.occlusion_texture.texture) {
+				matTex.stringIdx[glTF::Material::kOcclusion] = (uint16_t)cgltf_image_index(data, srcMat.occlusion_texture.texture->image);
+				//matConst.occlusionUV = (uint32_t)srcMat.occlusion_texture.texcoord;
+			}
+
+			if (srcMat.specular.specular_color_texture.texture)
+			{
+				matTex.stringIdx[glTF::Material::kSpecularColor] = (uint16_t)cgltf_image_index(data, srcMat.specular.specular_color_texture.texture->image);
+			}
+
+			// 状态位标志
+			if (srcMat.double_sided) matConst.flags |= 0x20; // 对应旧代码 twoSided bit
+			if (srcMat.alpha_mode == cgltf_alpha_mode_blend) matConst.flags |= 0x80;
+			if (srcMat.alpha_mode == cgltf_alpha_mode_mask) {
+				matConst.flags |= 0x40;
+				//matConst.alphaRef = static_cast<uint16_t>(srcMat.alpha_cutoff * 255.0f); // 简单映射
+			}
+
+			// 记录纹理编译选项 (此处逻辑保持不变)
+			auto RegisterOpt = [&](int slot, bool srgb) {
+				if (matTex.stringIdx[slot] != 0xFFFF)
+					textureOptions[model.m_TextureNames[matTex.stringIdx[slot]]] = TextureOptions(srgb, (srcMat.alpha_mode != cgltf_alpha_mode_opaque));
+				};
+			RegisterOpt(glTF::Material::kBaseColor, true);
+			RegisterOpt(glTF::Material::kMetallicRoughness, false);
+			RegisterOpt(glTF::Material::kEmissive, true);
+			RegisterOpt(glTF::Material::kNormal, false);
+			RegisterOpt(glTF::Material::kOcclusion, false);
+			RegisterOpt(glTF::Material::kSpecularColor, true);
+		}
+	}
+
+	// 编译纹理 (保持不变)
+	for (size_t i = 0; i < model.m_TextureNames.size(); ++i)
+	{
+		auto it = textureOptions.find(model.m_TextureNames[i]);
+		if (it != textureOptions.end())
+		{
+			model.m_TextureOptions.push_back(it->second);
+			CompileTextureOnDemand(asset.m_BasePath + Utility::UTF8ToWideString(it->first), it->second);
+		}
+		else
+		{
+			model.m_TextureOptions.push_back(0xFF);
+		}
+	}
 }
 
-void BuildMaterials(ModelData& model, const glTF::Asset& asset)
+void BuildAnimations(ModelData& model, const glTF::GltfAsset& asset, const NodeMap& nodeMap)
 {
-    //static_assert((_alignof(MaterialConstants) & 255) == 0, "CBVs need 256 byte alignment");
+	cgltf_data* data = asset.m_Data;
+	if (data->animations_count == 0) return;
 
-    // Replace texture filename extensions with "DDS" in the string table
-    model.m_TextureNames.resize(asset.m_images.size());
-    for (size_t i = 0; i < asset.m_images.size(); ++i)
-        model.m_TextureNames[i] = asset.m_images[i].path;
-
-    std::map<std::string, uint8_t> textureOptions;
-
-    const uint32_t numMaterials = (uint32_t)asset.m_materials.size();
-
-    model.m_MaterialConstants.resize(numMaterials);
-    model.m_MaterialTextures.resize(numMaterials);
-
-    for (uint32_t i = 0; i < numMaterials; ++i)
-    {
-        const glTF::Material& srcMat = asset.m_materials[i];
-
-        MaterialConstantData& material = model.m_MaterialConstants[i];
-        material.baseColorFactor[0] = srcMat.baseColorFactor[0];
-        material.baseColorFactor[1] = srcMat.baseColorFactor[1];
-        material.baseColorFactor[2] = srcMat.baseColorFactor[2];
-        material.baseColorFactor[3] = srcMat.baseColorFactor[3];
-        material.emissiveFactor[0] = srcMat.emissiveFactor[0];
-        material.emissiveFactor[1] = srcMat.emissiveFactor[1];
-        material.emissiveFactor[2] = srcMat.emissiveFactor[2];
-        material.normalTextureScale = srcMat.normalTextureScale;
-        material.metallicFactor = srcMat.metallicFactor;
-        material.roughnessFactor = srcMat.roughnessFactor;
-        material.flags = srcMat.flags;
-
-        MaterialTextureData& dstMat = model.m_MaterialTextures[i];
-        dstMat.addressModes = 0;
-
-        for (uint32_t ti = 0; ti < kNumTextures; ++ti)
-        {
-            dstMat.stringIdx[ti] = 0xFFFF;
-
-            if (srcMat.textures[ti] != nullptr)
-            {
-                if (srcMat.textures[ti]->source != nullptr)
-                {
-                    dstMat.stringIdx[ti] = uint16_t(srcMat.textures[ti]->source - asset.m_images.data());
-                }
-
-                if (srcMat.textures[ti]->sampler != nullptr)
-                {
-                    dstMat.addressModes |= srcMat.textures[ti]->sampler->wrapS << (ti * 4);
-                    dstMat.addressModes |= srcMat.textures[ti]->sampler->wrapT << (ti * 4 + 2);
-                }
-                else
-                {
-                    dstMat.addressModes |= 0x5 << (ti * 4);
-                }
-            }
-            else
-            {
-                dstMat.addressModes |= 0x5 << (ti * 4);
-            }
-        }
-
-        SetTextureOptions(textureOptions, srcMat.textures[kBaseColor], TextureOptions(true, srcMat.alphaBlend | srcMat.alphaTest));
-        SetTextureOptions(textureOptions, srcMat.textures[kMetallicRoughness], TextureOptions(false));
-        SetTextureOptions(textureOptions, srcMat.textures[kOcclusion], TextureOptions(false));
-        SetTextureOptions(textureOptions, srcMat.textures[kEmissive], TextureOptions(true));
-        SetTextureOptions(textureOptions, srcMat.textures[kNormal], TextureOptions(false));
-    }
-
-    model.m_TextureOptions.clear();
-    for (auto name : model.m_TextureNames)
-    {
-        auto iter = textureOptions.find(name);
-        if (iter != textureOptions.end())
-        {
-            model.m_TextureOptions.push_back(iter->second);
-            CompileTextureOnDemand(asset.m_basePath + Utility::UTF8ToWideString(iter->first), iter->second);
-        }
-        else
-            model.m_TextureOptions.push_back(0xFF);
-    }
-    ASSERT(model.m_TextureOptions.size() == model.m_TextureNames.size());
-}
-
-void BuildAnimations(ModelData& model, const glTF::Asset& asset)
-{
-    size_t numAnimations = asset.m_animations.size();
-    if (numAnimations == 0)
-        return;
-
-    model.m_Animations.resize(numAnimations);
+    model.m_Animations.resize(data->animations_count);
     uint32_t animIdx = 0;
 
-    for (const glTF::Animation& anim : asset.m_animations)
+    for (size_t i = 0; i < data->animations_count; ++i)
     {
-        AnimationSet& animSet = model.m_Animations[animIdx++];
-        animSet.duration = 0.0f;
-        animSet.firstCurve = (uint32_t)model.m_AnimationCurves.size();
-        animSet.numCurves = (uint32_t)anim.m_channels.size();
+		const cgltf_animation& srcAnim = data->animations[i];
+		AnimationSet& animSet = model.m_Animations[i];
+		animSet.duration = 0.0f;
+		animSet.firstCurve = (uint32_t)model.m_AnimationCurves.size();
+		animSet.numCurves = (uint32_t)srcAnim.channels_count;
 
-        for (size_t i = 0; i < animSet.numCurves; ++i)
+        for (size_t j = 0; j < srcAnim.channels_count; ++j)
         {
-            const glTF::AnimChannel& channel = anim.m_channels[i];
-            const glTF::AnimSampler& sampler = *channel.m_sampler;
+			const cgltf_animation_channel& channel = srcAnim.channels[j];
+			const cgltf_animation_sampler& sampler = *channel.sampler;
 
-            ASSERT(channel.m_target->linearIdx >= 0);
-
-            AnimationCurve curve;
-            curve.targetNode = channel.m_target->linearIdx;
-            curve.targetPath = channel.m_path;
-            curve.interpolation = sampler.m_interpolation;
-            curve.keyFrameOffset = model.m_AnimationKeyFrameData.size();
-            curve.keyFrameFormat = std::min<uint32_t>(sampler.m_output->componentType, AnimationCurve::kFloat);
-            curve.numSegments = sampler.m_output->count - 1.0f;
-
-            // In glTF, stride==0 means "packed tightly"
-            if (sampler.m_output->stride == 0)
+			AnimationCurve curve;
+			auto it = nodeMap.find(channel.target_node);
+			if (it != nodeMap.end())
+			{
+				curve.targetNode = it->second;
+			}
+			else
+			{
+				// 如果找不到（比如该节点不在当前 Scene 中），跳过或者设为无效
+				continue;
+			}
+			// 路径映射
+			switch (channel.target_path) 
             {
-                uint32_t numComponents = sampler.m_output->type + 1;
-                uint32_t bytesPerComponent = sampler.m_output->componentType / 2 + 1;
-                curve.keyFrameStride = numComponents * bytesPerComponent / 4;
-            }
-            else
+			case cgltf_animation_path_type_translation: curve.targetPath = glTF::AnimChannel::kTranslation; break;
+			case cgltf_animation_path_type_rotation:    curve.targetPath = glTF::AnimChannel::kRotation; break;
+			case cgltf_animation_path_type_scale:       curve.targetPath = glTF::AnimChannel::kScale; break;
+			case cgltf_animation_path_type_weights:     curve.targetPath = glTF::AnimChannel::kWeights; break;
+			default: continue;
+			}
+
+			// 插值方式映射
+			switch (sampler.interpolation) 
             {
-                ASSERT(sampler.m_output->stride <= 16 && sampler.m_output->stride % 4 == 0);
-                curve.keyFrameStride = sampler.m_output->stride / 4;
-            }
+			case cgltf_interpolation_type_linear:       curve.interpolation = glTF::AnimSampler::kLinear; break;
+			case cgltf_interpolation_type_step:         curve.interpolation = glTF::AnimSampler::kStep; break;
+			case cgltf_interpolation_type_cubic_spline: curve.interpolation = glTF::AnimSampler::kCubicSpline; break;
+			default: curve.interpolation = glTF::AnimSampler::kLinear; break;
+			}
 
-            // Determine start and stop time stamps
-            const float* timeStamps = (float*)sampler.m_input->dataPtr;
-            curve.startTime = timeStamps[0];
+			// 关键帧数据偏移与格式
+			curve.keyFrameOffset = (uint32_t)model.m_AnimationKeyFrameData.size();
+			curve.keyFrameFormat = glTF::GltfAsset::MapComponentType(sampler.output->component_type);
+			curve.numSegments = (float)(sampler.input->count - 1);
 
-            const float endTime = timeStamps[sampler.m_output->count - 1];
-            curve.rangeScale = curve.numSegments / (endTime - curve.startTime);
+			// 计算 Stride (float 数量)
+			uint32_t numComps = (uint32_t)cgltf_num_components(sampler.output->type);
+			curve.keyFrameStride = numComps; // 假设是 float，如果是短整型需调整
 
-            animSet.duration = std::max<float>(animSet.duration, endTime);
+			// 提取时间戳计算 Duration
+			std::vector<float> times(sampler.input->count);
+			cgltf_accessor_unpack_floats(sampler.input, times.data(), times.size());
+			curve.startTime = times.front();
+			float endTime = times.back();
+			curve.rangeScale = curve.numSegments / (endTime - curve.startTime);
+			animSet.duration = std::max(animSet.duration, endTime);
 
-            // Append this curve data
-            model.m_AnimationKeyFrameData.insert(
-                model.m_AnimationKeyFrameData.end(),
-                sampler.m_output->dataPtr,
-                sampler.m_output->dataPtr + sampler.m_output->count * curve.keyFrameStride * 4);
+			// 提取关键帧数据
+			size_t dataSize = sampler.output->count * cgltf_calc_size(sampler.output->type, sampler.output->component_type);
+			const uint8_t* srcData = (const uint8_t*)sampler.output->buffer_view->buffer->data + sampler.output->offset + sampler.output->buffer_view->offset;
 
-            model.m_AnimationCurves.push_back(curve);
+			size_t currentByteSize = model.m_AnimationKeyFrameData.size();
+			model.m_AnimationKeyFrameData.resize(currentByteSize + dataSize);
+			memcpy(model.m_AnimationKeyFrameData.data() + currentByteSize, srcData, dataSize);
+
+			model.m_AnimationCurves.push_back(curve);
+
         }
     }
 }
 
-void BuildSkins(ModelData& model, const glTF::Asset& asset)
+void BuildSkins(ModelData& model, const glTF::GltfAsset& asset, const NodeMap& nodeMap)
 {
-    size_t numSkins = asset.m_skins.size();
-    if (numSkins == 0)
-        return;
+	cgltf_data* data = asset.m_Data;
+	if (data->skins_count == 0)
+		return;
 
-    std::vector<std::pair<uint16_t, uint16_t>> skinMap;
-    skinMap.reserve(asset.m_skins.size());
+	std::vector<std::pair<uint16_t, uint16_t>> skinMap;
+	skinMap.reserve(data->skins_count);
 
-    for (const glTF::Skin& skin : asset.m_skins)
-    {
+	for (size_t i = 0; i < data->skins_count; ++i)
+	{
+		const cgltf_skin& skin = data->skins[i];
+
         // Record offset and joint count
-        uint16_t numJoints = (uint16_t)skin.joints.size();
+        uint16_t numJoints = (uint16_t)skin.joints_count;
         uint16_t curOffset = (uint16_t)model.m_JointIndices.size();
         skinMap.push_back(std::make_pair(curOffset, numJoints));
 
         // Append remapped joint indices
-        for (glTF::Node* joint : skin.joints)
-        {
-            ASSERT(joint->linearIdx >= 0, "Skin joint not present in node hierarchy");
-            model.m_JointIndices.push_back((uint16_t)joint->linearIdx);
-        }
+		for (size_t j = 0; j < skin.joints_count; ++j)
+		{
+			cgltf_node* joint = skin.joints[j];
+			// 修正：cgltf_node_index 获取节点索引
+			auto it = nodeMap.find(joint);
+			if (it != nodeMap.end())
+			{
+				model.m_JointIndices.push_back((uint16_t)it->second);
+			}
+			else
+			{
+				model.m_JointIndices.push_back(0); // 错误回退
+				Utility::Printf("Error: Skin joint not found in scene graph.\n");
+			}
+		}
 
         // Append IBMs
-        Matrix4* IBMstart = (Matrix4*)skin.inverseBindMatrices->dataPtr;
-        Matrix4* IBMend = IBMstart + skin.inverseBindMatrices->count;
-        ASSERT(skin.inverseBindMatrices->count == numJoints);
-        model.m_JointIBMs.insert(model.m_JointIBMs.end(), IBMstart, IBMend);
+		// 修正：从 accessor 读取矩阵数据
+		if (skin.inverse_bind_matrices) 
+		{
+			std::vector<float> buffer(skin.inverse_bind_matrices->count * 16);
+			cgltf_accessor_unpack_floats(skin.inverse_bind_matrices, buffer.data(), buffer.size());
+			// 假设 float 布局与 Matrix4 兼容
+			model.m_JointIBMs.insert(model.m_JointIBMs.end(), (Matrix4*)buffer.data(), (Matrix4*)buffer.data() + skin.inverse_bind_matrices->count);
+		}
+		else 
+		{
+			// 如果没有 IBM，推入单位矩阵
+			model.m_JointIBMs.insert(model.m_JointIBMs.end(), numJoints, Matrix4(kIdentity));
+		}
     }
 
     // Assign skinned meshes the proper joint offset and count
@@ -482,15 +551,20 @@ void BuildSkins(ModelData& model, const glTF::Asset& asset)
     //}
 }
 
-bool Renderer::BuildModel(ModelData& model, const glTF::Asset& asset, GlobalStreamingContext& streamCtx, int sceneIdx)
+bool Renderer::BuildModel(ModelData& model, const glTF::GltfAsset& asset, GlobalStreamingContext& streamCtx, int sceneIdx)
 {
     BuildMaterials(model, asset);
 
+	cgltf_data* data = asset.m_Data;
+
     // Generate scene graph and meshes
-    model.m_SceneGraph.resize(asset.m_nodes.size());
-    const glTF::Scene* scene = sceneIdx < 0 ? asset.m_scene : &asset.m_scenes[sceneIdx];
-    if (scene == nullptr)
-        return false;
+	model.m_SceneGraph.resize(data->nodes_count);
+
+	NodeMap nodeMap;
+
+	const cgltf_scene* scene = sceneIdx < 0 ? data->scene : &data->scenes[sceneIdx];
+	if (scene == nullptr)
+		return false;
 
     // Aggregate all of the vertex and index buffers in this unified buffer
     //std::vector<unsigned char>& bufferMemory = model.m_GeometryData;
@@ -499,11 +573,29 @@ bool Renderer::BuildModel(ModelData& model, const glTF::Asset& asset, GlobalStre
 
     model.m_BoundingSphere = BoundingSphere(kZero);
     model.m_BoundingBox = AxisAlignedBox(kZero);
-    uint32_t numNodes = WalkGraph(model, model.m_SceneGraph, model.m_BoundingSphere, model.m_BoundingBox, model.m_Meshes, bufferMemory, model.m_Cameras, scene->nodes, 0, Matrix4(kIdentity), streamCtx);
-    model.m_SceneGraph.resize(numNodes);
 
-    BuildAnimations(model, asset);
-    BuildSkins(model, asset);
+	// 遍历 Scene 的根节点
+	uint32_t currentPos = 0;
+	if (scene->nodes_count > 0)
+	{
+		// 模拟一个 Root Node 来包含 Scene 的所有 Root Nodes，或者循环处理
+		// 这里假设按照顺序放入 Graph，需要特殊处理多个根节点的情况
+		// WalkGraph 逻辑是处理单个树。如果 Scene 有多个节点，它们是平级的。
+
+		for (size_t i = 0; i < scene->nodes_count; ++i)
+		{
+			uint32_t nextPos = WalkGraph(model, data, model.m_SceneGraph, model.m_BoundingSphere, model.m_BoundingBox, scene->nodes[i], currentPos, Matrix4(kIdentity), streamCtx, nodeMap);
+			if (i < scene->nodes_count - 1)
+				model.m_SceneGraph[nextPos - 1].hasSibling = 1;
+
+			currentPos = nextPos;
+		}
+	}
+
+	model.m_SceneGraph.resize(currentPos);
+
+    BuildAnimations(model, asset, nodeMap);
+    BuildSkins(model, asset, nodeMap);
 
     return true;
 }

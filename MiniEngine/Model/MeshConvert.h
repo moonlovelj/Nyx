@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -13,7 +13,8 @@
 
 #pragma once
 
-#include "glTF.h"
+#include "glTFLoader.h"
+#include "FileUtility.h"
 #include "../Core/Math/BoundingSphere.h"
 #include "../Core/Math/BoundingBox.h"
 
@@ -47,4 +48,5 @@ namespace Renderer
     };
 }
 
-void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, const Math::Matrix4& localToObject );
+//void OptimizeMesh( Renderer::Primitive& outPrim, const glTF::Primitive& inPrim, const Math::Matrix4& localToObject );
+void OptimizeMesh(Renderer::Primitive& outPrim, const cgltf_data* data, const cgltf_primitive& inPrim, const Math::Matrix4& localToObject);
