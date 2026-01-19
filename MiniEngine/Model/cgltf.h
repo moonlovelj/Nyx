@@ -1,4 +1,4 @@
-/**
+﻿/**
  * cgltf - a single-file glTF 2.0 parser written in C99.
  *
  * Version: 1.15
@@ -93,6 +93,8 @@
  */
 #ifndef CGLTF_H_INCLUDED__
 #define CGLTF_H_INCLUDED__
+
+#pragma warning(disable : 4996)
 
 #include <stddef.h>
 #include <stdint.h> /* For uint8_t, uint32_t */

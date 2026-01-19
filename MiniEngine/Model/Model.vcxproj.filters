@@ -178,10 +178,10 @@
     <ClInclude Include="StructsIO.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="cgltf.h">
+    <ClInclude Include="glTFLoader.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="glTFLoader.h">
+    <ClInclude Include="cgltf.h">
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>

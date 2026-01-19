@@ -27,8 +27,10 @@ namespace glTF
 
 	struct Material
 	{
-		enum { kBaseColor, kMetallicRoughness, kOcclusion, kEmissive, kNormal, kSpecularColor, kNumTextures };
+		enum eMaterialTexture { kBaseColor, kMetallicRoughness, kOcclusion, kEmissive, kNormal, kSpecularColor, kNumTextures };
 	};
+
+	static_assert((uint32_t)Material::eMaterialTexture::kNumTextures <= 8, "Num of material textures can not much than 8");
 
 	struct AnimChannel {
 		enum ePath { kTranslation, kRotation, kScale, kWeights };

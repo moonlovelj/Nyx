@@ -32,7 +32,7 @@ struct MeshConstants
 };
 
 // The order of textures for PBR materials
-enum { kBaseColor, kMetallicRoughness, kOcclusion, kEmissive, kNormal, kNumTextures };
+enum { kBaseColor, kMetallicRoughness, kOcclusion, kEmissive, kNormal, kSpecularColor, kNumTextures };
 
 // model 粒度
 struct MaterialConstants

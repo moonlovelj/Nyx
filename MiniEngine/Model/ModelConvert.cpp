@@ -221,7 +221,6 @@ static uint32_t WalkGraph(
 		memcpy(&node.xform, curNode->matrix, sizeof(float) * 16);
 	}
 	else {
-		// 如果没有矩阵，使用 PRS 组合
 		Vector3 translation = curNode->has_translation ? Vector3(curNode->translation[0], curNode->translation[1], curNode->translation[2]) : Vector3(kOrigin);
 		Vector3 scale = curNode->has_scale ? Vector3(curNode->scale[0], curNode->scale[1], curNode->scale[2]) : Vector3(kOne);
 		Quaternion rotation = curNode->has_rotation ?
@@ -234,17 +233,14 @@ static uint32_t WalkGraph(
 
     const Matrix4 worldXform = xform * node.xform;
 
-	// 2. 处理 Mesh 数据
 	if (curNode->mesh) {
 		BoundingSphere sphereOS;
 		AxisAlignedBox boxOS;
-		// 需修改 CompileMesh 的签名，接受 cgltf_mesh
 		CompileMesh(modelData, data, *curNode->mesh, curPos, worldXform, sphereOS, boxOS, streamCtx);
 		modelBSphere = modelBSphere.Union(sphereOS);
 		modelBBox.AddBoundingBox(boxOS);
 	}
 
-	// 3. 处理 Camera
 	if (curNode->camera) {
 		CameraData cam;
 		if (curNode->camera->type == cgltf_camera_type_perspective) {
@@ -258,23 +254,12 @@ static uint32_t WalkGraph(
 		modelData.m_Cameras.push_back(cam);
 	}
 
-	// 4. 递归子节点
 	uint32_t nextPos = curPos + 1;
 	for (size_t i = 0; i < curNode->children_count; ++i) {
-		// 标记是否有兄弟节点（除最后一个子节点外都有兄弟）
-		if (i < curNode->children_count - 1) {
-			// 注意：由于是深度优先扁平化存储，Sibling 标记逻辑需小心
-			// 在 Minigraph 的 WalkGraph 中，Sibling 意味着在同一层级还有后续节点
-		}
-
-		// 深度优先遍历
+		const uint32_t childStartPos = nextPos;
 		nextPos = WalkGraph(modelData, data, sceneGraph, modelBSphere, modelBBox, curNode->children[i], nextPos, worldXform, streamCtx, nodeMap);
-
-		// 更新 hasSibling 状态：
-		// 这里的逻辑必须和渲染时的线性遍历匹配。
-		// 原本 sceneGraph[curPos] 如果有兄弟，渲染器会知道跳到哪里。
 		if (i < curNode->children_count - 1)
-			sceneGraph[nextPos - 1].hasSibling = 1;
+			sceneGraph[childStartPos].hasSibling = 1;
 	}
 
 	return nextPos;
@@ -326,9 +311,44 @@ void BuildMaterials(ModelData& model, const glTF::GltfAsset& asset)
 		matConst.emissiveFactor[1] = 0.0f;
 		matConst.emissiveFactor[2] = 0.0f;
 		matConst.flags = 0;
-		matTex.addressModes = 0x55555; // 默认为所有贴图开启 Wrap (D3D12_TEXTURE_ADDRESS_MODE_WRAP = 1, 1 | 1<<2 = 5)
+		matTex.addressModes = 0;
 
 		for (int j = 0; j < kNumTextures; ++j) matTex.stringIdx[j] = 0xFFFF;
+
+		const uint32_t defaultAddressMode = 0x5;
+		auto mapGltfSamplerAddressModeToDX12 = [](cgltf_sampler* gltfSampler, glTF::Material::eMaterialTexture mTex)
+			{
+				uint32_t modeSValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+				if (gltfSampler)
+				{
+					switch (gltfSampler->wrap_s)
+					{
+					case cgltf_wrap_mode_clamp_to_edge:
+						modeSValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+					case cgltf_wrap_mode_mirrored_repeat:
+						modeSValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+					default:
+						modeSValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+					}
+				}
+
+				uint32_t modeTValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+				if (gltfSampler)
+				{
+					switch (gltfSampler->wrap_t)
+					{
+					case cgltf_wrap_mode_clamp_to_edge:
+						modeTValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+					case cgltf_wrap_mode_mirrored_repeat:
+						modeTValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+					default:
+						modeTValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+					}
+				}
+
+				const uint32_t finalValue = (modeTValue << 2 | modeSValue) << ((uint32_t)mTex * 4);
+				return finalValue;
+			};
 
 		// PBR 参数映射
 		if (srcMat.has_pbr_metallic_roughness)
@@ -338,45 +358,92 @@ void BuildMaterials(ModelData& model, const glTF::GltfAsset& asset)
 			matConst.metallicFactor = pbr.metallic_factor;
 			matConst.roughnessFactor = pbr.roughness_factor;
 
-			if (pbr.base_color_texture.texture) {
+			if (pbr.base_color_texture.texture) 
+			{
 				matTex.stringIdx[glTF::Material::kBaseColor] = (uint16_t)cgltf_image_index(data, pbr.base_color_texture.texture->image);
-				//matConst.baseColorUV = (uint32_t)pbr.base_color_texture.texcoord;
+				matConst.baseColorUV = (uint32_t)pbr.base_color_texture.texcoord;
+				matTex.addressModes |= mapGltfSamplerAddressModeToDX12(
+					pbr.base_color_texture.texture->sampler,
+					glTF::Material::kBaseColor);
 			}
-			if (pbr.metallic_roughness_texture.texture) {
-				matTex.stringIdx[glTF::Material::kMetallicRoughness] = (uint16_t)cgltf_image_index(data, pbr.metallic_roughness_texture.texture->image);
-				//matConst.metallicRoughnessUV = (uint32_t)pbr.metallic_roughness_texture.texcoord;
+			else
+			{
+				matTex.addressModes |= (defaultAddressMode << ((uint32_t)glTF::Material::kBaseColor * 4));
 			}
 
-			// 其他贴图
-			if (srcMat.normal_texture.texture) {
+			if (pbr.metallic_roughness_texture.texture) 
+			{
+				matTex.stringIdx[glTF::Material::kMetallicRoughness] = (uint16_t)cgltf_image_index(data, pbr.metallic_roughness_texture.texture->image);
+				matConst.metallicRoughnessUV = (uint32_t)pbr.metallic_roughness_texture.texcoord;
+				matTex.addressModes |= mapGltfSamplerAddressModeToDX12(
+					pbr.metallic_roughness_texture.texture->sampler,
+					glTF::Material::kMetallicRoughness);
+			}
+			else
+			{
+				matTex.addressModes |= (defaultAddressMode << ((uint32_t)glTF::Material::kMetallicRoughness * 4));
+			}
+
+			if (srcMat.normal_texture.texture) 
+			{
 				matTex.stringIdx[glTF::Material::kNormal] = (uint16_t)cgltf_image_index(data, srcMat.normal_texture.texture->image);
 				matConst.normalTextureScale = srcMat.normal_texture.scale;
-				//matConst.normalUV = (uint32_t)srcMat.normal_texture.texcoord;
+				matConst.normalUV = (uint32_t)srcMat.normal_texture.texcoord;
+				matTex.addressModes |= mapGltfSamplerAddressModeToDX12(
+					srcMat.normal_texture.texture->sampler,
+					glTF::Material::kNormal);
 			}
-			if (srcMat.emissive_texture.texture) {
+			else
+			{
+				matTex.addressModes |= (defaultAddressMode << ((uint32_t)glTF::Material::kNormal * 4));
+			}
+
+			if (srcMat.emissive_texture.texture)
+			{
 				matTex.stringIdx[glTF::Material::kEmissive] = (uint16_t)cgltf_image_index(data, srcMat.emissive_texture.texture->image);
 				memcpy(matConst.emissiveFactor, srcMat.emissive_factor, sizeof(float) * 3);
-				//matConst.emissiveUV = (uint32_t)srcMat.emissive_texture.texcoord;
+				matConst.emissiveUV = (uint32_t)srcMat.emissive_texture.texcoord;
+				matTex.addressModes |= mapGltfSamplerAddressModeToDX12(
+					srcMat.emissive_texture.texture->sampler,
+					glTF::Material::kEmissive);
 			}
-			if (srcMat.occlusion_texture.texture) {
+			else
+			{
+				matTex.addressModes |= (defaultAddressMode << ((uint32_t)glTF::Material::kEmissive * 4));
+			}
+
+			if (srcMat.occlusion_texture.texture)
+			{
 				matTex.stringIdx[glTF::Material::kOcclusion] = (uint16_t)cgltf_image_index(data, srcMat.occlusion_texture.texture->image);
-				//matConst.occlusionUV = (uint32_t)srcMat.occlusion_texture.texcoord;
+				matConst.occlusionUV = (uint32_t)srcMat.occlusion_texture.texcoord;
+				matTex.addressModes |= mapGltfSamplerAddressModeToDX12(
+					srcMat.occlusion_texture.texture->sampler,
+					glTF::Material::kOcclusion);
+			}
+			else
+			{
+				matTex.addressModes |= (defaultAddressMode << ((uint32_t)glTF::Material::kOcclusion * 4));
 			}
 
 			if (srcMat.specular.specular_color_texture.texture)
 			{
 				matTex.stringIdx[glTF::Material::kSpecularColor] = (uint16_t)cgltf_image_index(data, srcMat.specular.specular_color_texture.texture->image);
+				matTex.addressModes |= mapGltfSamplerAddressModeToDX12(
+					srcMat.specular.specular_color_texture.texture->sampler,
+					glTF::Material::kSpecularColor);
+			}
+			else
+			{
+				matTex.addressModes |= (defaultAddressMode << ((uint32_t)glTF::Material::kSpecularColor * 4));
 			}
 
-			// 状态位标志
-			if (srcMat.double_sided) matConst.flags |= 0x20; // 对应旧代码 twoSided bit
-			if (srcMat.alpha_mode == cgltf_alpha_mode_blend) matConst.flags |= 0x80;
+			if (srcMat.double_sided) matConst.twoSided = 1;
+			if (srcMat.alpha_mode == cgltf_alpha_mode_blend) matConst.alphaBlend = 1;
 			if (srcMat.alpha_mode == cgltf_alpha_mode_mask) {
-				matConst.flags |= 0x40;
-				//matConst.alphaRef = static_cast<uint16_t>(srcMat.alpha_cutoff * 255.0f); // 简单映射
+				matConst.alphaTest = 1;
+				matConst.alphaRef = static_cast<uint16_t>(srcMat.alpha_cutoff * 255.0f); // 简单映射
 			}
 
-			// 记录纹理编译选项 (此处逻辑保持不变)
 			auto RegisterOpt = [&](int slot, bool srgb) {
 				if (matTex.stringIdx[slot] != 0xFFFF)
 					textureOptions[model.m_TextureNames[matTex.stringIdx[slot]]] = TextureOptions(srgb, (srcMat.alpha_mode != cgltf_alpha_mode_opaque));
@@ -390,7 +457,6 @@ void BuildMaterials(ModelData& model, const glTF::GltfAsset& asset)
 		}
 	}
 
-	// 编译纹理 (保持不变)
 	for (size_t i = 0; i < model.m_TextureNames.size(); ++i)
 	{
 		auto it = textureOptions.find(model.m_TextureNames[i]);
@@ -412,7 +478,6 @@ void BuildAnimations(ModelData& model, const glTF::GltfAsset& asset, const NodeM
 	if (data->animations_count == 0) return;
 
     model.m_Animations.resize(data->animations_count);
-    uint32_t animIdx = 0;
 
     for (size_t i = 0; i < data->animations_count; ++i)
     {
@@ -420,7 +485,7 @@ void BuildAnimations(ModelData& model, const glTF::GltfAsset& asset, const NodeM
 		AnimationSet& animSet = model.m_Animations[i];
 		animSet.duration = 0.0f;
 		animSet.firstCurve = (uint32_t)model.m_AnimationCurves.size();
-		animSet.numCurves = (uint32_t)srcAnim.channels_count;
+		animSet.numCurves = 0;
 
         for (size_t j = 0; j < srcAnim.channels_count; ++j)
         {
@@ -435,10 +500,9 @@ void BuildAnimations(ModelData& model, const glTF::GltfAsset& asset, const NodeM
 			}
 			else
 			{
-				// 如果找不到（比如该节点不在当前 Scene 中），跳过或者设为无效
 				continue;
 			}
-			// 路径映射
+
 			switch (channel.target_path) 
             {
 			case cgltf_animation_path_type_translation: curve.targetPath = glTF::AnimChannel::kTranslation; break;
@@ -471,7 +535,10 @@ void BuildAnimations(ModelData& model, const glTF::GltfAsset& asset, const NodeM
 			cgltf_accessor_unpack_floats(sampler.input, times.data(), times.size());
 			curve.startTime = times.front();
 			float endTime = times.back();
-			curve.rangeScale = curve.numSegments / (endTime - curve.startTime);
+			if (endTime - curve.startTime < 1e-6f)
+				curve.rangeScale = 0.0f;
+			else
+				curve.rangeScale = curve.numSegments / (endTime - curve.startTime);
 			animSet.duration = std::max(animSet.duration, endTime);
 
 			// 提取关键帧数据
@@ -483,7 +550,7 @@ void BuildAnimations(ModelData& model, const glTF::GltfAsset& asset, const NodeM
 			memcpy(model.m_AnimationKeyFrameData.data() + currentByteSize, srcData, dataSize);
 
 			model.m_AnimationCurves.push_back(curve);
-
+			animSet.numCurves++;
         }
     }
 }
@@ -500,7 +567,7 @@ void BuildSkins(ModelData& model, const glTF::GltfAsset& asset, const NodeMap& n
 	for (size_t i = 0; i < data->skins_count; ++i)
 	{
 		const cgltf_skin& skin = data->skins[i];
-
+		ASSERT(skin.joints_count == skin.inverse_bind_matrices->count);
         // Record offset and joint count
         uint16_t numJoints = (uint16_t)skin.joints_count;
         uint16_t curOffset = (uint16_t)model.m_JointIndices.size();
@@ -510,7 +577,6 @@ void BuildSkins(ModelData& model, const glTF::GltfAsset& asset, const NodeMap& n
 		for (size_t j = 0; j < skin.joints_count; ++j)
 		{
 			cgltf_node* joint = skin.joints[j];
-			// 修正：cgltf_node_index 获取节点索引
 			auto it = nodeMap.find(joint);
 			if (it != nodeMap.end())
 			{
@@ -518,23 +584,28 @@ void BuildSkins(ModelData& model, const glTF::GltfAsset& asset, const NodeMap& n
 			}
 			else
 			{
-				model.m_JointIndices.push_back(0); // 错误回退
+				model.m_JointIndices.push_back(0);
 				Utility::Printf("Error: Skin joint not found in scene graph.\n");
 			}
 		}
 
-        // Append IBMs
-		// 修正：从 accessor 读取矩阵数据
 		if (skin.inverse_bind_matrices) 
 		{
-			std::vector<float> buffer(skin.inverse_bind_matrices->count * 16);
+			size_t count = skin.inverse_bind_matrices->count;
+			std::vector<float> buffer(count * 16);
 			cgltf_accessor_unpack_floats(skin.inverse_bind_matrices, buffer.data(), buffer.size());
-			// 假设 float 布局与 Matrix4 兼容
-			model.m_JointIBMs.insert(model.m_JointIBMs.end(), (Matrix4*)buffer.data(), (Matrix4*)buffer.data() + skin.inverse_bind_matrices->count);
+
+			Matrix4* matBuffer = (Matrix4*)buffer.data();
+			for (uint16_t k = 0; k < numJoints; ++k)
+			{
+				if (k < count)
+					model.m_JointIBMs.push_back(matBuffer[k]);
+				else
+					model.m_JointIBMs.push_back(Matrix4(kIdentity));
+			}
 		}
 		else 
 		{
-			// 如果没有 IBM，推入单位矩阵
 			model.m_JointIBMs.insert(model.m_JointIBMs.end(), numJoints, Matrix4(kIdentity));
 		}
     }
@@ -578,15 +649,12 @@ bool Renderer::BuildModel(ModelData& model, const glTF::GltfAsset& asset, Global
 	uint32_t currentPos = 0;
 	if (scene->nodes_count > 0)
 	{
-		// 模拟一个 Root Node 来包含 Scene 的所有 Root Nodes，或者循环处理
-		// 这里假设按照顺序放入 Graph，需要特殊处理多个根节点的情况
-		// WalkGraph 逻辑是处理单个树。如果 Scene 有多个节点，它们是平级的。
-
 		for (size_t i = 0; i < scene->nodes_count; ++i)
 		{
+			const uint32_t rootStartPos = currentPos;
 			uint32_t nextPos = WalkGraph(model, data, model.m_SceneGraph, model.m_BoundingSphere, model.m_BoundingBox, scene->nodes[i], currentPos, Matrix4(kIdentity), streamCtx, nodeMap);
 			if (i < scene->nodes_count - 1)
-				model.m_SceneGraph[nextPos - 1].hasSibling = 1;
+				model.m_SceneGraph[rootStartPos].hasSibling = 1;
 
 			currentPos = nextPos;
 		}

@@ -71,7 +71,7 @@ std::vector<uint32_t> LoadMaterials(Model& model,
         uint32_t SRVDescriptorTable = Renderer::s_TextureHeap.GetOffsetOfHandle(TextureHandles);
 
         uint32_t DestCount = kNumTextures;
-        uint32_t SourceCounts[kNumTextures] = { 1, 1, 1, 1, 1 };
+        uint32_t SourceCounts[kNumTextures] = { 1, 1, 1, 1, 1, 1 };
 
         D3D12_CPU_DESCRIPTOR_HANDLE DefaultTextures[kNumTextures] =
         {
@@ -79,7 +79,8 @@ std::vector<uint32_t> LoadMaterials(Model& model,
             GetDefaultTexture(kWhiteOpaque2D),
             GetDefaultTexture(kWhiteOpaque2D),
             GetDefaultTexture(kBlackTransparent2D),
-            GetDefaultTexture(kDefaultNormalMap)
+            GetDefaultTexture(kDefaultNormalMap),
+            GetDefaultTexture(kWhiteOpaque2D)
         };
 
         D3D12_CPU_DESCRIPTOR_HANDLE SourceTextures[kNumTextures];

@@ -100,11 +100,10 @@ void OptimizeMesh(Renderer::Primitive& outPrim,
 	outPrim.primCount = indexCount;
 	outPrim.index32 = 1;
 
-	// 解决 parent 属性不存在的问题：使用 cgltf_material_index
 	if (inPrim.material)
 		outPrim.materialIdx = (uint16_t)cgltf_material_index(data, inPrim.material);
 	else
-		outPrim.materialIdx = 0xFFFF;
+		outPrim.materialIdx = 0x7FFF;
 
 	const uint8_t* indices = outPrim.IB->data();
 
@@ -204,7 +203,9 @@ void OptimizeMesh(Renderer::Primitive& outPrim,
 	}
 
 	// 准备材质，处理材质为空的情况
-	cgltf_material defaultIdentityMaterial = {}; // 默认为 opaque, double_sided=false
+	cgltf_material defaultIdentityMaterial = {};
+	defaultIdentityMaterial.alpha_mode = cgltf_alpha_mode_opaque;
+	defaultIdentityMaterial.alpha_cutoff = 0.5f;
 	const cgltf_material& material = inPrim.material ? *inPrim.material : defaultIdentityMaterial;
 
 	outPrim.psoFlags = PSOFlags::kHasPosition | PSOFlags::kHasNormal;
@@ -296,14 +297,19 @@ void OptimizeMesh(Renderer::Primitive& outPrim,
 
         HRESULT hr = S_OK;
 
-		// 根据 glTF 标准，法线贴图的 texcoord 索引决定了切线空间基于哪套 UV
-        // 默认为 UV0 (索引0)
 		bool useUV1ForTangent = false;
 		if (material.normal_texture.texture && material.normal_texture.texcoord == 1)
 		{
-			useUV1ForTangent = true;
+			if (HasUV1)
+			{
+				useUV1ForTangent = true;
+			}
+			else if (HasUV0)
+			{
+				Utility::Printf("Warning: Normal map requests UV1 but mesh missing it. Fallback to UV0 for tangents.\n");
+				useUV1ForTangent = false;
+			}
 		}
-
 
         if (HasUV0 && !useUV1ForTangent)
         {
