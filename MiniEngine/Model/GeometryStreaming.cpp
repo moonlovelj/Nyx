@@ -9,7 +9,7 @@
 
 namespace GeometryStreaming
 {
-	const uint32_t kMaxChunks = 2;
+	const uint32_t kMaxChunks = 8;
 	constexpr uint32_t kNumReadbackBuffers = 3;
 	StructuredBuffer m_HierarchyNodesGPU;
 	std::vector<ByteAddressBuffer> m_GeometryChunksGPU;
@@ -227,7 +227,9 @@ void GeometryStreaming::PinRootPages(Model* model)
 
 		std::vector<uint8_t> pageData(Renderer::kPageSizeInBytes);
 		std::ifstream fs(model->m_StreamingFilePath, std::ios::in | std::ios::binary);
-		fs.seekg(model->m_GeometryBlobOffsetInFile + (pageIdx * Renderer::kPageSizeInBytes));
+		//fs.seekg(model->m_GeometryBlobOffsetInFile + (pageIdx * Renderer::kPageSizeInBytes));
+		uint64_t fileOffset = model->m_GeometryBlobOffsetInFile + (static_cast<uint64_t>(pageIdx) * static_cast<uint64_t>(Renderer::kPageSizeInBytes));
+		fs.seekg(fileOffset);
 		fs.read((char*)pageData.data(), pageData.size());
 
 		uint32_t byteOffset = slot.SlotIndex * Renderer::kPageSizeInBytes;
@@ -417,7 +419,7 @@ void GeometryStreaming::EnqueueAsyncLoad(uint32_t pageIdx)
 	std::thread([=]() {
 		std::vector<uint8_t> pageData(Renderer::kPageSizeInBytes);
 		std::ifstream fs(filePath, std::ios::in | std::ios::binary);
-		fs.seekg(baseOffset + (pageIdx * Renderer::kPageSizeInBytes), std::ios::beg);
+		fs.seekg(baseOffset + (static_cast<uint64_t>(pageIdx) * Renderer::kPageSizeInBytes), std::ios::beg);
 		fs.read((char*)pageData.data(), pageData.size());
 		OnPageIOComplete(pageIdx, std::move(pageData));
 		m_ActiveIOCount--;

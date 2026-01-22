@@ -539,7 +539,7 @@ bool MeshletBuilder::SimplifyGroup(
 	for (size_t i = 0; i < localVertexCount; ++i)
 	{
 		uint32_t globalIdx = usedGlobalIndices[i];
-		const unsigned char* vPtr = buildArgs.VBData + (globalIdx * buildArgs.vertexStride);
+		const unsigned char* vPtr = buildArgs.VBData + ((size_t)globalIdx) * buildArgs.vertexStride;
 
 		// Position
 		memcpy(&localPositions[i * 3], vPtr, 12);
@@ -714,9 +714,9 @@ GroupPackage MeshletBuilder::SerializeGroup(
 		pIndicesCursor += Math::AlignUp(static_cast<uint32_t>(triBytes), 4u);
 
 		// 拷贝顶点数据
-		for (uint32_t mvIdx = 0; mvIdx < m.Vertices.size(); mvIdx++)
+		for (size_t mvIdx = 0; mvIdx < m.Vertices.size(); mvIdx++)
 		{
-			const unsigned char* srcV = &(buildArgs.VBData[m.Vertices[mvIdx] * buildArgs.vertexStride]);
+			const unsigned char* srcV = &(buildArgs.VBData[(size_t)m.Vertices[mvIdx] * buildArgs.vertexStride]);
 			std::memcpy(pVerticesCursor + buildArgs.vertexStride * mvIdx, srcV, buildArgs.vertexStride);
 		}
 

@@ -326,7 +326,7 @@ void Renderer::Initialize(void)
 
     TextureManager::Initialize(L"");
 
-    s_TextureHeap.Create(L"Scene Texture Descriptors", D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 4096);
+    s_TextureHeap.Create(L"Scene Texture Descriptors", D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 4096 * 8);
     m_BindlessResources = s_TextureHeap.Alloc(BINDLESS_CAPACITY);
 
     // Maybe only need 2 for wrap vs. clamp?  Currently we allocate 1 for 1 with textures

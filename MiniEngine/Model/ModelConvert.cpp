@@ -38,6 +38,230 @@ using namespace Graphics;
 
 #include "MeshletBuilder.h"
 
+// 编译后的 Primitive 元数据 (不包含顶点数据，仅包含引用信息)
+struct CompiledPrimitive
+{
+	uint32_t rootNodeIndex;         // BVH 在全局节点数组中的起始索引
+	uint32_t indexCount;            // 索引数量（用于统计或调试）
+	Math::BoundingSphere boundsLS;  // 局部空间包围球（Local Space）
+	uint16_t materialIdx;
+	uint16_t psoFlags;
+	uint16_t vertexStride;
+};
+
+// 编译后的 Mesh 元数据
+struct CompiledMeshData
+{
+	std::vector<CompiledPrimitive> primitives;
+	Math::BoundingSphere boundsLS;  // 整个Mesh的局部包围球
+	Math::AxisAlignedBox bboxLS;    // 整个Mesh的局部包围盒
+};
+
+// 几何缓存：避免同一个 glTF Mesh 被重复解析和构建
+using MeshCache = std::unordered_map<const cgltf_mesh*, CompiledMeshData>;
+// 节点映射：用于动画和蒙皮关联
+using NodeMap = std::unordered_map<const cgltf_node*, uint32_t>;
+
+/**
+ * @brief 编译网格几何体。
+ * 负责读取原始顶点数据、优化、生成 Meshlets，并将数据流式写入磁盘。
+ * 此时产生的几何体是 Mesh Local Space 的，不包含特定的世界变换。
+ */
+static const CompiledMeshData& CompileMeshGeometry(
+	ModelData& modelData,
+	MeshCache& meshCache,
+	const cgltf_data* data,
+	const cgltf_mesh& srcMesh,
+	GlobalStreamingContext& streamCtx
+)
+{
+	// 1. 缓存命中检查
+	auto it = meshCache.find(&srcMesh);
+	if (it != meshCache.end())
+		return it->second;
+
+	CompiledMeshData resultData = {};
+	resultData.boundsLS = BoundingSphere(kZero);
+	resultData.bboxLS = AxisAlignedBox(kZero);
+
+	// 2. 读取并优化 Primitives
+	// 注意：这里传入 Identity 矩阵，确保生成的 VB/IB 是基于 Local Space 的
+	// OptimizeMesh 不会在 VB 中烘焙变换，但会利用传入的矩阵计算 outPrim.m_BoundsOS。
+	// 我们这里统一认为: 构建时，Local == Object
+	Matrix4 identityXform(kIdentity);
+
+	std::vector<Primitive> primitives(srcMesh.primitives_count);
+
+	// 用于聚合 Bounds
+	BoundingSphere sphereAccum(kZero);
+	AxisAlignedBox bboxAccum(kZero);
+
+	for (uint32_t i = 0; i < primitives.size(); ++i)
+	{
+		OptimizeMesh(primitives[i], data, srcMesh.primitives[i], identityXform);
+
+		// 累加局部包围盒
+		sphereAccum = sphereAccum.Union(primitives[i].m_BoundsOS); // 由于传入 Identity，这里 OS == LS
+		bboxAccum.AddBoundingBox(primitives[i].m_BBoxOS);
+	}
+
+	resultData.boundsLS = sphereAccum;
+	resultData.bboxLS = bboxAccum;
+
+	// 3. 按材质和属性 Hash 分组 (Render Groups)
+	// 即使 glTF 中分成了多个 primitive，属性相同的可以尝试合并处理，或者至少共享配置
+	std::map<uint32_t, std::vector<Primitive*>> renderGroups;
+	for (auto& prim : primitives)
+	{
+		renderGroups[prim.hash].push_back(&prim);
+	}
+
+	// 4. 构建 Meshlets (最耗时步骤，也是磁盘占用最大的部分)
+	// 仅在第一次遇到该 Mesh 时执行
+	uint32_t baseGroupIndex = static_cast<uint32_t>(modelData.m_GroupInfos.size());
+	uint32_t baseNodeIndex = static_cast<uint32_t>(modelData.m_Nodes.size());
+
+	for (auto& iter : renderGroups)
+	{
+		const auto& groupPrims = iter.second;
+		if (groupPrims.empty()) continue;
+
+		MeshletBuildArgs buildArgs = {};
+		// 这里的 meshBufferIndex 仅用于 Runtime 查找 Mesh 常量，
+		// 在 Instancing 模式下，几何体与特定 Instance 解耦，因此这里并不绑定具体的 matrixIdx。
+		// Runtime 通过 Instance buffer 重定向到 Geometry buffer。
+		buildArgs.meshBufferIndex = 0;
+
+		buildArgs.materialBufferIndex = groupPrims[0]->materialIdx;
+		buildArgs.psoFlags = groupPrims[0]->psoFlags;
+		for (Primitive* draw : groupPrims)
+		{
+			buildArgs.vertexStride = draw->vertexStride;
+			const uint32_t vertexCount = static_cast<uint32_t>(draw->VB->size() / draw->vertexStride);
+			buildArgs.VBData = draw->VB->data();
+			buildArgs.IBData = draw->IB->data();
+			buildArgs.vertexCount = vertexCount;
+			buildArgs.indexCount = draw->primCount;
+			buildArgs.baseGroupIndex = baseGroupIndex;
+			buildArgs.baseNodeIndex = baseNodeIndex;
+
+			// --- 执行 Meshlet 构建 ---
+			const auto buildResult = MeshletBuilder::Build(buildArgs);
+
+			// 记录构建结果元数据
+			CompiledPrimitive finalPrim = {};
+			finalPrim.rootNodeIndex = baseNodeIndex; // 记录当前 Primitive 对应的 BVH 根节点
+			finalPrim.materialIdx = draw->materialIdx;
+			finalPrim.psoFlags = draw->psoFlags;
+			finalPrim.vertexStride = draw->vertexStride;
+			finalPrim.indexCount = draw->primCount;
+			finalPrim.boundsLS = draw->m_BoundsLS;
+
+			resultData.primitives.push_back(finalPrim);
+
+			// --- 写入全局流 ---
+			for (const auto& group : buildResult.Groups)
+			{
+				const uint32_t groupSize = static_cast<uint32_t>(group.Blob.size());
+				ASSERT(groupSize % 4 == 0, "Group blob must be 4-byte aligned");
+				ASSERT(groupSize <= Renderer::kPageSizeInBytes, "Single group exceeds page size limit.");
+
+				// 简单的页管理逻辑
+				if (streamCtx.CurrentOffsetInPage + groupSize > Renderer::kPageSizeInBytes)
+				{
+					uint32_t paddingSize = Renderer::kPageSizeInBytes - streamCtx.CurrentOffsetInPage;
+					if (paddingSize > 0 && paddingSize < Renderer::kPageSizeInBytes)
+					{
+						streamCtx.TempGeoFile.write(streamCtx.ZeroBuffer.data(), paddingSize);
+						streamCtx.TotalGeometrySize += paddingSize;
+					}
+
+					PageMetadata page;
+					page.StartGroupIndex = static_cast<uint32_t>(modelData.m_GroupInfos.size());
+					page.GroupCount = 0;
+					modelData.m_Pages.push_back(page);
+
+					streamCtx.CurrentPageIndex = static_cast<uint32_t>(modelData.m_Pages.size() - 1);
+					streamCtx.CurrentOffsetInPage = 0;
+				}
+				else if (modelData.m_Pages.empty())
+				{
+					PageMetadata page = { 0, 0 };
+					modelData.m_Pages.push_back(page);
+				}
+
+				modelData.m_Pages.back().GroupCount++;
+
+				GroupMetadata metadata = group.Metadata;
+				metadata.PageIndex = streamCtx.CurrentPageIndex;
+				metadata.OffsetInPage = streamCtx.CurrentOffsetInPage;
+				modelData.m_GroupInfos.push_back(metadata);
+
+				streamCtx.TempGeoFile.write(reinterpret_cast<const char*>(group.Blob.data()), groupSize);
+
+				streamCtx.CurrentOffsetInPage += groupSize;
+				streamCtx.TotalGeometrySize += groupSize;
+			}
+
+			// 更新偏移
+			baseGroupIndex += (uint32_t)buildResult.Groups.size();
+			baseNodeIndex += (uint32_t)buildResult.Hierarchy.size();
+
+			// 记录生成的 BVH 节点
+			modelData.m_Nodes.insert(modelData.m_Nodes.end(), buildResult.Hierarchy.begin(), buildResult.Hierarchy.end());
+			modelData.m_TriangleCount += buildArgs.indexCount / 3;
+		}
+	}
+	Utility::Printf("Already build triangles count : %llu\n", modelData.m_TriangleCount);
+	// 更新缓存并返回引用
+	// 注意：std::move 后 primitives 里的 heavy vector (VB/IB) 会被移动然后销毁（因为 CompilePrimitive 里没有存 VB 指针）
+	// 这里的 primitives 变量析构时释放内存，实现了“构建即焚”，保证 Build 阶段低内存占用
+	auto& ref = meshCache[&srcMesh] = std::move(resultData);
+	return ref;
+}
+
+/**
+ * @brief 实例化 Mesh。
+ * 创建一个 Renderer::Mesh 对象，关联到特定的 Scene Graph 节点 (matrixIdx)，并复用已编译的几何数据。
+ */
+static void InstantiateMesh(
+	ModelData& modelData,
+	const CompiledMeshData& cachedData,
+	uint32_t matrixIdx
+)
+{
+	size_t numDraws = cachedData.primitives.size();
+	if (numDraws == 0) return;
+
+	// 分配紧凑的 Mesh 结构体内存
+	// 注意：这里使用 malloc 是为了配合 modelData 存储指针的设计。在16亿级场景下，如果实例极多（如数百万），
+	// 这里的堆分配可能会造成碎片。但考虑到要兼容现有 Model 结构，这是必要的妥协。
+	// 在极限情况下，建议 ModelData 改用 LinearAllocator 或 std::deque<Mesh> 存储。
+	size_t meshStructSize = sizeof(Mesh) + sizeof(Mesh::Draw) * (numDraws - 1);
+	Mesh* mesh = (Mesh*)malloc(meshStructSize);
+
+	mesh->numDraws = (uint32_t)numDraws;
+	mesh->matrixIdx = static_cast<uint16_t>(matrixIdx);
+	mesh->padding = 0;
+
+	for (size_t i = 0; i < numDraws; ++i)
+	{
+		const auto& prim = cachedData.primitives[i];
+
+		// 关键：复用同一个 rootNodeIndex，不需要再次构建 BVH
+		mesh->draw[i].rootNodeIndex = prim.rootNodeIndex;
+
+		// 存储 Local Space 的 Bounds。
+		// Runtime 的 Cull Shader 会根据 mesh->matrixIdx 读取 Instance Transform 将其变换到 World Space。
+		mesh->draw[i].boundingSphere[0] = prim.boundsLS.GetCenter().GetX();
+		mesh->draw[i].boundingSphere[1] = prim.boundsLS.GetCenter().GetY();
+		mesh->draw[i].boundingSphere[2] = prim.boundsLS.GetCenter().GetZ();
+		mesh->draw[i].boundingSphere[3] = prim.boundsLS.GetRadius();
+	}
+
+	modelData.m_Meshes.push_back(mesh);
+}
+
 void Renderer::CompileMesh(
 	ModelData& modelData,
 	const cgltf_data* data,
@@ -55,7 +279,7 @@ void Renderer::CompileMesh(
     // There may be more than one draw call per group due to 16-bit indices.
 
     size_t totalVertexSize = 0;
-    size_t totalDepthVertexSize = 0;
+    //size_t totalDepthVertexSize = 0;
     size_t totalIndexSize = 0;
 
     BoundingSphere sphereOS(kZero);
@@ -78,7 +302,7 @@ void Renderer::CompileMesh(
         uint32_t hash = prim.hash;
         renderMeshes[hash].push_back(&prim);
         totalVertexSize += prim.VB->size();
-        totalDepthVertexSize += prim.DepthVB->size();
+        //totalDepthVertexSize += prim.DepthVB->size();
         totalIndexSize += Math::AlignUp(prim.IB->size(), 4);
     }
 
@@ -196,7 +420,7 @@ void Renderer::CompileMesh(
 	Utility::Printf("Already build triangles count : %llu\n", modelData.m_TriangleCount);
 }
 
-using NodeMap = std::unordered_map<const cgltf_node*, uint32_t>;
+//using NodeMap = std::unordered_map<const cgltf_node*, uint32_t>;
 
 static uint32_t WalkGraph(
 	ModelData& modelData,
@@ -208,7 +432,8 @@ static uint32_t WalkGraph(
     uint32_t curPos,
     const Matrix4& xform,
     GlobalStreamingContext& streamCtx,
-	NodeMap& nodeMap
+	NodeMap& nodeMap,
+	MeshCache& meshCache
     )
 {
 	nodeMap[curNode] = curPos;
@@ -233,12 +458,49 @@ static uint32_t WalkGraph(
 
     const Matrix4 worldXform = xform * node.xform;
 
-	if (curNode->mesh) {
-		BoundingSphere sphereOS;
-		AxisAlignedBox boxOS;
-		CompileMesh(modelData, data, *curNode->mesh, curPos, worldXform, sphereOS, boxOS, streamCtx);
-		modelBSphere = modelBSphere.Union(sphereOS);
-		modelBBox.AddBoundingBox(boxOS);
+	//if (curNode->mesh) {
+	//	BoundingSphere sphereOS;
+	//	AxisAlignedBox boxOS;
+	//	CompileMesh(modelData, data, *curNode->mesh, curPos, worldXform, sphereOS, boxOS, streamCtx);
+	//	modelBSphere = modelBSphere.Union(sphereOS);
+	//	modelBBox.AddBoundingBox(boxOS);
+	//}
+
+	if (curNode->mesh) 
+	{
+		// --- 核心改动：支持 Instance ---
+		// 1. 获取或编译几何体（自动利用缓存）
+		const CompiledMeshData& cachedMesh = CompileMeshGeometry(modelData, meshCache, data, *curNode->mesh, streamCtx);
+
+		// 2. 生成 Mesh 实例对象
+		InstantiateMesh(modelData, cachedMesh, curPos);
+
+		// 3. 更新整个模型的 World Space Bounds
+		// 将 Mesh 的 Local Bounds 变换到 World Space 后合并
+		BoundingSphere lsSphere = cachedMesh.boundsLS;
+		AxisAlignedBox lsBox = cachedMesh.bboxLS;
+
+		// 变换 Sphere
+		Vector3 worldCenter = Vector3(worldXform * lsSphere.GetCenter());
+		// 粗略估算世界缩放：取三个轴的最大缩放系数
+		Vector3 xAxis = Vector3(worldXform.GetX().GetX(), worldXform.GetX().GetY(), worldXform.GetX().GetZ());
+		Vector3 yAxis = Vector3(worldXform.GetY().GetX(), worldXform.GetY().GetY(), worldXform.GetY().GetZ());
+		Vector3 zAxis = Vector3(worldXform.GetZ().GetX(), worldXform.GetZ().GetY(), worldXform.GetZ().GetZ());
+		float maxScale = std::max(std::max((float)Length(xAxis), (float)Length(yAxis)), (float)Length(zAxis));
+		BoundingSphere worldSphere(worldCenter, lsSphere.GetRadius() * maxScale);
+		modelBSphere = modelBSphere.Union(worldSphere); // 合并到总包围球
+
+		// 变换 Box (AABB -> OBB -> AABB)
+		// 简单方法：变换 AABB 的 8 个角点，然后求新的 AABB
+		Vector3 minP = lsBox.GetMin();
+		Vector3 maxP = lsBox.GetMax();
+		Vector3 corners[8] = {
+			{minP.GetX(), minP.GetY(), minP.GetZ()}, {minP.GetX(), minP.GetY(), maxP.GetZ()},
+			{minP.GetX(), maxP.GetY(), minP.GetZ()}, {minP.GetX(), maxP.GetY(), maxP.GetZ()},
+			{maxP.GetX(), minP.GetY(), minP.GetZ()}, {maxP.GetX(), minP.GetY(), maxP.GetZ()},
+			{maxP.GetX(), maxP.GetY(), minP.GetZ()}, {maxP.GetX(), maxP.GetY(), maxP.GetZ()}
+		};
+		for (int k = 0; k < 8; ++k) modelBBox.AddPoint(Vector3(worldXform * corners[k])); // 合并到总包围盒
 	}
 
 	if (curNode->camera) {
@@ -257,7 +519,7 @@ static uint32_t WalkGraph(
 	uint32_t nextPos = curPos + 1;
 	for (size_t i = 0; i < curNode->children_count; ++i) {
 		const uint32_t childStartPos = nextPos;
-		nextPos = WalkGraph(modelData, data, sceneGraph, modelBSphere, modelBBox, curNode->children[i], nextPos, worldXform, streamCtx, nodeMap);
+		nextPos = WalkGraph(modelData, data, sceneGraph, modelBSphere, modelBBox, curNode->children[i], nextPos, worldXform, streamCtx, nodeMap, meshCache);
 		if (i < curNode->children_count - 1)
 			sceneGraph[childStartPos].hasSibling = 1;
 	}
@@ -632,6 +894,7 @@ bool Renderer::BuildModel(ModelData& model, const glTF::GltfAsset& asset, Global
 	model.m_SceneGraph.resize(data->nodes_count);
 
 	NodeMap nodeMap;
+	MeshCache meshCache;
 
 	const cgltf_scene* scene = sceneIdx < 0 ? data->scene : &data->scenes[sceneIdx];
 	if (scene == nullptr)
@@ -652,7 +915,7 @@ bool Renderer::BuildModel(ModelData& model, const glTF::GltfAsset& asset, Global
 		for (size_t i = 0; i < scene->nodes_count; ++i)
 		{
 			const uint32_t rootStartPos = currentPos;
-			uint32_t nextPos = WalkGraph(model, data, model.m_SceneGraph, model.m_BoundingSphere, model.m_BoundingBox, scene->nodes[i], currentPos, Matrix4(kIdentity), streamCtx, nodeMap);
+			uint32_t nextPos = WalkGraph(model, data, model.m_SceneGraph, model.m_BoundingSphere, model.m_BoundingBox, scene->nodes[i], currentPos, Matrix4(kIdentity), streamCtx, nodeMap, meshCache);
 			if (i < scene->nodes_count - 1)
 				model.m_SceneGraph[rootStartPos].hasSibling = 1;
 

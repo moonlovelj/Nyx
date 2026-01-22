@@ -33,7 +33,7 @@ namespace Renderer
         AxisAlignedBox m_BBoxOS;       // object space AABB
         Utility::ByteArray VB;
         Utility::ByteArray IB;
-        Utility::ByteArray DepthVB;
+        //Utility::ByteArray DepthVB;
         uint32_t primCount;
         union
         {

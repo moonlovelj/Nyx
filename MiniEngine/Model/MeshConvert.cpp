@@ -82,9 +82,8 @@ void OptimizeMesh(Renderer::Primitive& outPrim,
 
     ASSERT(posAcc != nullptr, "Must have POSITION");
 
-    uint32_t vertexCount = (uint32_t)posAcc->count;
-	// --- 处理索引 ---
-	uint32_t indexCount = inPrim.indices ? (uint32_t)inPrim.indices->count : vertexCount;
+    const size_t vertexCount = (uint32_t)posAcc->count;
+    const size_t indexCount = inPrim.indices ? inPrim.indices->count : vertexCount;
 	outPrim.IB = std::make_shared<std::vector<unsigned char>>(4 * indexCount);
 	if (inPrim.indices)
 	{
@@ -97,7 +96,7 @@ void OptimizeMesh(Renderer::Primitive& outPrim,
 	}
 
 	
-	outPrim.primCount = indexCount;
+	outPrim.primCount = static_cast<uint32_t>(indexCount);
 	outPrim.index32 = 1;
 
 	if (inPrim.material)
@@ -407,51 +406,51 @@ void OptimizeMesh(Renderer::Primitive& outPrim,
     }
 
     // Now write a VB for positions only (or positions and UV when alpha testing)
-    uint32_t depthStride = 12;
-    std::vector<D3D12_INPUT_ELEMENT_DESC> DepthElements;
-    DepthElements.push_back({"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT});
-    if (material.alpha_mode == cgltf_alpha_mode_mask)
-    {
-        depthStride += 4;
-        DepthElements.push_back({"TEXCOORD", 0, DXGI_FORMAT_R16G16_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT});
-    }
-    if (HasSkin)
-    {
-        depthStride += 16;
-        DepthElements.push_back({ "BLENDINDICES", 0, DXGI_FORMAT_R16G16B16A16_UINT, 0, D3D12_APPEND_ALIGNED_ELEMENT });
-        DepthElements.push_back({ "BLENDWEIGHT", 0, DXGI_FORMAT_R16G16B16A16_UNORM, 0, D3D12_APPEND_ALIGNED_ELEMENT });
-    }
+    //uint32_t depthStride = 12;
+    //std::vector<D3D12_INPUT_ELEMENT_DESC> DepthElements;
+    //DepthElements.push_back({"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT});
+    //if (material.alpha_mode == cgltf_alpha_mode_mask)
+    //{
+    //    depthStride += 4;
+    //    DepthElements.push_back({"TEXCOORD", 0, DXGI_FORMAT_R16G16_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT});
+    //}
+    //if (HasSkin)
+    //{
+    //    depthStride += 16;
+    //    DepthElements.push_back({ "BLENDINDICES", 0, DXGI_FORMAT_R16G16B16A16_UINT, 0, D3D12_APPEND_ALIGNED_ELEMENT });
+    //    DepthElements.push_back({ "BLENDWEIGHT", 0, DXGI_FORMAT_R16G16B16A16_UNORM, 0, D3D12_APPEND_ALIGNED_ELEMENT });
+    //}
 
-    VBWriter dvbw;
-    dvbw.Initialize({DepthElements.data(), (uint32_t)DepthElements.size()});
+	//VBWriter dvbw;
+	//dvbw.Initialize({ DepthElements.data(), (uint32_t)DepthElements.size() });
 
-    outPrim.DepthVB = std::make_shared<std::vector<unsigned char>>(depthStride * vertexCount);
-    ASSERT_SUCCEEDED(dvbw.AddStream(outPrim.DepthVB->data(), vertexCount, 0, depthStride));
+	//outPrim.DepthVB = std::make_shared<std::vector<unsigned char>>(depthStride * vertexCount);
+	//ASSERT_SUCCEEDED(dvbw.AddStream(outPrim.DepthVB->data(), vertexCount, 0, depthStride));
 
-    dvbw.Write( position.get(), "POSITION", 0, vertexCount );
-    if (material.alpha_mode == cgltf_alpha_mode_mask)
-    {
-		// 获取 Base Color 的 UV 索引，默认为 0
-		int texCoordIndex = material.pbr_metallic_roughness.base_color_texture.texture ?
-			material.pbr_metallic_roughness.base_color_texture.texcoord : 0;
+  //  dvbw.Write( position.get(), "POSITION", 0, vertexCount );
+  //  if (material.alpha_mode == cgltf_alpha_mode_mask)
+  //  {
+		//// 获取 Base Color 的 UV 索引，默认为 0
+		//int texCoordIndex = material.pbr_metallic_roughness.base_color_texture.texture ?
+		//	material.pbr_metallic_roughness.base_color_texture.texcoord : 0;
 
-		const XMFLOAT2* texcoordData = (texCoordIndex == 1) ? texcoord1.get() : texcoord0.get();
-        if (!texcoordData)
-        {
-            //TODO 暂时特殊处理，按理说alphatest的材质一定会有UV的
-			std::vector<XMFLOAT2> tempUVs(vertexCount, XMFLOAT2(0.0f, 0.0f));
-            dvbw.Write(tempUVs.data(), "TEXCOORD", 0, vertexCount);
-        }
-        else
-        {
-            dvbw.Write(texcoordData, "TEXCOORD", 0, vertexCount);
-        }
-    }
-    if (HasSkin)
-    {
-        dvbw.Write(joints.get(), "BLENDINDICES", 0, vertexCount);
-        dvbw.Write(weights.get(), "BLENDWEIGHT", 0, vertexCount);
-    }
+		//const XMFLOAT2* texcoordData = (texCoordIndex == 1) ? texcoord1.get() : texcoord0.get();
+  //      if (!texcoordData)
+  //      {
+  //          //TODO 暂时特殊处理，按理说alphatest的材质一定会有UV的
+		//	std::vector<XMFLOAT2> tempUVs(vertexCount, XMFLOAT2(0.0f, 0.0f));
+  //          dvbw.Write(tempUVs.data(), "TEXCOORD", 0, vertexCount);
+  //      }
+  //      else
+  //      {
+  //          dvbw.Write(texcoordData, "TEXCOORD", 0, vertexCount);
+  //      }
+  //  }
+  //  if (HasSkin)
+  //  {
+  //      dvbw.Write(joints.get(), "BLENDINDICES", 0, vertexCount);
+  //      dvbw.Write(weights.get(), "BLENDWEIGHT", 0, vertexCount);
+  //  }
 
     ASSERT(outPrim.materialIdx < 0x8000, "Only 15-bit material indices allowed");
 
@@ -459,7 +458,7 @@ void OptimizeMesh(Renderer::Primitive& outPrim,
     outPrim.index32 = b32BitIndices ? 1 : 0;
     //outPrim.materialIdx = material.index;
 
-    outPrim.primCount = indexCount;
+    outPrim.primCount = static_cast<uint32_t>(indexCount);
 
     // TODO:  Generate optimized depth-only streams
 }

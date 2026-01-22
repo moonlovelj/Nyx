@@ -206,9 +206,9 @@ void SceneViewer::Startup( void )
 		//m_ModelInst = Renderer::LoadModel(L"Assets/old_federal_building/scene.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/DamagedHelmet/glTF/DamagedHelmet.gltf", forceRebuild);
-        auto model = Renderer::LoadModel(L"Assets/Jinx/scene.gltf", forceRebuild);
+        //auto model = Renderer::LoadModel(L"Assets/Jinx/scene.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/lumber_mill_wood_factory_gltf/scene.gltf", forceRebuild);
-		//auto model = Renderer::LoadModel(L"Assets/zorah_main_public.gltf/zorah_main_public.gltf", forceRebuild);
+		auto model = Renderer::LoadModel(L"Assets/zorah_main_public.gltf/zorah_main_public.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/Monkey/monkey.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/Dragon/Dragon.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/japanese_metal_lantern_vfvjccaqx_gltf_raw/Japanese_Metal_Lantern_vfvjccaqx_Raw.gltf", forceRebuild);
@@ -238,7 +238,7 @@ void SceneViewer::Startup( void )
 		m_Camera.SetEyeAtUp(eye, obb.GetCenter(), Vector3(kYUnitVector));
     }
 
-    m_Camera.SetZRange(0.01f, 10000.0f);
+    m_Camera.SetZRange(0.01f, 100000.0f);
 	if (gltfFileName.size() == 0)
 		m_CameraController.reset(new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector)));
 	else
