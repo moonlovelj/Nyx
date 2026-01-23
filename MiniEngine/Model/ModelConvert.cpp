@@ -30,6 +30,14 @@
 #include <fstream>
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
+#include <algorithm>
+#include <execution>
+#include <omp.h>
+
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <execution>
 
 using namespace DirectX;
 using namespace Math;
@@ -37,6 +45,7 @@ using namespace Renderer;
 using namespace Graphics;
 
 #include "MeshletBuilder.h"
+#include "MeshletStructs.h"
 
 // 编译后的 Primitive 元数据 (不包含顶点数据，仅包含引用信息)
 struct CompiledPrimitive
@@ -57,137 +66,215 @@ struct CompiledMeshData
 	Math::AxisAlignedBox bboxLS;    // 整个Mesh的局部包围盒
 };
 
+// 中间构建结果 (用于并行 -> 串行传递)
+struct MeshBuildResult
+{
+	const cgltf_mesh* sourceMesh;
+	CompiledMeshData meshData;
+	// 逻辑上的构建结果，尚未序列化到磁盘，索引为 Local 0 基准
+	std::vector<MeshletBuildProducts> logicProducts;
+	std::wstring tempFilePath;
+};
+
+// 收集的请求
+struct MeshInstanceRequest
+{
+	const cgltf_mesh* mesh;
+	uint32_t nodeIndex;
+	Matrix4 worldXform;
+};
+
 // 几何缓存：避免同一个 glTF Mesh 被重复解析和构建
 using MeshCache = std::unordered_map<const cgltf_mesh*, CompiledMeshData>;
 // 节点映射：用于动画和蒙皮关联
 using NodeMap = std::unordered_map<const cgltf_node*, uint32_t>;
 
 /**
- * @brief 编译网格几何体。
- * 负责读取原始顶点数据、优化、生成 Meshlets，并将数据流式写入磁盘。
- * 此时产生的几何体是 Mesh Local Space 的，不包含特定的世界变换。
+ * 并行编译网格几何体。
+ * 在内存中并行构建 Meshlets。
+ * 串行修正索引并写入磁盘。
  */
-static const CompiledMeshData& CompileMeshGeometry(
+static void ParallelCompileMeshes(
 	ModelData& modelData,
 	MeshCache& meshCache,
 	const cgltf_data* data,
-	const cgltf_mesh& srcMesh,
+	const std::vector<MeshInstanceRequest>& requests,
 	GlobalStreamingContext& streamCtx
 )
 {
-	// 1. 缓存命中检查
-	auto it = meshCache.find(&srcMesh);
-	if (it != meshCache.end())
-		return it->second;
-
-	CompiledMeshData resultData = {};
-	resultData.boundsLS = BoundingSphere(kZero);
-	resultData.bboxLS = AxisAlignedBox(kZero);
-
-	// 2. 读取并优化 Primitives
-	// 注意：这里传入 Identity 矩阵，确保生成的 VB/IB 是基于 Local Space 的
-	// OptimizeMesh 不会在 VB 中烘焙变换，但会利用传入的矩阵计算 outPrim.m_BoundsOS。
-	// 我们这里统一认为: 构建时，Local == Object
-	Matrix4 identityXform(kIdentity);
-
-	std::vector<Primitive> primitives(srcMesh.primitives_count);
-
-	// 用于聚合 Bounds
-	BoundingSphere sphereAccum(kZero);
-	AxisAlignedBox bboxAccum(kZero);
-
-	for (uint32_t i = 0; i < primitives.size(); ++i)
+	// 提取唯一 Mesh 任务
+	std::vector<const cgltf_mesh*> uniqueMeshes;
 	{
-		OptimizeMesh(primitives[i], data, srcMesh.primitives[i], identityXform);
-
-		// 累加局部包围盒
-		sphereAccum = sphereAccum.Union(primitives[i].m_BoundsOS); // 由于传入 Identity，这里 OS == LS
-		bboxAccum.AddBoundingBox(primitives[i].m_BBoxOS);
-	}
-
-	resultData.boundsLS = sphereAccum;
-	resultData.bboxLS = bboxAccum;
-
-	// 3. 按材质和属性 Hash 分组 (Render Groups)
-	// 即使 glTF 中分成了多个 primitive，属性相同的可以尝试合并处理，或者至少共享配置
-	std::map<uint32_t, std::vector<Primitive*>> renderGroups;
-	for (auto& prim : primitives)
-	{
-		renderGroups[prim.hash].push_back(&prim);
-	}
-
-	// 4. 构建 Meshlets (最耗时步骤，也是磁盘占用最大的部分)
-	// 仅在第一次遇到该 Mesh 时执行
-	uint32_t baseGroupIndex = static_cast<uint32_t>(modelData.m_GroupInfos.size());
-	uint32_t baseNodeIndex = static_cast<uint32_t>(modelData.m_Nodes.size());
-
-	for (auto& iter : renderGroups)
-	{
-		const auto& groupPrims = iter.second;
-		if (groupPrims.empty()) continue;
-
-		MeshletBuildArgs buildArgs = {};
-		// 这里的 meshBufferIndex 仅用于 Runtime 查找 Mesh 常量，
-		// 在 Instancing 模式下，几何体与特定 Instance 解耦，因此这里并不绑定具体的 matrixIdx。
-		// Runtime 通过 Instance buffer 重定向到 Geometry buffer。
-		buildArgs.meshBufferIndex = 0;
-
-		buildArgs.materialBufferIndex = groupPrims[0]->materialIdx;
-		buildArgs.psoFlags = groupPrims[0]->psoFlags;
-		for (Primitive* draw : groupPrims)
+		std::unordered_set<const cgltf_mesh*> seen;
+		for (const auto& req : requests)
 		{
-			buildArgs.vertexStride = draw->vertexStride;
-			const uint32_t vertexCount = static_cast<uint32_t>(draw->VB->size() / draw->vertexStride);
-			buildArgs.VBData = draw->VB->data();
-			buildArgs.IBData = draw->IB->data();
-			buildArgs.vertexCount = vertexCount;
-			buildArgs.indexCount = draw->primCount;
-			buildArgs.baseGroupIndex = baseGroupIndex;
-			buildArgs.baseNodeIndex = baseNodeIndex;
+			if (seen.insert(req.mesh).second)
+				uniqueMeshes.push_back(req.mesh);
+		}
+	}
 
-			// --- 执行 Meshlet 构建 ---
-			const auto buildResult = MeshletBuilder::Build(buildArgs);
+	std::vector<MeshBuildResult> buildResults(uniqueMeshes.size());
 
-			// 记录构建结果元数据
-			CompiledPrimitive finalPrim = {};
-			finalPrim.rootNodeIndex = baseNodeIndex; // 记录当前 Primitive 对应的 BVH 根节点
-			finalPrim.materialIdx = draw->materialIdx;
-			finalPrim.psoFlags = draw->psoFlags;
-			finalPrim.vertexStride = draw->vertexStride;
-			finalPrim.indexCount = draw->primCount;
-			finalPrim.boundsLS = draw->m_BoundsLS;
+	// 辅助索引用于并行遍历
+	std::vector<size_t> taskIndices(uniqueMeshes.size());
+	for (size_t i = 0; i < taskIndices.size(); ++i) taskIndices[i] = i;
 
-			resultData.primitives.push_back(finalPrim);
+	Utility::Printf("Compiling %zu unique meshes in parallel...\n", uniqueMeshes.size());
 
-			// --- 写入全局流 ---
-			for (const auto& group : buildResult.Groups)
+	// 用于并行进度的原子计数器
+	std::atomic<uint32_t> processedCount = 0;
+	const uint32_t totalMeshes = (uint32_t)uniqueMeshes.size();
+
+	// 并行执行 Meshlet 构建 (Compute Bound)
+	//int maxThreads = std::max(1, (int)omp_get_max_threads());
+	int workerCount = (int)omp_get_max_threads();//std::min((int)omp_get_max_threads(), 8);
+
+	#pragma omp parallel for schedule(dynamic, 1) num_threads(workerCount)
+	for (int taskIndex = 0; taskIndex < taskIndices.size(); taskIndex++)
+	{
+		const cgltf_mesh* srcMesh = uniqueMeshes[taskIndex];
+		MeshBuildResult& result = buildResults[taskIndex];
+		result.sourceMesh = srcMesh;
+
+		// 为当前任务创建唯一的临时文件
+		wchar_t tempPath[MAX_PATH];
+		GetTempPathW(MAX_PATH, tempPath);
+		wchar_t tempFileName[MAX_PATH];
+		// 使用 taskIndex 作为唯一标识的一部分
+		swprintf_s(tempFileName, L"%sNYX_TASK_%d.tmp", tempPath, taskIndex);
+		result.tempFilePath = tempFileName;
+
+		// 打开该任务的临时文件流 (二进制写)
+		std::ofstream localTempFile(result.tempFilePath, std::ios::out | std::ios::binary | std::ios::trunc);
+		uint64_t localFileCursor = 0;
+
+		// 初始化
+		result.meshData.boundsLS = BoundingSphere(kZero);
+		result.meshData.bboxLS = AxisAlignedBox(kZero);
+
+		Matrix4 identityXform(kIdentity);
+		std::vector<Primitive> primitives(srcMesh->primitives_count);
+		BoundingSphere sphereAccum(kZero);
+		AxisAlignedBox bboxAccum(kZero);
+
+		// 优化与 Bounds 计算
+		for (uint32_t p = 0; p < primitives.size(); ++p)
+		{
+			OptimizeMesh(primitives[p], data, srcMesh->primitives[p], identityXform);
+			sphereAccum = sphereAccum.Union(primitives[p].m_BoundsOS);
+			bboxAccum.AddBoundingBox(primitives[p].m_BBoxOS);
+		}
+		result.meshData.boundsLS = sphereAccum;
+		result.meshData.bboxLS = bboxAccum;
+
+		// 分组
+		std::map<uint32_t, std::vector<Primitive*>> renderGroups;
+		for (auto& prim : primitives)
+			renderGroups[prim.hash].push_back(&prim);
+
+		// Meshlet 构建
+		for (auto& iter : renderGroups)
+		{
+			const auto& groupPrims = iter.second;
+			if (groupPrims.empty()) continue;
+
+			MeshletBuildArgs buildArgs = {};
+			buildArgs.meshBufferIndex = 0;
+			buildArgs.materialBufferIndex = groupPrims[0]->materialIdx;
+			buildArgs.psoFlags = groupPrims[0]->psoFlags;
+			// 并行时不知道全局偏移，设为 0，稍后 Patch
+			buildArgs.baseGroupIndex = 0;
+			buildArgs.baseNodeIndex = 0;
+
+			for (Primitive* draw : groupPrims)
 			{
-				const uint32_t groupSize = static_cast<uint32_t>(group.Blob.size());
-				ASSERT(groupSize % 4 == 0, "Group blob must be 4-byte aligned");
-				ASSERT(groupSize <= Renderer::kPageSizeInBytes, "Single group exceeds page size limit.");
+				buildArgs.vertexStride = draw->vertexStride;
+				buildArgs.vertexCount = static_cast<uint32_t>(draw->VB->size() / draw->vertexStride);
+				buildArgs.VBData = draw->VB->data();
+				buildArgs.IBData = draw->IB->data();
+				buildArgs.indexCount = draw->primCount;
 
-				// 简单的页管理逻辑
+				// --- 构建meshlets ---
+				auto products = MeshletBuilder::Build(buildArgs);
+
+				for (auto& group : products.Groups)
+				{
+					if (!group.Blob.empty())
+					{
+						group.TempFileOffset = localFileCursor; 
+						localTempFile.write(reinterpret_cast<const char*>(group.Blob.data()), group.Blob.size());
+						localFileCursor += group.Blob.size();
+						// 释放内存
+						std::vector<uint8_t>().swap(group.Blob);
+					}
+				}
+
+				CompiledPrimitive finalPrim = {};
+				finalPrim.rootNodeIndex = 0; // 稍后修正
+				finalPrim.materialIdx = draw->materialIdx;
+				finalPrim.psoFlags = draw->psoFlags;
+				finalPrim.vertexStride = draw->vertexStride;
+				finalPrim.indexCount = draw->primCount;
+				finalPrim.boundsLS = draw->m_BoundsLS;
+
+				result.meshData.primitives.push_back(finalPrim);
+				result.logicProducts.push_back(std::move(products));
+			}
+		}
+
+		localTempFile.close();
+
+		// 更新并打印进度
+		uint32_t current = ++processedCount;
+		uint32_t step = std::max(1u, totalMeshes / 20);
+		if (current % step == 0 || current == totalMeshes)
+		{
+			float percent = (float)current / totalMeshes * 100.0f;
+			Utility::Printf("Compiling Meshes: %u/%u (%.1f%%)\n", current, totalMeshes, percent);
+		}
+	};
+
+	// 串行提交与修正
+	for (auto& result : buildResults)
+	{
+		streamCtx.TempFilesToClean.push_back(result.tempFilePath);
+
+		size_t primIndex = 0;
+		for (auto& products : result.logicProducts)
+		{
+			CompiledPrimitive& finalPrim = result.meshData.primitives[primIndex++];
+
+			// 获取当前全局基准偏移
+			const uint32_t baseGroupIndex = static_cast<uint32_t>(modelData.m_GroupInfos.size());
+			const uint32_t baseNodeIndex = static_cast<uint32_t>(modelData.m_Nodes.size());
+
+			finalPrim.rootNodeIndex = baseNodeIndex;
+
+			// 处理二进制 Blob (Geometry Groups)
+			for (auto& group : products.Groups)
+			{
+				const uint32_t groupSize = group.Metadata.SizeBytes;
 				if (streamCtx.CurrentOffsetInPage + groupSize > Renderer::kPageSizeInBytes)
 				{
 					uint32_t paddingSize = Renderer::kPageSizeInBytes - streamCtx.CurrentOffsetInPage;
 					if (paddingSize > 0 && paddingSize < Renderer::kPageSizeInBytes)
 					{
-						streamCtx.TempGeoFile.write(streamCtx.ZeroBuffer.data(), paddingSize);
+						PendingGroupWrite padJob = {};
+						padJob.TempSourcePath = L""; // Empty means padding
+						padJob.SizeBytes = paddingSize;
+						streamCtx.PendingWrites.push_back(padJob);
+
 						streamCtx.TotalGeometrySize += paddingSize;
 					}
 
-					PageMetadata page;
-					page.StartGroupIndex = static_cast<uint32_t>(modelData.m_GroupInfos.size());
-					page.GroupCount = 0;
+					PageMetadata page = { static_cast<uint32_t>(modelData.m_GroupInfos.size()), 0 };
 					modelData.m_Pages.push_back(page);
-
 					streamCtx.CurrentPageIndex = static_cast<uint32_t>(modelData.m_Pages.size() - 1);
 					streamCtx.CurrentOffsetInPage = 0;
 				}
 				else if (modelData.m_Pages.empty())
 				{
-					PageMetadata page = { 0, 0 };
-					modelData.m_Pages.push_back(page);
+					modelData.m_Pages.push_back({ 0, 0 });
 				}
 
 				modelData.m_Pages.back().GroupCount++;
@@ -197,31 +284,47 @@ static const CompiledMeshData& CompileMeshGeometry(
 				metadata.OffsetInPage = streamCtx.CurrentOffsetInPage;
 				modelData.m_GroupInfos.push_back(metadata);
 
-				streamCtx.TempGeoFile.write(reinterpret_cast<const char*>(group.Blob.data()), groupSize);
+				// 记录稍后需要的真实写入操作
+				PendingGroupWrite job;
+				job.TempSourcePath = result.tempFilePath; // 数据在哪个文件
+				job.SourceOffset = group.TempFileOffset;  // 在文件哪里
+				job.SizeBytes = groupSize;                // 多大
+				job.BaseGroupIndexPatchValue = baseGroupIndex; // 修正值是多少
+				streamCtx.PendingWrites.push_back(job);
+
 
 				streamCtx.CurrentOffsetInPage += groupSize;
 				streamCtx.TotalGeometrySize += groupSize;
 			}
 
-			// 更新偏移
-			baseGroupIndex += (uint32_t)buildResult.Groups.size();
-			baseNodeIndex += (uint32_t)buildResult.Hierarchy.size();
-
-			// 记录生成的 BVH 节点
-			modelData.m_Nodes.insert(modelData.m_Nodes.end(), buildResult.Hierarchy.begin(), buildResult.Hierarchy.end());
-			modelData.m_TriangleCount += buildArgs.indexCount / 3;
+			// 处理并修正 BVH 节点
+			for (auto& node : products.Hierarchy)
+			{
+				if (node.Internal.IsGroup == 0) // Internal Node
+				{
+					// 修正子节点在全局 Node 数组中的索引
+					node.Internal.ChildStartIndex += baseNodeIndex;
+				}
+				else // Leaf Node
+				{
+					// 修正 Cluster Group 在全局 Group 数组中的索引
+					node.Leaf.GroupIndex += baseGroupIndex;
+				}
+			}
+			modelData.m_Nodes.insert(modelData.m_Nodes.end(), products.Hierarchy.begin(), products.Hierarchy.end());
+			modelData.m_TriangleCount += finalPrim.indexCount / 3;
 		}
+
+		// 存入缓存
+		meshCache[result.sourceMesh] = std::move(result.meshData);
+
+		//localTempFileIn.close();
+		//_wremove(result.tempFilePath.c_str());
 	}
-	Utility::Printf("Already build triangles count : %llu\n", modelData.m_TriangleCount);
-	// 更新缓存并返回引用
-	// 注意：std::move 后 primitives 里的 heavy vector (VB/IB) 会被移动然后销毁（因为 CompilePrimitive 里没有存 VB 指针）
-	// 这里的 primitives 变量析构时释放内存，实现了“构建即焚”，保证 Build 阶段低内存占用
-	auto& ref = meshCache[&srcMesh] = std::move(resultData);
-	return ref;
 }
 
 /**
- * @brief 实例化 Mesh。
+ * 实例化 Mesh。
  * 创建一个 Renderer::Mesh 对象，关联到特定的 Scene Graph 节点 (matrixIdx)，并复用已编译的几何数据。
  */
 static void InstantiateMesh(
@@ -234,7 +337,7 @@ static void InstantiateMesh(
 	if (numDraws == 0) return;
 
 	// 分配紧凑的 Mesh 结构体内存
-	// 注意：这里使用 malloc 是为了配合 modelData 存储指针的设计。在16亿级场景下，如果实例极多（如数百万），
+	// 这里使用 malloc 是为了配合 modelData 存储指针的设计。在16亿级场景下，如果实例极多（如数百万），
 	// 这里的堆分配可能会造成碎片。但考虑到要兼容现有 Model 结构，这是必要的妥协。
 	// 在极限情况下，建议 ModelData 改用 LinearAllocator 或 std::deque<Mesh> 存储。
 	size_t meshStructSize = sizeof(Mesh) + sizeof(Mesh::Draw) * (numDraws - 1);
@@ -247,12 +350,8 @@ static void InstantiateMesh(
 	for (size_t i = 0; i < numDraws; ++i)
 	{
 		const auto& prim = cachedData.primitives[i];
-
-		// 关键：复用同一个 rootNodeIndex，不需要再次构建 BVH
 		mesh->draw[i].rootNodeIndex = prim.rootNodeIndex;
 
-		// 存储 Local Space 的 Bounds。
-		// Runtime 的 Cull Shader 会根据 mesh->matrixIdx 读取 Instance Transform 将其变换到 World Space。
 		mesh->draw[i].boundingSphere[0] = prim.boundsLS.GetCenter().GetX();
 		mesh->draw[i].boundingSphere[1] = prim.boundsLS.GetCenter().GetY();
 		mesh->draw[i].boundingSphere[2] = prim.boundsLS.GetCenter().GetZ();
@@ -261,166 +360,6 @@ static void InstantiateMesh(
 
 	modelData.m_Meshes.push_back(mesh);
 }
-
-void Renderer::CompileMesh(
-	ModelData& modelData,
-	const cgltf_data* data,
-	const cgltf_mesh& srcMesh,
-	uint32_t matrixIdx,
-	const Matrix4& localToObject,
-	Math::BoundingSphere& boundingSphere,
-	Math::AxisAlignedBox& boundingBox,
-    GlobalStreamingContext& streamCtx
-    )
-{
-    // We still have a lot of work to do.  Now that we know about all of the primitives in this mesh
-    // and have standardized their vertex buffer streams, we must set out to identify which primitives
-    // have the same vertex format and material.  These can share a PSO and Vertex/Index buffer views.
-    // There may be more than one draw call per group due to 16-bit indices.
-
-    size_t totalVertexSize = 0;
-    //size_t totalDepthVertexSize = 0;
-    size_t totalIndexSize = 0;
-
-    BoundingSphere sphereOS(kZero);
-    AxisAlignedBox bboxOS(kZero);
-
-    std::vector<Primitive> primitives(srcMesh.primitives_count);
-    for (uint32_t i = 0; i < primitives.size(); ++i)
-    {
-		OptimizeMesh(primitives[i], data, srcMesh.primitives[i], localToObject);
-        sphereOS = sphereOS.Union(primitives[i].m_BoundsOS);
-        bboxOS.AddBoundingBox(primitives[i].m_BBoxOS);
-    }
-
-    boundingSphere = sphereOS;
-    boundingBox = bboxOS;
-
-    std::map<uint32_t, std::vector<Primitive*>> renderMeshes;
-    for (auto& prim : primitives)
-    {
-        uint32_t hash = prim.hash;
-        renderMeshes[hash].push_back(&prim);
-        totalVertexSize += prim.VB->size();
-        //totalDepthVertexSize += prim.DepthVB->size();
-        totalIndexSize += Math::AlignUp(prim.IB->size(), 4);
-    }
-
-    uint32_t baseGroupIndex = static_cast<uint32_t>(modelData.m_GroupInfos.size());
-    uint32_t baseNodeIndex = static_cast<uint32_t>(modelData.m_Nodes.size());
-	MeshletBuildArgs buildArgs = {};
-	buildArgs.meshBufferIndex = static_cast<uint16_t>(matrixIdx);
-	ASSERT(matrixIdx <= 0xFFFF, "Too many scene graph nodes for meshlet system.");
-
-    for (auto& iter : renderMeshes)
-    {
-        buildArgs.materialBufferIndex = iter.second[0]->materialIdx;
-        buildArgs.psoFlags = iter.second[0]->psoFlags;
-
-		size_t numDraws = iter.second.size();
-		Mesh* mesh = (Mesh*)malloc(sizeof(Mesh) + sizeof(Mesh::Draw) * (numDraws - 1));
-        mesh->numDraws = (uint32_t)numDraws;
-		mesh->matrixIdx = static_cast<uint16_t>(matrixIdx);
-
-        for (size_t primitiveIndex = 0; primitiveIndex < iter.second.size(); primitiveIndex++)
-        {
-            Primitive* draw = iter.second[primitiveIndex];
-			buildArgs.vertexStride = draw->vertexStride;
-			const uint32_t vertexCount = static_cast<uint32_t>(draw->VB->size() / draw->vertexStride);
-			buildArgs.VBData = draw->VB->data();
-			buildArgs.IBData = draw->IB->data();
-			buildArgs.vertexCount = vertexCount;
-			buildArgs.indexCount = draw->primCount;
-			buildArgs.baseGroupIndex = baseGroupIndex;
-			buildArgs.baseNodeIndex = baseNodeIndex;
-#if defined(_DEBUG)
-			buildArgs.settings.bOutputDebugInfo = true;
-            Utility::Printf("Start build meshlets of primitive with %llu triangles", buildArgs.indexCount / 3);
-#endif
-            // 构建
-            const auto buildResult = MeshletBuilder::Build(buildArgs);
-            // 记录根节点
-			mesh->draw[primitiveIndex].rootNodeIndex = baseNodeIndex;
-
-			mesh->draw[primitiveIndex].boundingSphere[0] = draw->m_BoundsLS.GetCenter().GetX();
-			mesh->draw[primitiveIndex].boundingSphere[1] = draw->m_BoundsLS.GetCenter().GetY();
-			mesh->draw[primitiveIndex].boundingSphere[2] = draw->m_BoundsLS.GetCenter().GetZ();
-			mesh->draw[primitiveIndex].boundingSphere[3] = draw->m_BoundsLS.GetRadius();
-
-            for (uint32_t buildGroupIndex = 0; buildGroupIndex < buildResult.Groups.size(); ++buildGroupIndex)
-            {
-				const auto& group = buildResult.Groups[buildGroupIndex];
-				const uint32_t groupSize = static_cast<uint32_t>(group.Blob.size());
-				ASSERT(groupSize % 4 == 0, "Group blob must be 4-byte aligned");
-				ASSERT(groupSize <= Renderer::kPageSizeInBytes, "Single group exceeds page size limit.");
-
-				if (streamCtx.CurrentOffsetInPage + groupSize > Renderer::kPageSizeInBytes)
-				{
-					// 空间不足，执行 Page 填充（Padding）
-					uint32_t paddingSize = Renderer::kPageSizeInBytes - streamCtx.CurrentOffsetInPage;
-					if (paddingSize > 0 && paddingSize < Renderer::kPageSizeInBytes)
-					{
-						streamCtx.TempGeoFile.write(streamCtx.ZeroBuffer.data(), paddingSize);
-						streamCtx.TotalGeometrySize += paddingSize;
-					}
-
-					// 开启新 Page
-					PageMetadata page;
-					page.StartGroupIndex = static_cast<uint32_t>(modelData.m_GroupInfos.size());
-					page.GroupCount = 0; // 后面会自增
-					modelData.m_Pages.push_back(page);
-
-					streamCtx.CurrentPageIndex = static_cast<uint32_t>(modelData.m_Pages.size() - 1);
-					streamCtx.CurrentOffsetInPage = 0;
-				}
-				else if (modelData.m_Pages.empty()) 
-				{
-                    // 初始化第一个 Page
-					PageMetadata page = { 0, 0 };
-					modelData.m_Pages.push_back(page);
-				}
-
-				// 更新 Page 元数据
-				modelData.m_Pages.back().GroupCount++;
-
-				// 填充 GroupMetadata (用于 Runtime)
-				GroupMetadata metadata = group.Metadata;
-				metadata.PageIndex = streamCtx.CurrentPageIndex;
-				metadata.OffsetInPage = streamCtx.CurrentOffsetInPage;
-				modelData.m_GroupInfos.push_back(metadata);
-
-				// 直接写盘
-				streamCtx.TempGeoFile.write(reinterpret_cast<const char*>(group.Blob.data()), groupSize);
-
-				streamCtx.CurrentOffsetInPage += groupSize;
-				streamCtx.TotalGeometrySize += groupSize;
-            }
-
-			baseGroupIndex += (uint32_t)buildResult.Groups.size();
-			baseNodeIndex += (uint32_t)buildResult.Hierarchy.size();
-
-			modelData.m_Nodes.insert(modelData.m_Nodes.end(), buildResult.Hierarchy.begin(), buildResult.Hierarchy.end());
-            modelData.m_TriangleCount += buildArgs.indexCount / 3;
-        }
-
-        //if (srcMesh.skin >= 0)
-        //{
-        //    mesh->numJoints = 0xFFFF;
-        //    mesh->startJoint = (uint16_t)srcMesh.skin;
-        //}
-        //else
-        //{
-        //    mesh->numJoints = 0;
-        //    mesh->startJoint = 0xFFFF;
-        //}
-
-		modelData.m_Meshes.push_back(mesh);
-    }
-
-	Utility::Printf("Already build triangles count : %llu\n", modelData.m_TriangleCount);
-}
-
-//using NodeMap = std::unordered_map<const cgltf_node*, uint32_t>;
 
 static uint32_t WalkGraph(
 	ModelData& modelData,
@@ -433,7 +372,8 @@ static uint32_t WalkGraph(
     const Matrix4& xform,
     GlobalStreamingContext& streamCtx,
 	NodeMap& nodeMap,
-	MeshCache& meshCache
+	MeshCache& meshCache,
+	std::vector<MeshInstanceRequest>& meshRequests
     )
 {
 	nodeMap[curNode] = curPos;
@@ -457,50 +397,14 @@ static uint32_t WalkGraph(
 	}
 
     const Matrix4 worldXform = xform * node.xform;
-
-	//if (curNode->mesh) {
-	//	BoundingSphere sphereOS;
-	//	AxisAlignedBox boxOS;
-	//	CompileMesh(modelData, data, *curNode->mesh, curPos, worldXform, sphereOS, boxOS, streamCtx);
-	//	modelBSphere = modelBSphere.Union(sphereOS);
-	//	modelBBox.AddBoundingBox(boxOS);
-	//}
-
 	if (curNode->mesh) 
 	{
-		// --- 核心改动：支持 Instance ---
-		// 1. 获取或编译几何体（自动利用缓存）
-		const CompiledMeshData& cachedMesh = CompileMeshGeometry(modelData, meshCache, data, *curNode->mesh, streamCtx);
-
-		// 2. 生成 Mesh 实例对象
-		InstantiateMesh(modelData, cachedMesh, curPos);
-
-		// 3. 更新整个模型的 World Space Bounds
-		// 将 Mesh 的 Local Bounds 变换到 World Space 后合并
-		BoundingSphere lsSphere = cachedMesh.boundsLS;
-		AxisAlignedBox lsBox = cachedMesh.bboxLS;
-
-		// 变换 Sphere
-		Vector3 worldCenter = Vector3(worldXform * lsSphere.GetCenter());
-		// 粗略估算世界缩放：取三个轴的最大缩放系数
-		Vector3 xAxis = Vector3(worldXform.GetX().GetX(), worldXform.GetX().GetY(), worldXform.GetX().GetZ());
-		Vector3 yAxis = Vector3(worldXform.GetY().GetX(), worldXform.GetY().GetY(), worldXform.GetY().GetZ());
-		Vector3 zAxis = Vector3(worldXform.GetZ().GetX(), worldXform.GetZ().GetY(), worldXform.GetZ().GetZ());
-		float maxScale = std::max(std::max((float)Length(xAxis), (float)Length(yAxis)), (float)Length(zAxis));
-		BoundingSphere worldSphere(worldCenter, lsSphere.GetRadius() * maxScale);
-		modelBSphere = modelBSphere.Union(worldSphere); // 合并到总包围球
-
-		// 变换 Box (AABB -> OBB -> AABB)
-		// 简单方法：变换 AABB 的 8 个角点，然后求新的 AABB
-		Vector3 minP = lsBox.GetMin();
-		Vector3 maxP = lsBox.GetMax();
-		Vector3 corners[8] = {
-			{minP.GetX(), minP.GetY(), minP.GetZ()}, {minP.GetX(), minP.GetY(), maxP.GetZ()},
-			{minP.GetX(), maxP.GetY(), minP.GetZ()}, {minP.GetX(), maxP.GetY(), maxP.GetZ()},
-			{maxP.GetX(), minP.GetY(), minP.GetZ()}, {maxP.GetX(), minP.GetY(), maxP.GetZ()},
-			{maxP.GetX(), maxP.GetY(), minP.GetZ()}, {maxP.GetX(), maxP.GetY(), maxP.GetZ()}
-		};
-		for (int k = 0; k < 8; ++k) modelBBox.AddPoint(Vector3(worldXform * corners[k])); // 合并到总包围盒
+		// 收集任务，稍后并行处理
+		MeshInstanceRequest req;
+		req.mesh = curNode->mesh;
+		req.nodeIndex = curPos;
+		req.worldXform = worldXform;
+		meshRequests.push_back(req);
 	}
 
 	if (curNode->camera) {
@@ -519,7 +423,7 @@ static uint32_t WalkGraph(
 	uint32_t nextPos = curPos + 1;
 	for (size_t i = 0; i < curNode->children_count; ++i) {
 		const uint32_t childStartPos = nextPos;
-		nextPos = WalkGraph(modelData, data, sceneGraph, modelBSphere, modelBBox, curNode->children[i], nextPos, worldXform, streamCtx, nodeMap, meshCache);
+		nextPos = WalkGraph(modelData, data, sceneGraph, modelBSphere, modelBBox, curNode->children[i], nextPos, worldXform, streamCtx, nodeMap, meshCache, meshRequests);
 		if (i < curNode->children_count - 1)
 			sceneGraph[childStartPos].hasSibling = 1;
 	}
@@ -531,12 +435,6 @@ inline void CompileTexture(const std::wstring& basePath, const std::string& file
 {
     CompileTextureOnDemand(basePath + Utility::UTF8ToWideString(fileName), flags);
 }
-
-//inline void SetTextureOptions(std::map<std::string, uint8_t>& optionsMap, glTF::Texture* texture, uint8_t options)
-//{
-//    if (texture && texture->source && optionsMap.find(texture->source->path) == optionsMap.end())
-//        optionsMap[texture->source->path] = options;
-//}
 
 void BuildMaterials(ModelData& model, const glTF::GltfAsset& asset)
 {
@@ -900,13 +798,13 @@ bool Renderer::BuildModel(ModelData& model, const glTF::GltfAsset& asset, Global
 	if (scene == nullptr)
 		return false;
 
-    // Aggregate all of the vertex and index buffers in this unified buffer
-    //std::vector<unsigned char>& bufferMemory = model.m_GeometryData;
-
     std::vector<unsigned char> bufferMemory;
 
     model.m_BoundingSphere = BoundingSphere(kZero);
     model.m_BoundingBox = AxisAlignedBox(kZero);
+
+	std::vector<MeshInstanceRequest> meshRequests;
+	meshRequests.reserve(data->nodes_count); // 预估容量
 
 	// 遍历 Scene 的根节点
 	uint32_t currentPos = 0;
@@ -915,7 +813,7 @@ bool Renderer::BuildModel(ModelData& model, const glTF::GltfAsset& asset, Global
 		for (size_t i = 0; i < scene->nodes_count; ++i)
 		{
 			const uint32_t rootStartPos = currentPos;
-			uint32_t nextPos = WalkGraph(model, data, model.m_SceneGraph, model.m_BoundingSphere, model.m_BoundingBox, scene->nodes[i], currentPos, Matrix4(kIdentity), streamCtx, nodeMap, meshCache);
+			uint32_t nextPos = WalkGraph(model, data, model.m_SceneGraph, model.m_BoundingSphere, model.m_BoundingBox, scene->nodes[i], currentPos, Matrix4(kIdentity), streamCtx, nodeMap, meshCache, meshRequests);
 			if (i < scene->nodes_count - 1)
 				model.m_SceneGraph[rootStartPos].hasSibling = 1;
 
@@ -925,6 +823,54 @@ bool Renderer::BuildModel(ModelData& model, const glTF::GltfAsset& asset, Global
 
 	model.m_SceneGraph.resize(currentPos);
 
+	// 并行编译几何体 (Heavy Lifting)
+	if (!meshRequests.empty())
+	{
+		ParallelCompileMeshes(model, meshCache, data, meshRequests, streamCtx);
+	}
+	Utility::Printf("Total triangles built: %llu\n", model.m_TriangleCount);
+
+	// 实例化与计算 Bounds
+	if (!meshRequests.empty())
+	{
+		BoundingSphere modelBSphere(kZero);
+		AxisAlignedBox modelBBox(kZero);
+
+		for (const auto& req : meshRequests)
+		{
+			auto it = meshCache.find(req.mesh);
+			if (it == meshCache.end()) continue; // Should not happen
+
+			const CompiledMeshData& cachedMesh = it->second;
+
+			InstantiateMesh(model, cachedMesh, req.nodeIndex);
+
+			BoundingSphere lsSphere = cachedMesh.boundsLS;
+			Vector3 worldCenter = Vector3(req.worldXform * lsSphere.GetCenter());
+
+			Vector3 xAxis = Vector3(req.worldXform.GetX().GetX(), req.worldXform.GetX().GetY(), req.worldXform.GetX().GetZ());
+			Vector3 yAxis = Vector3(req.worldXform.GetY().GetX(), req.worldXform.GetY().GetY(), req.worldXform.GetY().GetZ());
+			Vector3 zAxis = Vector3(req.worldXform.GetZ().GetX(), req.worldXform.GetZ().GetY(), req.worldXform.GetZ().GetZ());
+			float maxScale = std::max(std::max((float)Length(xAxis), (float)Length(yAxis)), (float)Length(zAxis));
+
+			BoundingSphere worldSphere(worldCenter, lsSphere.GetRadius() * maxScale);
+			modelBSphere = modelBSphere.Union(worldSphere);
+
+			AxisAlignedBox lsBox = cachedMesh.bboxLS;
+			Vector3 minP = lsBox.GetMin();
+			Vector3 maxP = lsBox.GetMax();
+			Vector3 corners[8] = {
+				{minP.GetX(), minP.GetY(), minP.GetZ()}, {minP.GetX(), minP.GetY(), maxP.GetZ()},
+				{minP.GetX(), maxP.GetY(), minP.GetZ()}, {minP.GetX(), maxP.GetY(), maxP.GetZ()},
+				{maxP.GetX(), minP.GetY(), minP.GetZ()}, {maxP.GetX(), minP.GetY(), maxP.GetZ()},
+				{maxP.GetX(), maxP.GetY(), minP.GetZ()}, {maxP.GetX(), maxP.GetY(), maxP.GetZ()}
+			};
+			for (int k = 0; k < 8; ++k) modelBBox.AddPoint(Vector3(req.worldXform * corners[k]));
+		}
+
+		model.m_BoundingSphere = modelBSphere;
+		model.m_BoundingBox = modelBBox;
+	}
     BuildAnimations(model, asset, nodeMap);
     BuildSkins(model, asset, nodeMap);
 
@@ -933,10 +879,6 @@ bool Renderer::BuildModel(ModelData& model, const glTF::GltfAsset& asset, Global
 
 bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, GlobalStreamingContext& streamCtx)
 {
-    std::ofstream outFile(filePath, std::ios::out | std::ios::binary);
-    if (!outFile)
-        return false;
-
     FileHeader header;
     std::memcpy(header.id, "MINI", 4);
     header.version = CURRENT_MINI_FILE_VERSION;
@@ -969,103 +911,199 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
     header.maxPos[1] = data.m_BoundingBox.GetMax().GetY();
     header.maxPos[2] = data.m_BoundingBox.GetMax().GetZ();
 
-    outFile.write((char*)&header, sizeof(FileHeader));
-    outFile.write((char*)data.m_SceneGraph.data(), header.numNodes * sizeof(GraphNode));
-
-    for (const Mesh* mesh : data.m_Meshes)
-    {
-		const size_t meshSize = sizeof(Mesh) + sizeof(Mesh::Draw) * (mesh->numDraws - 1);
-		outFile.write(reinterpret_cast<const char*>(mesh), meshSize);
-    }
-
-    outFile.write((char*)data.m_MaterialConstants.data(), header.numMaterials * sizeof(MaterialConstantData));
-    outFile.write((char*)data.m_MaterialTextures.data(), header.numMaterials * sizeof(MaterialTextureData));
-    for (uint32_t i = 0; i < header.numTextures; ++i)
-        outFile << data.m_TextureNames[i] << '\0';
-    outFile.write((char*)data.m_TextureOptions.data(), header.numTextures * sizeof(uint8_t));
-
-    if (header.numAnimations > 0)
-    {
-        ASSERT(header.keyFrameDataSize > 0 && header.numAnimationCurves > 0);
-        outFile.write((char*)data.m_AnimationKeyFrameData.data(), header.keyFrameDataSize);
-        outFile.write((char*)data.m_AnimationCurves.data(), header.numAnimationCurves * sizeof(AnimationCurve));
-        outFile.write((char*)data.m_Animations.data(), header.numAnimations * sizeof(AnimationSet));
-    }
-    else
-    {
-        ASSERT(header.keyFrameDataSize == 0 && header.numAnimationCurves == 0);
-    }
-
-    if (header.numJoints)
-    {
-        ASSERT(header.numJoints == (uint32_t)data.m_JointIBMs.size());
-        outFile.write((char*)data.m_JointIndices.data(), header.numJoints * sizeof(uint16_t));
-        outFile.write((char*)data.m_JointIBMs.data(), header.numJoints * sizeof(Matrix4));
-    }
-
-    if (header.numCameras)
-    {
-        outFile.write((char*)data.m_Cameras.data(), header.numCameras * sizeof(CameraData));
-    }
-
-	// --- Cluster LOD Data ---
-	// Group Infos
-	if (header.groupCount > 0)
-		outFile.write((char*)data.m_GroupInfos.data(), header.groupCount * sizeof(GroupMetadata));
-
-	// BVH Nodes
-	if (header.hierarchyNodeCount > 0)
-		outFile.write((char*)data.m_Nodes.data(), header.hierarchyNodeCount * sizeof(HierarchyNode));
-
-	// Page Metadatas
-    if (header.pageCount > 0)
-		outFile.write((char*)data.m_Pages.data(), header.pageCount * sizeof(PageMetadata));
-
-	const std::streampos currentPos = outFile.tellp();
-	// 强制跳转到下一个 256KB 边界以保证整个 Blob 的页对齐
-	const uint64_t alignedOffset = Math::AlignUp(static_cast<uint64_t>(currentPos), Renderer::kPageSizeInBytes);
-	uint32_t startPadding = static_cast<uint32_t>(alignedOffset - static_cast<uint64_t>(currentPos));
-	if (startPadding > 0)
-	{
-		std::vector<char> pad(startPadding, 0);
-		outFile.write(pad.data(), startPadding);
+	// -------------------------------------------------------------
+	// 计算 Header 及元数据总大小
+	// -------------------------------------------------------------
+	uint64_t metadataSize = sizeof(FileHeader);
+	metadataSize += header.numNodes * sizeof(GraphNode);
+	for (const Mesh* mesh : data.m_Meshes)
+		metadataSize += sizeof(Mesh) + sizeof(Mesh::Draw) * (mesh->numDraws - 1);
+	metadataSize += header.numMaterials * sizeof(MaterialConstantData);
+	metadataSize += header.numMaterials * sizeof(MaterialTextureData);
+	metadataSize += header.stringTableSize; // Texture Names
+	metadataSize += header.numTextures * sizeof(uint8_t); // Options
+	if (header.numAnimations > 0) {
+		metadataSize += header.keyFrameDataSize;
+		metadataSize += header.numAnimationCurves * sizeof(AnimationCurve);
+		metadataSize += header.numAnimations * sizeof(AnimationSet);
 	}
+	if (header.numJoints) {
+		metadataSize += header.numJoints * sizeof(uint16_t);
+		metadataSize += header.numJoints * sizeof(Matrix4);
+	}
+	if (header.numCameras) {
+		metadataSize += header.numCameras * sizeof(CameraData);
+	}
+	if (header.groupCount > 0) metadataSize += header.groupCount * sizeof(GroupMetadata);
+	if (header.hierarchyNodeCount > 0) metadataSize += header.hierarchyNodeCount * sizeof(HierarchyNode);
+	if (header.pageCount > 0) metadataSize += header.pageCount * sizeof(PageMetadata);
+
+	// 计算对齐
+	const uint64_t alignedOffset = Math::AlignUp(metadataSize, Renderer::kPageSizeInBytes);
+	// 补齐最后的 Geometry Page 对齐
+	const uint32_t pageSize = Renderer::kPageSizeInBytes;
+	const size_t   blobSize = streamCtx.TotalGeometrySize;
+	const size_t   alignedBlobSize = Math::AlignUp(blobSize, pageSize);
+
+	const uint64_t finalFileSize = alignedOffset + alignedBlobSize;
 
 	header.geometryBlobOffset = alignedOffset;
-	header.geometryBlobSize = streamCtx.TotalGeometrySize;
+	header.geometryBlobSize = static_cast<uint64_t>(alignedBlobSize);
 
+	// -------------------------------------------------------------
+	// 使用内存映射文件进行并行写入
+	// -------------------------------------------------------------
+	Utility::Printf("Allocating file space: %llu MB...\n", finalFileSize / (1024 * 1024));
+
+	HANDLE hFile = CreateFileW(filePath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) return false;
+
+	// 预扩展文件大小
+	LARGE_INTEGER liSize;
+	liSize.QuadPart = finalFileSize;
+	SetFilePointerEx(hFile, liSize, NULL, FILE_BEGIN);
+	SetEndOfFile(hFile);
+
+	HANDLE hMapping = CreateFileMappingW(hFile, NULL, PAGE_READWRITE, 0, 0, NULL);
+	if (!hMapping) {
+		CloseHandle(hFile);
+		return false;
+	}
+
+	uint8_t* pMappedData = (uint8_t*)MapViewOfFile(hMapping, FILE_MAP_WRITE, 0, 0, 0);
+	if (!pMappedData) {
+		CloseHandle(hMapping);
+		CloseHandle(hFile);
+		return false;
+	}
+
+	// 写入 Header 和 Metadata
+	// -------------------------------------------------------------
+	uint8_t* pCursor = pMappedData;
+	auto Write = [&](const void* src, size_t size) {
+		std::memcpy(pCursor, src, size);
+		pCursor += size;
+		};
+
+	Write(&header, sizeof(FileHeader));
+	Write(data.m_SceneGraph.data(), header.numNodes * sizeof(GraphNode));
+	for (const Mesh* mesh : data.m_Meshes) {
+		const size_t meshSize = sizeof(Mesh) + sizeof(Mesh::Draw) * (mesh->numDraws - 1);
+		Write(mesh, meshSize);
+	}
+	Write(data.m_MaterialConstants.data(), header.numMaterials * sizeof(MaterialConstantData));
+	Write(data.m_MaterialTextures.data(), header.numMaterials * sizeof(MaterialTextureData));
+	for (uint32_t i = 0; i < header.numTextures; ++i) {
+		const std::string& str = data.m_TextureNames[i];
+		Write(str.c_str(), str.size() + 1);
+	}
+	Write(data.m_TextureOptions.data(), header.numTextures * sizeof(uint8_t));
+
+	if (header.numAnimations > 0) {
+		Write(data.m_AnimationKeyFrameData.data(), header.keyFrameDataSize);
+		Write(data.m_AnimationCurves.data(), header.numAnimationCurves * sizeof(AnimationCurve));
+		Write(data.m_Animations.data(), header.numAnimations * sizeof(AnimationSet));
+	}
+	if (header.numJoints) {
+		Write(data.m_JointIndices.data(), header.numJoints * sizeof(uint16_t));
+		Write(data.m_JointIBMs.data(), header.numJoints * sizeof(Matrix4));
+	}
+	if (header.numCameras) {
+		Write(data.m_Cameras.data(), header.numCameras * sizeof(CameraData));
+	}
+	if (header.groupCount > 0) Write(data.m_GroupInfos.data(), header.groupCount * sizeof(GroupMetadata));
+	if (header.hierarchyNodeCount > 0) Write(data.m_Nodes.data(), header.hierarchyNodeCount * sizeof(HierarchyNode));
+	if (header.pageCount > 0) Write(data.m_Pages.data(), header.pageCount * sizeof(PageMetadata));
+
+	// Zero padding until alignedOffset
+	uint64_t currentOffset = pCursor - pMappedData;
+	if (currentOffset < alignedOffset) {
+		std::memset(pMappedData + currentOffset, 0, alignedOffset - currentOffset);
+	}
+
+	// 并行写入 Geometry Blob
+    // -------------------------------------------------------------
 	if (streamCtx.TotalGeometrySize > 0)
 	{
-		streamCtx.TempGeoFile.close(); 
-		std::ifstream tempIn(streamCtx.FileName, std::ios::binary);
-		if (tempIn)
-		{
-			constexpr size_t copyBufferSize = 16 * 1024 * 1024;
-			std::unique_ptr<char[]> buffer(new char[copyBufferSize]);
-			while (tempIn.read(buffer.get(), copyBufferSize) || tempIn.gcount() > 0)
-			{
-				outFile.write(buffer.get(), tempIn.gcount());
-			}
-			tempIn.close();
-			
+		uint8_t* pBlobBase = pMappedData + alignedOffset;
+		std::vector<uint64_t> jobOffsets(streamCtx.PendingWrites.size());
+		uint64_t runningOffset = 0;
+		for (size_t i = 0; i < streamCtx.PendingWrites.size(); ++i) {
+			jobOffsets[i] = runningOffset;
+			runningOffset += streamCtx.PendingWrites[i].SizeBytes;
 		}
-		const uint32_t pageSize = Renderer::kPageSizeInBytes;
-		const size_t   blobSize = streamCtx.TotalGeometrySize;
-		const size_t   alignedSize = Math::AlignUp(blobSize, pageSize);
-		if (alignedSize != blobSize)
+
+		Utility::Printf("Parallel writing geometry blobs (Total: %llu MB)...\n", streamCtx.TotalGeometrySize / (1024 * 1024));
+		// 并行循环
+		// dynamic 调度可以平衡不同大小的任务
+		#pragma omp parallel for schedule(dynamic)
+		for (int i = 0; i < (int)streamCtx.PendingWrites.size(); ++i)
 		{
-			// 最后一页剩余空间被零填充，方便页对齐读取
-			std::vector<uint8_t> padded(alignedSize - blobSize, 0);
-			outFile.write(reinterpret_cast<const char*>(padded.data()), padded.size());
-			header.geometryBlobSize = static_cast<uint64_t>(alignedSize);
+			const auto& job = streamCtx.PendingWrites[i];
+			uint8_t* pDest = pBlobBase + jobOffsets[i];
+
+			// Padding
+			if (job.TempSourcePath.empty())
+			{
+				std::memset(pDest, 0, job.SizeBytes);
+				continue;
+			}
+
+			// 真实数据
+			std::ifstream localStream(job.TempSourcePath, std::ios::in | std::ios::binary);
+			if (localStream)
+			{
+				localStream.seekg(job.SourceOffset);
+				localStream.read((char*)pDest, job.SizeBytes);
+
+				// 直接在映射的目标内存上修改
+				if (job.BaseGroupIndexPatchValue > 0)
+				{
+					auto* gHeader = reinterpret_cast<GroupHeader*>(pDest);
+					auto* mHeaders = reinterpret_cast<MeshletHeader*>(pDest + sizeof(GroupHeader));
+
+					for (uint32_t m = 0; m < gHeader->MeshletCount; ++m)
+					{
+						if (mHeaders[m].RefineGroupIndex != 0xFFFFFFFF)
+						{
+							mHeaders[m].RefineGroupIndex += job.BaseGroupIndexPatchValue;
+						}
+					}
+				}
+			}
+		}
+		// 尾部 Padding
+		if (alignedBlobSize > blobSize) {
+			std::memset(pBlobBase + blobSize, 0, alignedBlobSize - blobSize);
 		}
 	}
 
-	outFile.seekp(0, std::ios::beg);
-	outFile.write(reinterpret_cast<const char*>(&header), sizeof(FileHeader));
+	// 显式刷入系统缓存
+	if (!FlushViewOfFile(pMappedData, 0)) {
+		Utility::Printf("Failed to flush view of file: %d\n", GetLastError());
+	}
 
-    Utility::Printf("Build geometry result:\n");
-    Utility::Printf("Group count: %d\n", header.groupCount);
+	UnmapViewOfFile(pMappedData);
+	CloseHandle(hMapping);
+
+	// 强制物理落盘
+	if (!FlushFileBuffers(hFile)) {
+		Utility::Printf("Failed to flush file buffers to disk: %d\n", GetLastError());
+	}
+
+	CloseHandle(hFile);
+
+	// 清理临时文件
+	Utility::Printf("Deleting temp files...\n");
+	#pragma omp parallel for schedule(dynamic)
+	for(int i = 0; i < (int)streamCtx.TempFilesToClean.size(); ++i)
+	{
+		_wremove(streamCtx.TempFilesToClean[i].c_str());
+	}
+	streamCtx.TempFilesToClean.clear();
+
+	Utility::Printf("Build geometry result:\n");
+	Utility::Printf("Group count: %d\n", header.groupCount);
 	Utility::Printf("BVH node count: %d\n", header.hierarchyNodeCount);
 	Utility::Printf("Page count: %d\n", header.pageCount);
 

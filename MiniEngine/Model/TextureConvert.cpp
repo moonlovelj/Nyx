@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -57,8 +57,8 @@ bool ConvertToDDS( const std::wstring& filePath, uint32_t Flags )
     bool bFloat32HDR = GetFlag(kFloat32HDR);
 
     // Can't be both
-    ASSERT(!bInterpretAsSRGB || !bContainsNormals);
-    ASSERT(!bPreserveAlpha || !bContainsNormals);
+	ASSERT(!bInterpretAsSRGB || !bContainsNormals, "Texture cannot be both sRGB and NormalMap: %ws\n", filePath.c_str());
+	ASSERT(!bPreserveAlpha || !bContainsNormals, "Texture cannot be both Alpha and NormalMap: %ws\n", filePath.c_str());
 
     Utility::Printf( "Converting file \"%ws\" to DDS.\n", filePath.c_str() );
 

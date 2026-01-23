@@ -31,23 +31,39 @@ namespace Renderer
 {
     using namespace Math;
 
+	struct PendingGroupWrite
+	{
+		std::wstring TempSourcePath;
+		uint64_t SourceOffset;
+		uint64_t SizeBytes;
+
+		uint32_t BaseGroupIndexPatchValue; // 需要加到 RefineGroupIndex 上的值
+	};
+
 	struct GlobalStreamingContext {
-		const std::string FileName = "geometry_build_temp.bin";
-		std::ofstream TempGeoFile;          // 临时文件流
+		//const std::string FileName = "geometry_build_temp.bin";
+		//std::ofstream TempGeoFile;          // 临时文件流
+
 		uint64_t TotalGeometrySize = 0;     // 已写入的总字节数
 		uint32_t CurrentPageIndex = 0;      // 当前 Page 索引
 		uint32_t CurrentOffsetInPage = 0;   // 当前 Page 内的偏移
 
 		std::vector<char> ZeroBuffer;
 
+		// 延迟写入队列
+		std::vector<PendingGroupWrite> PendingWrites;
+		// 需要保持生命周期的临时文件列表 (用于最后清理)
+		std::vector<std::wstring> TempFilesToClean;
+
 		GlobalStreamingContext() {
 			ZeroBuffer.assign(Renderer::kPageSizeInBytes, 0);
 			// 创建临时文件
-			TempGeoFile.open(FileName, std::ios::binary | std::ios::out | std::ios::trunc);
+			//TempGeoFile.open(FileName, std::ios::binary | std::ios::out | std::ios::trunc);
 		}
 
 		~GlobalStreamingContext() {
-			if (TempGeoFile.is_open()) TempGeoFile.close();
+			//if (TempGeoFile.is_open()) TempGeoFile.close();
+			for (const auto& f : TempFilesToClean) _wremove(f.c_str());
 		}
 	};
 

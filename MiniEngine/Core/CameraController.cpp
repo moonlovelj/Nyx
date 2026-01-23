@@ -27,8 +27,8 @@ FlyingFPSCamera::FlyingFPSCamera( Camera& camera, Vector3 worldUp ) : CameraCont
 
     m_HorizontalLookSensitivity = 2.0f;
     m_VerticalLookSensitivity = 2.0f;
-    m_MoveSpeed = 5.0f;
-    m_StrafeSpeed = 5.0f;
+    m_MoveSpeed = 2155.0f;
+    m_StrafeSpeed = 2155.0f;
     m_MouseSensitivityX = 1.0f;
     m_MouseSensitivityY = 1.0f;
 

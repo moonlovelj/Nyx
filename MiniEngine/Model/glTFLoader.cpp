@@ -1,6 +1,50 @@
 ﻿#define CGLTF_IMPLEMENTATION
+
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+
 #include "glTFLoader.h"
 #include "../Core/Utility.h"
+
+namespace
+{
+	// 使用内存映射读取文件，避免堆内存分配
+	cgltf_result CgltfReadFile(const struct cgltf_memory_options* memory_options, const struct cgltf_file_options* file_options, const char* path, cgltf_size* size, void** data)
+	{
+		std::wstring wpath = Utility::UTF8ToWideString(path);
+
+		HANDLE file = CreateFileW(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (file == INVALID_HANDLE_VALUE) return cgltf_result_file_not_found;
+
+		LARGE_INTEGER fileSize;
+		if (!GetFileSizeEx(file, &fileSize))
+		{
+			CloseHandle(file);
+			return cgltf_result_io_error;
+		}
+
+		HANDLE mapping = CreateFileMapping(file, NULL, PAGE_READONLY, 0, 0, NULL);
+		CloseHandle(file);
+
+		if (mapping == NULL) return cgltf_result_io_error;
+
+		void* ptr = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
+		CloseHandle(mapping);
+
+		if (ptr == NULL) return cgltf_result_io_error;
+
+		*size = (cgltf_size)fileSize.QuadPart;
+		*data = ptr;
+
+		return cgltf_result_success;
+	}
+
+	void CgltfReleaseFile(const struct cgltf_memory_options* memory_options, const struct cgltf_file_options* file_options, void* data, cgltf_size size)
+	{
+		if (data) UnmapViewOfFile(data);
+	}
+}
 
 namespace glTF
 {
@@ -10,6 +54,9 @@ namespace glTF
 		std::string path = Utility::WideStringToUTF8(filePath);
 
 		cgltf_options options = {};
+		options.file.read = CgltfReadFile;
+		options.file.release = CgltfReleaseFile;
+
 		cgltf_result result = cgltf_parse_file(&options, path.c_str(), &m_Data);
 		if (result != cgltf_result_success) return;
 

@@ -37,6 +37,7 @@ struct GroupPackage
 {
 	Renderer::GroupMetadata Metadata{};
 	std::vector<uint8_t> Blob;
+	uint64_t TempFileOffset = 0;
 };
 
 struct MeshletBuildProducts

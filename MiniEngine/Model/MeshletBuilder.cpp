@@ -149,7 +149,7 @@ MeshletBuildProducts MeshletBuilder::Build(
 		std::iota(gi.begin(), gi.end(), size_t(0));
 
 		// 并行执行每个分组的简化尝试（只产生局部结果，不改写 shared 状态）
-		std::for_each(std::execution::par, gi.begin(), gi.end(),
+		std::for_each(std::execution::seq, gi.begin(), gi.end(),
 			[&](size_t idx)
 			{
 				const Group& g = currentGroups[groupIds[idx]];
@@ -262,7 +262,7 @@ MeshletBuilder::BuildLOD0Meshlets(
 	std::vector<Meshlet> out;
 	BuildMeshletsFromIndices(buildArgs, reinterpret_cast<uint32_t*>(buildArgs.IBData), buildArgs.indexCount, out);
 
-	std::for_each(std::execution::par, out.begin(), out.end(),
+	std::for_each(std::execution::seq, out.begin(), out.end(),
 		[&buildArgs](Meshlet& m)
 		{
 			ComputeMeshletSphere(buildArgs, m, m.BoundSphere);
@@ -523,8 +523,8 @@ bool MeshletBuilder::SimplifyGroup(
 	if (localIndices.empty())
 		return false;
 
-	static thread_local std::vector<float> localPositions;
-	static thread_local std::vector<float> localAttrs;
+	std::vector<float> localPositions;
+	std::vector<float> localAttrs;
 
 	// 准备局部属性缓冲 (Position + Attributes)
 	size_t localVertexCount = usedGlobalIndices.size();
