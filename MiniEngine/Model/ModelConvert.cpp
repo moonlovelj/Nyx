@@ -585,6 +585,18 @@ void BuildMaterials(ModelData& model, const glTF::GltfAsset& asset)
 				matTex.addressModes |= (defaultAddressMode << ((uint32_t)glTF::Material::kOcclusion * 4));
 			}
 
+			if (srcMat.specular.specular_texture.texture)
+			{
+				matTex.stringIdx[glTF::Material::kSpecular] = (uint16_t)cgltf_image_index(data, srcMat.specular.specular_texture.texture->image);
+				matTex.addressModes |= mapGltfSamplerAddressModeToDX12(
+					srcMat.specular.specular_texture.texture->sampler,
+					glTF::Material::kSpecular);
+			}
+			else
+			{
+				matTex.addressModes |= (defaultAddressMode << ((uint32_t)glTF::Material::kSpecular * 4));
+			}
+
 			if (srcMat.specular.specular_color_texture.texture)
 			{
 				matTex.stringIdx[glTF::Material::kSpecularColor] = (uint16_t)cgltf_image_index(data, srcMat.specular.specular_color_texture.texture->image);
@@ -613,6 +625,7 @@ void BuildMaterials(ModelData& model, const glTF::GltfAsset& asset)
 			RegisterOpt(glTF::Material::kEmissive, true);
 			RegisterOpt(glTF::Material::kNormal, false);
 			RegisterOpt(glTF::Material::kOcclusion, false);
+			RegisterOpt(glTF::Material::kSpecular, false);
 			RegisterOpt(glTF::Material::kSpecularColor, true);
 		}
 	}

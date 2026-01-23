@@ -19,6 +19,8 @@ bool FileExists( const std::wstring& fileName )
 
 bool ModelH3D::BuildModel(ModelData& model, Renderer::GlobalStreamingContext& streamCtx, const std::wstring& basePath) const
 {
+    streamCtx.TotalGeometrySize;
+
     model.m_SceneGraph.resize(1);
 
     GraphNode& node = model.m_SceneGraph[0];

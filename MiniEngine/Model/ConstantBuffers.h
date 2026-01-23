@@ -15,6 +15,7 @@
 
 #include "../Core/Math/Matrix3.h"
 #include "../Core/Math/Matrix4.h"
+#include "glTFLoader.h"
 #include <cstdint>
 
 struct InstanceConstants
@@ -32,7 +33,8 @@ struct MeshConstants
 };
 
 // The order of textures for PBR materials
-enum { kBaseColor, kMetallicRoughness, kOcclusion, kEmissive, kNormal, kSpecularColor, kNumTextures };
+enum { kBaseColor, kMetallicRoughness, kOcclusion, kEmissive, kNormal, kSpecular, kSpecularColor, kNumTextures };
+static_assert((uint32_t)kNumTextures == (uint32_t)glTF::Material::eMaterialTexture::kNumTextures);
 
 // model 粒度
 struct MaterialConstants
