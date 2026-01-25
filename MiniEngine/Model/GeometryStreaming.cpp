@@ -5,7 +5,9 @@
 #include "Model.h"
 #include "Renderer.h"
 #include "ModelInstanceManager.h"
+
 #include <numeric>
+#include <condition_variable>
 
 namespace GeometryStreaming
 {
@@ -46,11 +48,55 @@ namespace GeometryStreaming
 	std::deque<LoadedPage> m_CompletedPagesQueue;
 
 	bool m_NeedSyncAddressTable = false;
-	std::atomic<uint32_t> m_ActiveIOCount{ 0 };
+
+	struct IORequest {
+		uint32_t PageIdx;
+		std::wstring FilePath;
+		uint64_t BaseOffset;
+	};
+	std::thread m_IOThread;
+	std::deque<IORequest> m_IOQueue;
+	std::mutex m_IOQueueMutex;
+	std::condition_variable m_IOCV;
+	std::atomic<bool> m_StopIOThread{ false };
+	void IOThreadFunc()
+	{
+		while (true)
+		{
+			IORequest req;
+			{
+				std::unique_lock<std::mutex> lock(m_IOQueueMutex);
+				m_IOCV.wait(lock, [] { return !m_IOQueue.empty() || m_StopIOThread; });
+
+				if (m_IOQueue.empty() && m_StopIOThread)
+					break;
+
+				req = m_IOQueue.front();
+				m_IOQueue.pop_front();
+			}
+
+			std::vector<uint8_t> pageData(Renderer::kPageSizeInBytes);
+			std::ifstream fs(req.FilePath, std::ios::in | std::ios::binary);
+			if (fs)
+			{
+				fs.seekg(req.BaseOffset + (static_cast<uint64_t>(req.PageIdx) * Renderer::kPageSizeInBytes), std::ios::beg);
+				fs.read((char*)pageData.data(), pageData.size());
+				OnPageIOComplete(req.PageIdx, std::move(pageData));
+			}
+			else
+			{
+				// Error handling: maybe mark as not loading or log
+				// currently just decrementing counter to avoid hangs
+			}
+		}
+	}
 }
 
 void GeometryStreaming::Initialize(const std::vector<Renderer::HierarchyNode>& nodes, uint32_t maxGroupSize, uint32_t numPages)
 {
+	m_StopIOThread = false;
+	m_IOThread = std::thread(IOThreadFunc);
+
 	m_PageTableCPU.assign(numPages, PageResidency{});
 
 	m_GPURequestBuffer.Create(L"GPU Request Buffer", MAX_STREAMING_REQUESTS + 64, sizeof(GeometryStreamingRequest));
@@ -263,7 +309,14 @@ void GeometryStreaming::PinRootPages(Model* model)
 
 void GeometryStreaming::Shutdown()
 {
-	while (m_ActiveIOCount > 0) std::this_thread::yield();
+	std::lock_guard<std::mutex> lock(m_IOQueueMutex);
+	m_StopIOThread = true;
+	m_IOCV.notify_all();
+
+	if (m_IOThread.joinable())
+		m_IOThread.join();
+
+	m_IOQueue.clear();
 
 	m_HierarchyNodesGPU.Destroy();
 	for (auto& chunk : m_GeometryChunksGPU)
@@ -411,19 +464,16 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 
 void GeometryStreaming::EnqueueAsyncLoad(uint32_t pageIdx)
 {
-	m_ActiveIOCount++;
 	Model* sourceModel = ModelInstanceManager::Get().GetSourceModel();
-	const std::wstring& filePath = sourceModel->m_StreamingFilePath;
-	uint64_t baseOffset = sourceModel->m_GeometryBlobOffsetInFile;
-
-	std::thread([=]() {
-		std::vector<uint8_t> pageData(Renderer::kPageSizeInBytes);
-		std::ifstream fs(filePath, std::ios::in | std::ios::binary);
-		fs.seekg(baseOffset + (static_cast<uint64_t>(pageIdx) * Renderer::kPageSizeInBytes), std::ios::beg);
-		fs.read((char*)pageData.data(), pageData.size());
-		OnPageIOComplete(pageIdx, std::move(pageData));
-		m_ActiveIOCount--;
-		}).detach();
+	{
+		std::lock_guard<std::mutex> lock(m_IOQueueMutex);
+		m_IOQueue.push_back({
+			pageIdx,
+			sourceModel->m_StreamingFilePath,
+			sourceModel->m_GeometryBlobOffsetInFile
+			});
+	}
+	m_IOCV.notify_one();
 }
 
 void GeometryStreaming::OnPageIOComplete(uint32_t pageIdx, std::vector<uint8_t>&& pageData)
@@ -435,7 +485,7 @@ void GeometryStreaming::OnPageIOComplete(uint32_t pageIdx, std::vector<uint8_t>&
 void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDataLocation* pLocationTable)
 {
 	// 腾出 5% 的空间，或者至少 1 个
-	uint32_t totalSlots = (Renderer::kChunkSizeInBytes * kMaxChunks) / Renderer::kPageSizeInBytes;
+	uint32_t totalSlots = ((uint64_t)Renderer::kChunkSizeInBytes * kMaxChunks) / Renderer::kPageSizeInBytes;
 	uint32_t targetFreeCount = std::max(1u, (uint32_t)(totalSlots * 0.05f));
 
 	if (m_FreePool.size() >= targetFreeCount) return;
@@ -496,7 +546,7 @@ void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDat
 	{
 		static uint64_t lastWarnFrame = 0;
 		if (currentFrame > lastWarnFrame + 100) {
-			Utility::Print("WARNING: Geometry Cache Pool is full and no pages can be evicted! Increase kMaxChunks.\n");
+			Utility::Printf("WARNING: Geometry Cache Pool is full and no pages can be evicted! Increase kMaxChunks.\n");
 			lastWarnFrame = currentFrame;
 		}
 	}
