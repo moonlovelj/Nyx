@@ -121,4 +121,13 @@ struct GeometryStreamingRequest
 #endif
 };
 
+struct GeometryStreamingState
+{
+#ifdef __cplusplus
+	uint32_t NumRequests;
+#else
+	uint NumRequests;
+#endif
+};
+
 

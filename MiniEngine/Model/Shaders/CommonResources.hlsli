@@ -450,8 +450,18 @@ RWTexture2D<uint64_t> GetVBufferUAV()
 	return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_VBUFFER];
 }
 
-globallycoherent AppendStructuredBuffer<GeometryStreamingRequest> GetGeometryStreamingRequestBufferUAV()
+globallycoherent RWByteAddressBuffer GetGeometryStreamingRequestBufferUAV()
 {
     return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_GEOMETRY_STREAMING_REQUESTS_BUFFER];
+}
+
+globallycoherent RWStructuredBuffer<GeometryStreamingState> GetGeometryStreamingStateBufferUAV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_GEOMETRY_STREAMING_STATE_BUFFER];
+}
+
+globallycoherent RWByteAddressBuffer GetGeometryStreamingRequestMaskBufferUAV()
+{
+    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_GEOMETRY_STREAMING_REQUEST_MASK_BUFFER];
 }
 #endif

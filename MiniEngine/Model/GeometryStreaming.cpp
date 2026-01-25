@@ -8,16 +8,18 @@
 
 #include <numeric>
 #include <condition_variable>
+#include <intrin.h>
 
 namespace GeometryStreaming
 {
-	const uint32_t kMaxChunks = 8;
+	const uint32_t kMaxChunks = 6;
 	constexpr uint32_t kNumReadbackBuffers = 3;
 	StructuredBuffer m_HierarchyNodesGPU;
 	std::vector<ByteAddressBuffer> m_GeometryChunksGPU;
 	UploadBuffer m_GroupDataLocationCPU;
 	StructuredBuffer m_GroupDataLocationGPU;
 	std::vector<Renderer::GroupDataLocation> m_GroupDataLocations;
+	uint32_t m_GroupCount = 0;
 
 	struct PageResidency {
 		uint32_t ChunkIndex = INVALID_CHUNK_INDEX;
@@ -37,7 +39,10 @@ namespace GeometryStreaming
 	std::set<uint32_t> m_PagesToLoad;
 
 	ReadbackBuffer m_ReadbackRequestBuffer[kNumReadbackBuffers];
-	StructuredBuffer m_GPURequestBuffer;
+	ByteAddressBuffer m_GPURequestBuffer;
+	StructuredBuffer m_GeometryStreamingStateGPU;
+	ByteAddressBuffer m_GeometryStreamingRequestMaskGPU;
+	ReadbackBuffer m_ReadbackRequestMaskBuffer[kNumReadbackBuffers];
 	uint64_t m_FenceValues[kNumReadbackBuffers] = {};
 
 	struct LoadedPage {
@@ -94,6 +99,8 @@ namespace GeometryStreaming
 
 void GeometryStreaming::Initialize(const std::vector<Renderer::HierarchyNode>& nodes, uint32_t maxGroupSize, uint32_t numPages)
 {
+	m_GroupCount = maxGroupSize;
+
 	m_StopIOThread = false;
 	m_IOThread = std::thread(IOThreadFunc);
 
@@ -101,9 +108,15 @@ void GeometryStreaming::Initialize(const std::vector<Renderer::HierarchyNode>& n
 
 	m_GPURequestBuffer.Create(L"GPU Request Buffer", MAX_STREAMING_REQUESTS + 64, sizeof(GeometryStreamingRequest));
 	Renderer::SetBindlessResourceDescriptor(UAV_GEOMETRY_STREAMING_REQUESTS_BUFFER, m_GPURequestBuffer.GetUAV());
+	m_GeometryStreamingStateGPU.Create(L"Geometry Streaming State", 1, sizeof(GeometryStreamingState));
+	Renderer::SetBindlessResourceDescriptor(UAV_GEOMETRY_STREAMING_STATE_BUFFER, m_GeometryStreamingStateGPU.GetUAV());
+	m_GeometryStreamingRequestMaskGPU.Create(L"Geometry Streaming Request Mask", (m_GroupCount + 31) / 32, sizeof(uint32_t));
+	Renderer::SetBindlessResourceDescriptor(UAV_GEOMETRY_STREAMING_REQUEST_MASK_BUFFER, m_GeometryStreamingRequestMaskGPU.GetUAV());
+
 	for (int i = 0; i < kNumReadbackBuffers; ++i)
 	{
 		m_ReadbackRequestBuffer[i].Create(L"Readback Request Buffer", MAX_STREAMING_REQUESTS + 64, sizeof(GeometryStreamingRequest));
+		m_ReadbackRequestMaskBuffer[i].Create(L"Readback Request Mask Buffer", (m_GroupCount + 31) / 32, sizeof(uint32_t));
 		m_FenceValues[i] = 0;
 	}
 
@@ -329,9 +342,12 @@ void GeometryStreaming::Shutdown()
 	m_GroupDataLocationGPU.Destroy();
 
 	m_GPURequestBuffer.Destroy();
+	m_GeometryStreamingStateGPU.Destroy();
+	m_GeometryStreamingRequestMaskGPU.Destroy();
 	for (int i = 0; i < kNumReadbackBuffers; ++i)
 	{
 		m_ReadbackRequestBuffer[i].Destroy();
+		m_ReadbackRequestMaskBuffer[i].Destroy();
 	}
 }
 
@@ -348,23 +364,28 @@ void GeometryStreaming::Update(uint32_t frameIndex)
 	{
 		m_FenceValues[readbackBufferIndex] = 0;
 
-		GeometryStreamingRequest* requestedPages = (GeometryStreamingRequest*)m_ReadbackRequestBuffer[readbackBufferIndex].Map();
-		const uint32_t numRequests = std::min(requestedPages[0].PackedData, (uint32_t)MAX_STREAMING_REQUESTS);
-		for (uint32_t i = 1; i <= numRequests; ++i)
+		uint32_t* requestedGroupsMask = (uint32_t*)m_ReadbackRequestMaskBuffer[readbackBufferIndex].Map();
+		const uint32_t numRequests = (m_GroupCount + 31) / 32;
+		for (uint32_t i = 0; i < numRequests; ++i)
 		{
-			const GeometryStreamingRequest& requested = requestedPages[i];
-			if (requested.GroupIndex >= sourceModel->m_GroupMetadatas.size()) continue;
-			const auto& groupMeta = sourceModel->m_GroupMetadatas[requested.GroupIndex];
-			const uint32_t pageIdx = groupMeta.PageIndex;
-
-			m_PageTableCPU[pageIdx].LastUsedFrame = frameIndex;
-
-			if (m_PageTableCPU[pageIdx].ChunkIndex == INVALID_CHUNK_INDEX && !m_PageTableCPU[pageIdx].IsLoading)
+			uint32_t mask = requestedGroupsMask[i];
+			unsigned long bitIndex;
+			while (_BitScanForward(&bitIndex, mask))
 			{
-				m_PagesToLoad.insert(pageIdx);
+				uint32_t groupIndex = (i * 32) + bitIndex;
+				mask &= ~(1u << bitIndex);
+				if (groupIndex >= sourceModel->m_GroupMetadatas.size()) continue;
+				const auto& groupMeta = sourceModel->m_GroupMetadatas[groupIndex];
+				const uint32_t pageIdx = groupMeta.PageIndex;
+				m_PageTableCPU[pageIdx].LastUsedFrame = frameIndex;
+				if (m_PageTableCPU[pageIdx].ChunkIndex == INVALID_CHUNK_INDEX && !m_PageTableCPU[pageIdx].IsLoading)
+				{
+					m_PagesToLoad.insert(pageIdx);
+				}
 			}
 		}
-		m_ReadbackRequestBuffer[readbackBufferIndex].Unmap();
+
+		m_ReadbackRequestMaskBuffer[readbackBufferIndex].Unmap();
 
 		for (uint32_t pageIdx : m_PagesToLoad)
 		{
@@ -381,18 +402,14 @@ void GeometryStreaming::Update(uint32_t frameIndex)
 		// 读取请求
 		GraphicsContext& gfxContext = GraphicsContext::Begin(L"GeometryStreaming Update");
 
-		gfxContext.TransitionResource(m_GPURequestBuffer.GetCounterBuffer(), D3D12_RESOURCE_STATE_COPY_SOURCE);
-		gfxContext.TransitionResource(m_GPURequestBuffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
-
+		gfxContext.TransitionResource(m_GeometryStreamingRequestMaskGPU, D3D12_RESOURCE_STATE_COPY_SOURCE);
+		//gfxContext.TransitionResource(m_GPURequestBuffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
 		gfxContext.CopyBufferRegion(
-			m_ReadbackRequestBuffer[readbackBufferIndex], 0,
-			m_GPURequestBuffer.GetCounterBuffer(), 0, 4);
-		gfxContext.CopyBufferRegion(
-			m_ReadbackRequestBuffer[readbackBufferIndex], 4,
-			m_GPURequestBuffer, 0, MAX_STREAMING_REQUESTS * sizeof(GeometryStreamingRequest));
+			m_ReadbackRequestMaskBuffer[readbackBufferIndex], 0,
+			m_GeometryStreamingRequestMaskGPU, 0, (m_GroupCount + 31) / 32 * 4);
 
-		gfxContext.TransitionResource(m_GPURequestBuffer.GetCounterBuffer(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-		gfxContext.ClearUAV(m_GPURequestBuffer.GetCounterBuffer(), 0);
+		gfxContext.TransitionResource(m_GeometryStreamingRequestMaskGPU, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		gfxContext.ClearUAV(m_GeometryStreamingRequestMaskGPU,0);
 
 		m_FenceValues[readbackBufferIndex] = gfxContext.Finish();
 	}
@@ -488,7 +505,7 @@ void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDat
 	uint32_t totalSlots = ((uint64_t)Renderer::kChunkSizeInBytes * kMaxChunks) / Renderer::kPageSizeInBytes;
 	uint32_t targetFreeCount = std::max(1u, (uint32_t)(totalSlots * 0.05f));
 
-	if (m_FreePool.size() >= targetFreeCount) return;
+	//if (m_FreePool.size() >= targetFreeCount) return;
 
 	struct Candidate {
 		uint32_t pageIdx;
@@ -520,7 +537,7 @@ void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDat
 
 	for (const auto& cand : candidates)
 	{
-		if (evictedCount >= numToEvict) break;
+		//if (evictedCount >= numToEvict) break;
 
 		uint32_t pIdx = cand.pageIdx;
 		PageResidency& page = m_PageTableCPU[pIdx];

@@ -11,7 +11,9 @@ namespace GeometryStreaming
 	extern UploadBuffer m_GroupDataLocationCPU;
 	extern StructuredBuffer m_GroupDataLocationGPU;
 	extern std::vector<Renderer::GroupDataLocation> m_GroupDataLocations;
-	extern StructuredBuffer m_GPURequestBuffer;
+	extern ByteAddressBuffer m_GPURequestBuffer;
+	extern StructuredBuffer m_GeometryStreamingStateGPU;
+	extern ByteAddressBuffer m_GeometryStreamingRequestMaskGPU;
 
 	void Initialize(const std::vector<Renderer::HierarchyNode>& nodes, uint32_t maxGroupSize, uint32_t numPages);
 

@@ -810,9 +810,10 @@ void Renderer::DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlo
 	context.TransitionResource(CommandBucketer::Get().GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource(CommandBucketer::Get().GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource(CommandBucketer::Get().GetMeshletBatchGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	context.TransitionResource(GeometryStreaming::m_GPURequestBuffer.GetCounterBuffer(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	context.TransitionResource(GeometryStreaming::m_GeometryStreamingStateGPU, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 	context.TransitionResource(GeometryStreaming::m_GPURequestBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	context.ClearBufferUAV(GeometryStreaming::m_GPURequestBuffer.GetCounterBuffer(), 4, 0);
+	context.ClearBufferUAV(GeometryStreaming::m_GeometryStreamingStateGPU, 4, 0);
+    context.TransitionResource(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
@@ -1018,6 +1019,7 @@ void MeshSorter::RenderMeshedInternal(
         context.ClearUAV(CommandBucketer::Get().GetTaskQueueGPU(), 0xFFFFFFFF);
         context.TransitionResource(CommandBucketer::Get().GetMeshletBatchGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         context.ClearUAV(CommandBucketer::Get().GetMeshletBatchGPU(), 0);
+        context.ClearUAV(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, 0);
 
         uint32_t passIndex = 0;
         Renderer::InstanceCull(context, inGlobals, passIndex);

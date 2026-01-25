@@ -107,10 +107,22 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
         GroupDataLocation groupDataLocation = groupDataLocationSRV[node.GetGroupIndex()];
         if (groupDataLocation.ChunkIndex == INVALID_ID)
         {
-            globallycoherent AppendStructuredBuffer<GeometryStreamingRequest> requestUAV = GetGeometryStreamingRequestBufferUAV();
-            GeometryStreamingRequest request;
-            request.PackedData = request.PackData(node.GetGroupIndex(), 0);
-            requestUAV.Append(request);
+            //globallycoherent RWByteAddressBuffer requestUAV = GetGeometryStreamingRequestBufferUAV();
+            //globallycoherent RWStructuredBuffer<GeometryStreamingState> streamingStateUAV = GetGeometryStreamingStateBufferUAV();
+            //uint requestWriteOffset = 0;
+            //WaveInterlockedAddScalar(streamingStateUAV[0].NumRequests, true, 1u, requestWriteOffset);
+            //if (requestWriteOffset < MAX_STREAMING_REQUESTS)
+            //{
+            //    GeometryStreamingRequest request;
+            //    request.PackedData = request.PackData(node.GetGroupIndex(), 0);
+            //    requestUAV.Store(requestWriteOffset * 4, request.PackedData);
+            //} 
+            
+            globallycoherent RWByteAddressBuffer requestMaskUAV = GetGeometryStreamingRequestMaskBufferUAV();
+            const uint requestMaskAddress = (groupIndex >> 5) << 2;
+            const uint requestBitMask = 1u << (groupIndex & 31);
+            uint originalTemp;
+            requestMaskUAV.InterlockedOr(requestMaskAddress, requestBitMask, originalTemp);
         }
         else
         {
