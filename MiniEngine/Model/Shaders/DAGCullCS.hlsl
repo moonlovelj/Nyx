@@ -103,8 +103,17 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
     // 处理叶子节点 (Cluster)
     if (bVisible && bIsLeaf)
     {
+        const uint groupID = node.GetGroupIndex();
+        
+        globallycoherent RWByteAddressBuffer requestMaskUAV = GetGeometryStreamingRequestMaskBufferUAV();
+        const uint requestMaskAddress = (groupID >> 5) << 2;
+        const uint requestBitMask = 1u << (groupID & 31);
+        uint originalTemp;
+        requestMaskUAV.InterlockedOr(requestMaskAddress, requestBitMask, originalTemp);
+        
         StructuredBuffer<GroupDataLocation> groupDataLocationSRV = GetGroupDataLocationBufferSRV();
-        GroupDataLocation groupDataLocation = groupDataLocationSRV[node.GetGroupIndex()];
+        GroupDataLocation groupDataLocation = groupDataLocationSRV[groupID];
+
         if (groupDataLocation.ChunkIndex == INVALID_ID)
         {
             //globallycoherent RWByteAddressBuffer requestUAV = GetGeometryStreamingRequestBufferUAV();
@@ -118,11 +127,7 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
             //    requestUAV.Store(requestWriteOffset * 4, request.PackedData);
             //} 
             
-            globallycoherent RWByteAddressBuffer requestMaskUAV = GetGeometryStreamingRequestMaskBufferUAV();
-            const uint requestMaskAddress = (groupIndex >> 5) << 2;
-            const uint requestBitMask = 1u << (groupIndex & 31);
-            uint originalTemp;
-            requestMaskUAV.InterlockedOr(requestMaskAddress, requestBitMask, originalTemp);
+            
         }
         else
         {

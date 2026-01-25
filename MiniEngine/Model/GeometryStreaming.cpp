@@ -12,7 +12,7 @@
 
 namespace GeometryStreaming
 {
-	const uint32_t kMaxChunks = 6;
+	const uint32_t kMaxChunks = 16;
 	constexpr uint32_t kNumReadbackBuffers = 3;
 	StructuredBuffer m_HierarchyNodesGPU;
 	std::vector<ByteAddressBuffer> m_GeometryChunksGPU;
@@ -474,7 +474,14 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 	if (m_NeedSyncAddressTable)
 	{
 		m_NeedSyncAddressTable = false;
+		gfx.TransitionResource(m_GroupDataLocationCPU, D3D12_RESOURCE_STATE_COPY_SOURCE);
 		gfx.CopyBuffer(m_GroupDataLocationGPU, m_GroupDataLocationCPU);
+		gfx.TransitionResource(m_GroupDataLocationGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
+	}
+
+	for (auto& chunk : m_GeometryChunksGPU)
+	{
+		gfx.TransitionResource(chunk, D3D12_RESOURCE_STATE_GENERIC_READ);
 	}
 	gfx.Finish();
 }
