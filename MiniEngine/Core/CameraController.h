@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -55,6 +55,9 @@ public:
     void EnableMomentum( bool enable ) { m_Momentum = enable; }
 
     void SetHeadingPitchAndPosition(float heading, float pitch, const Vector3& position);
+
+	void SetMoveSpeed(float speed) { m_MoveSpeed = speed; }
+	void SetStrafeSpeed(float speed) { m_StrafeSpeed = speed; }
 
 private:
 

@@ -139,10 +139,16 @@ void SIMDMemFill( void* __restrict _Dest, __m128 FillVector, size_t NumQuadwords
 
 float F16ToF32(uint32_t bits)
 {
-	// _mm_cvtph_ps 接收一个包含 8 个 half 的 __m128i，返回 4 个 float 的 __m128
 	__m128i vh = _mm_set1_epi16(static_cast<short>(bits));
 	__m128 vf = _mm_cvtph_ps(vh);
 	return _mm_cvtss_f32(vf);
+}
+
+uint16_t F32ToF16(float value)
+{
+    __m128 vf = _mm_set1_ps(value);
+    __m128i vh = _mm_cvtps_ph(vf, _MM_FROUND_TO_NEAREST_INT);
+    return static_cast<uint16_t>(_mm_extract_epi16(vh, 0));
 }
 
 std::wstring Utility::UTF8ToWideString( const std::string& str )

@@ -207,15 +207,6 @@ void OptimizeMesh(Renderer::Primitive& outPrim,
 	defaultIdentityMaterial.alpha_cutoff = 0.5f;
 	const cgltf_material& material = inPrim.material ? *inPrim.material : defaultIdentityMaterial;
 
-	outPrim.psoFlags = PSOFlags::kHasPosition | PSOFlags::kHasNormal;
-	if (HasTangents) outPrim.psoFlags |= PSOFlags::kHasTangent;
-	if (HasUV0)     outPrim.psoFlags |= PSOFlags::kHasUV0;
-	if (HasUV1)    outPrim.psoFlags |= PSOFlags::kHasUV1;
-	if (HasSkin) outPrim.psoFlags |= PSOFlags::kHasSkin;
-	if (material.alpha_mode == cgltf_alpha_mode_blend) outPrim.psoFlags |= PSOFlags::kAlphaBlend;
-	if (material.alpha_mode == cgltf_alpha_mode_mask) outPrim.psoFlags |= PSOFlags::kAlphaTest;
-	if (material.double_sided) outPrim.psoFlags |= PSOFlags::kTwoSided;
-
     std::unique_ptr<XMFLOAT3[]> position;
     std::unique_ptr<XMFLOAT3[]> normal;
     std::unique_ptr<XMFLOAT4[]> tangent;
@@ -377,6 +368,10 @@ void OptimizeMesh(Renderer::Primitive& outPrim,
         OutputElements.push_back({ "BLENDWEIGHT", 0, DXGI_FORMAT_R16G16B16A16_UNORM, 0, D3D12_APPEND_ALIGNED_ELEMENT });
         outPrim.psoFlags |= PSOFlags::kHasSkin;
     }
+
+	if (material.alpha_mode == cgltf_alpha_mode_blend) outPrim.psoFlags |= PSOFlags::kAlphaBlend;
+	if (material.alpha_mode == cgltf_alpha_mode_mask) outPrim.psoFlags |= PSOFlags::kAlphaTest;
+	if (material.double_sided) outPrim.psoFlags |= PSOFlags::kTwoSided;
 
     D3D12_INPUT_LAYOUT_DESC layout = {OutputElements.data(), (uint32_t)OutputElements.size()};
 

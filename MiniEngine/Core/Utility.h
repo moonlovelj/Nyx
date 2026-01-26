@@ -162,3 +162,4 @@ namespace Utility
 void SIMDMemCopy( void* __restrict Dest, const void* __restrict Source, size_t NumQuadwords );
 void SIMDMemFill( void* __restrict Dest, __m128 FillVector, size_t NumQuadwords );
 float F16ToF32(uint32_t bits);
+uint16_t F32ToF16(float value);

@@ -269,6 +269,15 @@ void GeometryStreaming::PinRootPages(Model* model)
 
 	if (rootPageIndices.empty()) return;
 
+	const uint64_t requiredMemory = static_cast<uint64_t>(rootPageIndices.size()) * static_cast<uint64_t>(Renderer::kPageSizeInBytes);
+	const uint64_t availableMemory = static_cast<uint64_t>(m_FreePool.size()) * static_cast<uint64_t>(Renderer::kPageSizeInBytes);
+	if (requiredMemory > availableMemory)
+	{
+		Utility::Printf(L"GeometryStreaming: Not enough VRAM to pin root pages! Required: %llu MB, Available: %llu MB\n",
+			requiredMemory / (1024 * 1024),
+			availableMemory / (1024 * 1024));
+	}
+
 	Renderer::GroupDataLocation* locations = (Renderer::GroupDataLocation*)m_GroupDataLocationCPU.Map();
 	GraphicsContext& gfx = GraphicsContext::Begin(L"Pin Root Pages Upload");
 
@@ -428,11 +437,13 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 	Renderer::GroupDataLocation* locations = (Renderer::GroupDataLocation*)m_GroupDataLocationCPU.Map();
 	GraphicsContext& gfx = GraphicsContext::Begin(L"Streaming Upload");
 
+	ImmediateEvict(frameIndex, locations);
+
 	auto it = readyPages.begin();
 	for (; it != readyPages.end(); ++it)
 	{
-		if (m_FreePool.empty())
-			ImmediateEvict(frameIndex, locations);
+		//if (m_FreePool.empty())
+		//	ImmediateEvict(frameIndex, locations);
 
 		if (m_FreePool.empty()) break;
 
@@ -508,9 +519,8 @@ void GeometryStreaming::OnPageIOComplete(uint32_t pageIdx, std::vector<uint8_t>&
 
 void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDataLocation* pLocationTable)
 {
-	// 腾出 5% 的空间，或者至少 1 个
-	uint32_t totalSlots = ((uint64_t)Renderer::kChunkSizeInBytes * kMaxChunks) / Renderer::kPageSizeInBytes;
-	uint32_t targetFreeCount = std::max(1u, (uint32_t)(totalSlots * 0.05f));
+	//uint32_t totalSlots = ((uint64_t)Renderer::kChunkSizeInBytes * kMaxChunks) / Renderer::kPageSizeInBytes;
+	//uint32_t targetFreeCount = std::max(1u, (uint32_t)(totalSlots * 0.05f));
 
 	//if (m_FreePool.size() >= targetFreeCount) return;
 
@@ -521,12 +531,13 @@ void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDat
 	std::vector<Candidate> candidates;
 	candidates.reserve(m_PageTableCPU.size());
 
+	const uint32_t kEvictionGraceFrames = 120;
 	for (uint32_t i = 0; i < (uint32_t)m_PageTableCPU.size(); ++i)
 	{
 		const auto& info = m_PageTableCPU[i];
 		if (info.ChunkIndex != INVALID_CHUNK_INDEX && !info.IsPinned && !info.IsLoading)
 		{
-			if (info.LastUsedFrame + 3 < currentFrame)
+			if (info.LastUsedFrame + kEvictionGraceFrames < currentFrame)
 			{
 				candidates.push_back({ i, info.LastUsedFrame });
 			}
@@ -537,7 +548,7 @@ void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDat
 		return a.lastFrame < b.lastFrame;
 		});
 
-	uint32_t numToEvict = targetFreeCount - (uint32_t)m_FreePool.size();
+	//uint32_t numToEvict = targetFreeCount - (uint32_t)m_FreePool.size();
 	uint32_t evictedCount = 0;
 
 	Model* sourceModel = ModelInstanceManager::Get().GetSourceModel();
@@ -568,10 +579,10 @@ void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDat
 	}
 	else
 	{
-		static uint64_t lastWarnFrame = 0;
-		if (currentFrame > lastWarnFrame + 100) {
-			Utility::Printf("WARNING: Geometry Cache Pool is full and no pages can be evicted! Increase kMaxChunks.\n");
-			lastWarnFrame = currentFrame;
-		}
+		//static uint64_t lastWarnFrame = 0;
+		//if (currentFrame > lastWarnFrame + 100) {
+		//	Utility::Printf("WARNING: Geometry Cache Pool is full and no pages can be evicted! Increase kMaxChunks.\n");
+		//	lastWarnFrame = currentFrame;
+		//}
 	}
 }

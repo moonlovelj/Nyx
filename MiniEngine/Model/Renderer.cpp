@@ -1001,8 +1001,7 @@ void MeshSorter::Sort()
 void MeshSorter::RenderMeshedInternal(
     GraphicsContext& context,
     const GlobalConstants& inGlobals,
-    Renderer::PsoIdx psoIdx,
-    bool bOcclusionCull)
+    Renderer::PsoIdx psoIdx)
 {
     for (auto& chunksGPU : GeometryStreaming::m_GeometryChunksGPU)
     {
@@ -1019,6 +1018,7 @@ void MeshSorter::RenderMeshedInternal(
         context.ClearUAV(CommandBucketer::Get().GetTaskQueueGPU(), 0xFFFFFFFF);
         context.TransitionResource(CommandBucketer::Get().GetMeshletBatchGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         context.ClearUAV(CommandBucketer::Get().GetMeshletBatchGPU(), 0);
+        context.TransitionResource(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         context.ClearUAV(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, 0);
 
         uint32_t passIndex = 0;
@@ -1372,7 +1372,7 @@ void MeshSorter::RenderMeshes(
 			else if (kVBuffer == pass)
 			{
                 if (bucketer.GetNumPotentialDrawItems() > 0)
-                    RenderMeshedInternal(context, globals, Renderer::PsoIdx::kPsoMain, true);
+                    RenderMeshedInternal(context, globals, Renderer::PsoIdx::kPsoMain);
 			}
         }
     }

@@ -15,6 +15,19 @@
 #define PSO_TWO_SIDED         0x0080
 #define PSO_HAS_SKIN          0x0100
 
+#define MAT_FLAG_BASE_COLOR_UV         0x00000001
+#define MAT_FLAG_METALLIC_ROUGHNESS_UV 0x00000002
+#define MAT_FLAG_OCCLUSION_UV          0x00000004
+#define MAT_FLAG_EMISSIVE_UV           0x00000008
+#define MAT_FLAG_NORMAL_UV             0x00000010
+
+#define MAT_FLAG_TWO_SIDED             0x00000020
+#define MAT_FLAG_ALPHA_TEST            0x00000040
+#define MAT_FLAG_ALPHA_BLEND           0x00000080
+
+#define MAT_FLAG_ALPHA_REF_MASK        0xFFFF0000
+#define MAT_FLAG_ALPHA_REF_SHIFT       16
+
 #define PSO_IDX_SHADOW        0
 #define PSO_IDX_MAIN          1
 #define PSO_IDX_TRANSPARENT   2

@@ -194,23 +194,24 @@ void SceneViewer::Startup( void )
 
     std::wstring gltfFileName;
 
-    bool forceRebuild = true;
+    bool forceRebuild = false;
     uint32_t rebuildValue;
     if (CommandLineArgs::GetInteger(L"rebuild", rebuildValue))
         forceRebuild = rebuildValue != 0;
 
+    float modelRadius = 0;
     if (CommandLineArgs::GetString(L"model", gltfFileName) == false)
     {
         auto startTime = std::chrono::steady_clock::now();
-        //auto model = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
+        auto model = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
 		//m_ModelInst = Renderer::LoadModel(L"Assets/old_federal_building/scene.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/DamagedHelmet/glTF/DamagedHelmet.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/Jinx/scene.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/lumber_mill_wood_factory_gltf/scene.gltf", forceRebuild);
-		auto model = Renderer::LoadModel(L"Assets/zorah_main_public.gltf/zorah_main_public.gltf", forceRebuild);
-		//auto model = Renderer::LoadModel(L"Assets/Monkey/monkey.gltf", forceRebuild);
-		//auto model = Renderer::LoadModel(L"Assets/Dragon/Dragon.gltf", forceRebuild);
+		//auto model = Renderer::LoadModel(L"Assets/zorah_main_public.gltf/zorah_main_public.gltf", forceRebuild);
+		//auto model = Renderer::LoadModel(L"Assets/San_Miguel/scene.gltf", forceRebuild);
+        //auto model = Renderer::LoadModel(L"Assets/Dragon/Dragon.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/japanese_metal_lantern_vfvjccaqx_gltf_raw/Japanese_Metal_Lantern_vfvjccaqx_Raw.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/OcclusionTest/scene.gltf", forceRebuild);
         //m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
@@ -219,12 +220,15 @@ void SceneViewer::Startup( void )
 		auto durationTime = duration_cast<std::chrono::milliseconds>(endTime - startTime);
 		Utility::Printf("Model loading time: %lld ms\n", durationTime.count());
 
-        ModelInstanceManager::Get().Initialize(model, 1);
+		ModelInstanceManager::Get().Initialize(model, 1);
+		//ModelInstanceManager::Get().Initialize(model, 120 * 120);
 		OrientedBox obb = ModelInstanceManager::Get().GetModelInstance(0).GetBoundingBox();
 		//OrientedBox obb = ModelInstanceManager::Get().GetModelInstance(0).GetBoundingBox();
-        float modelRadius = Length(obb.GetDimensions()) * 0.5f;
+        modelRadius = Length(obb.GetDimensions()) * 0.5f;
+
 		const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 0.5f, 0.0f, 0.0f);
 		m_Camera.SetEyeAtUp(eye, obb.GetCenter(), Vector3(kYUnitVector));
+
 		//const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 10.f, modelRadius * 10.f, modelRadius * 10.f);
 		//m_Camera.SetEyeAtUp(eye, Vector3(-modelRadius * 10.f, 0, -modelRadius * 10.f), Vector3(kYUnitVector));
     }
@@ -233,14 +237,19 @@ void SceneViewer::Startup( void )
         auto model = Renderer::LoadModel(gltfFileName, forceRebuild);
         ModelInstanceManager::Get().Initialize(model);
 		OrientedBox obb = ModelInstanceManager::Get().GetModelInstance(0).GetBoundingBox();
-		float modelRadius = Length(obb.GetDimensions()) * 0.5f;
+		modelRadius = Length(obb.GetDimensions()) * 0.5f;
 		const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 0.5f, 0.0f, 0.0f);
 		m_Camera.SetEyeAtUp(eye, obb.GetCenter(), Vector3(kYUnitVector));
     }
 
     m_Camera.SetZRange(0.01f, 100000.0f);
 	if (gltfFileName.size() == 0)
-		m_CameraController.reset(new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector)));
+    { 
+        FlyingFPSCamera* flyingCamera = new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector));
+        flyingCamera->SetMoveSpeed(modelRadius * 0.02f);
+        flyingCamera->SetStrafeSpeed(modelRadius * 0.02f);
+        m_CameraController.reset(flyingCamera);
+    }
 	else
         m_CameraController.reset(new OrbitCamera(m_Camera, ModelInstanceManager::Get().GetModelInstance(0).GetBoundingSphere(), Vector3(kYUnitVector)));
 

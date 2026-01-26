@@ -243,14 +243,16 @@ void ProcessClusterBatch(uint clusterBatchStartIndex, uint clusterBatchReadySize
         
         if (!bTestForLod)
         {
-            StructuredBuffer<GroupDataLocation> groupDataLocationSRV = GetGroupDataLocationBufferSRV();
-            GroupDataLocation groupDataLocation = groupDataLocationSRV[meshletHeader.RefineGroupIndex];
-            if (groupDataLocation.ChunkIndex == INVALID_ID)
+            GroupDataLocation refineGroupDataLocation = groupDataLocationSRV[meshletHeader.RefineGroupIndex];
+            if (refineGroupDataLocation.ChunkIndex == INVALID_ID)
                 bTestForLod = true;
         }
         
+        //bTestForLod |= (groupDataLocation.ChunkIndex != INVALID_ID);
+        
+        bool bAlphaBlend = (meshletHeader.GetPSOFlags() & PSO_ALPHA_BLEND);
         uint level = meshletHeader.GetLODLevel();
-        if (bIsInFustrum && bNotOccluded && bTestForLod)
+        if (bIsInFustrum && bNotOccluded && bTestForLod && !bAlphaBlend)
         {
             globallycoherent RWStructuredBuffer<QueueState> taskStateUAV = GetTaskQueueStateBufferUAV();
             uint writeOffset;

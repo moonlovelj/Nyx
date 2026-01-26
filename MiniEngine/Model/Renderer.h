@@ -201,10 +201,9 @@ namespace Renderer
         void RenderMeshes(DrawPass pass, GraphicsContext& context, const GlobalConstants& inGlobals);
 
     private:
-		void RenderMeshedInternal(GraphicsContext& context, 
-            const GlobalConstants& inGlobals, 
-            Renderer::PsoIdx psoIdx, 
-            bool bOcclusionCull = false); // shadow pass不做遮挡剔除
+		void RenderMeshedInternal(GraphicsContext& context,
+			const GlobalConstants& inGlobals,
+			Renderer::PsoIdx psoIdx);
 
         struct SortKey
         {

@@ -66,9 +66,16 @@ VertexAttributes LoadVertexAttributes(
         attrs.tangent = float4(0, 0, 1, 1);
     }
 
-    uint PackedUV = geometryChunksBuffer.Load(vertexOffset);
-    vertexOffset += 4;
-    attrs.uv0 = DecodeR16G16FLOATToFloat2(PackedUV);
+    if (psoFlags & PSO_HAS_UV0)
+    {
+        uint PackedUV = geometryChunksBuffer.Load(vertexOffset);
+        vertexOffset += 4;
+        attrs.uv0 = DecodeR16G16FLOATToFloat2(PackedUV);
+    }
+    else
+    {
+        attrs.uv0 = float2(0.0f, 0.0f);
+    }
 
     if (psoFlags & PSO_HAS_UV1)
     {

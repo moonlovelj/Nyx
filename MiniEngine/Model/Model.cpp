@@ -48,6 +48,7 @@ uint32_t Model::GetNumTotalDraws() const
 void Model::Render(
     MeshSorter& sorter) const
 {
+    sorter;
     //sorter.SetIndexBuffer({m_DataBuffer.GetGpuVirtualAddress(), (uint32_t)m_DataBuffer.GetBufferSize(), DXGI_FORMAT_R32_UINT });
 
     // Pointer to current mesh

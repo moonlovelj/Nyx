@@ -613,7 +613,7 @@ void BuildMaterials(ModelData& model, const glTF::GltfAsset& asset)
 			if (srcMat.alpha_mode == cgltf_alpha_mode_blend) matConst.alphaBlend = 1;
 			if (srcMat.alpha_mode == cgltf_alpha_mode_mask) {
 				matConst.alphaTest = 1;
-				matConst.alphaRef = static_cast<uint16_t>(srcMat.alpha_cutoff * 255.0f); // 简单映射
+				matConst.alphaRef = F32ToF16(srcMat.alpha_cutoff);
 			}
 
 			auto RegisterOpt = [&](int slot, bool srgb) {

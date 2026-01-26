@@ -10,8 +10,9 @@
 struct VSOutput
 {
     float4 position : SV_POSITION;
-    //float2 uv0 : TEXCOORD0;
+    float2 uv0 : TEXCOORD0;
     nointerpolation uint commandIndex : TEXCOORD1;
+    nointerpolation uint packedMaterialInfo : TEXCOORD2;
 };
 
 struct PrimitiveAttributes
@@ -107,13 +108,28 @@ void main(
             float4 position = float4(asfloat(geometryChunksBuffer.Load3(vertexOffset)), 1.0);
             vertexOffset += 12;
 
-            //float2 uv0 = 0;
-            //if (mlet.psoFlags & PSO_ALPHA_TEST)
-            //{
-            //    uint PackedUV = geometryData.Load(vertexOffset);
-            //    uv0 = DecodeR16G16FLOATToFloat2(PackedUV);
-            //    vertexOffset += 4;
-            //}
+            uint psoFlags = meshletHeader.GetPSOFlags();
+            float2 uv0 = 0;
+            if (psoFlags & PSO_ALPHA_TEST)
+            {
+                uint uvLoadOffset = vertexOffset + 4; // normal
+                if (psoFlags & PSO_HAS_TANGENT)
+                    uvLoadOffset += 4; // tangent
+                
+                if ((mat.flags & MAT_FLAG_BASE_COLOR_UV) && (psoFlags & PSO_HAS_UV1))
+                {
+                    if (psoFlags & PSO_HAS_UV0)
+                        uvLoadOffset += 4; 
+                    uint PackedUV = geometryChunksBuffer.Load(uvLoadOffset);
+                    uv0 = DecodeR16G16FLOATToFloat2(PackedUV);
+
+                }
+                else if (psoFlags & PSO_HAS_UV0)
+                {
+                    uint PackedUV = geometryChunksBuffer.Load(uvLoadOffset);
+                    uv0 = DecodeR16G16FLOATToFloat2(PackedUV);
+                }
+            }
 
             // Skinning (动态分支)
             //if (mlet.psoFlags & PSO_HAS_SKIN)
@@ -147,6 +163,12 @@ void main(
             
             verts[localVertexIdx].position = clipPos;
             verts[localVertexIdx].commandIndex = commandIndex;
+            uint packedMaterialInfo = (meshletHeader.GetMaterialBufferIndex() & 0xFFFF)
+                                    | ((mat.flags & 0xFF) << 16);
+                                    
+            verts[localVertexIdx].packedMaterialInfo = packedMaterialInfo;
+            verts[localVertexIdx].uv0 = uv0;
+
         }
     }
     
