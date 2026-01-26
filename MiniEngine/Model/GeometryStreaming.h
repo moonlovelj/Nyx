@@ -8,7 +8,6 @@ namespace GeometryStreaming
 {
 	extern StructuredBuffer m_HierarchyNodesGPU;
 	extern std::vector<ByteAddressBuffer> m_GeometryChunksGPU;
-	extern UploadBuffer m_GroupDataLocationCPU;
 	extern StructuredBuffer m_GroupDataLocationGPU;
 	extern std::vector<Renderer::GroupDataLocation> m_GroupDataLocations;
 	extern ByteAddressBuffer m_GPURequestBuffer;
@@ -16,12 +15,6 @@ namespace GeometryStreaming
 	extern ByteAddressBuffer m_GeometryStreamingRequestMaskGPU;
 
 	void Initialize(const std::vector<Renderer::HierarchyNode>& nodes, uint32_t maxGroupSize, uint32_t numPages);
-
-	//void LoadAllGeometries(
-	//	const std::wstring& filePath,
-	//	uint64_t geometryBlobOffsetInFile,
-	//	const std::vector<Renderer::PageMetadata>& pages,
-	//	const std::vector <Renderer::GroupMetadata>& groups);
 	void PinRootPages(Model* model);
 	void Shutdown();
 

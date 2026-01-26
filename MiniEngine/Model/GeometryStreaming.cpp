@@ -16,7 +16,6 @@ namespace GeometryStreaming
 	constexpr uint32_t kNumReadbackBuffers = 3;
 	StructuredBuffer m_HierarchyNodesGPU;
 	std::vector<ByteAddressBuffer> m_GeometryChunksGPU;
-	UploadBuffer m_GroupDataLocationCPU;
 	StructuredBuffer m_GroupDataLocationGPU;
 	std::vector<Renderer::GroupDataLocation> m_GroupDataLocations;
 	uint32_t m_GroupCount = 0;
@@ -147,14 +146,6 @@ void GeometryStreaming::Initialize(const std::vector<Renderer::HierarchyNode>& n
 	);
 
 	uint32_t groupCount = std::max(1u, maxGroupSize);
-	m_GroupDataLocationCPU.Create(L"Group Data Location CPU", groupCount * sizeof(Renderer::GroupDataLocation));
-	Renderer::GroupDataLocation* locations = (Renderer::GroupDataLocation*)m_GroupDataLocationCPU.Map();
-	for (uint32_t i = 0; i < groupCount; ++i)
-	{
-		locations[i] = { INVALID_CHUNK_INDEX, 0 };
-	}
-	m_GroupDataLocationCPU.Unmap();
-
 	m_GroupDataLocationGPU.Create(L"Group Data Location GPU", groupCount, sizeof(Renderer::GroupDataLocation), nullptr);
 	Renderer::SetBindlessResourceDescriptor(
 		SRV_GROUP_DATA_LOCATION_BUFFER,
@@ -163,91 +154,6 @@ void GeometryStreaming::Initialize(const std::vector<Renderer::HierarchyNode>& n
 
 	m_GroupDataLocations.resize(groupCount, { INVALID_CHUNK_INDEX , 0});
 }
-
-//void GeometryStreaming::LoadAllGeometries(
-//	const std::wstring& filePath,
-//	uint64_t geometryBlobOffsetInFile,
-//	const std::vector<Renderer::PageMetadata>& pages,
-//	const std::vector <Renderer::GroupMetadata>& groups)
-//{
-//	ASSERT(Renderer::kPageSizeInBytes * pages.size() <= Renderer::kChunkSizeInBytes, "Geometry blob exceeds chunk size.");
-//
-//	if (pages.empty() || groups.empty())
-//		return;
-//
-//	std::ifstream fs(filePath, std::ios::in | std::ios::binary);
-//	if (!fs)
-//	{
-//		Utility::Print("GeometryStreaming: failed to open file.\n");
-//		return;
-//	}
-//
-//	fs.seekg(geometryBlobOffsetInFile, std::ios::beg);
-//	std::vector<uint8_t> readBuffer(Renderer::kPageSizeInBytes * pages.size());
-//	fs.read(reinterpret_cast<char*>(readBuffer.data()), readBuffer.size());
-//	if (fs.fail())
-//	{
-//		Utility::Printf("GeometryStreaming: failed to read geometry blob from file.\n");
-//		const std::streamsize got = fs.gcount();
-//		Utility::Printf(
-//			"GeometryStreaming: read failed. eof=%d bad=%d fail=%d, expected=%lld, got=%lld\n",
-//			fs.eof() ? 1 : 0,
-//			fs.bad() ? 1 : 0,
-//			fs.fail() ? 1 : 0,
-//			static_cast<uint64_t>(readBuffer.size()),
-//			static_cast<uint64_t>(got)
-//		);
-//
-//		if (errno != 0)
-//		{
-//			char errBuf[256] = {};
-//			::strerror_s(errBuf, sizeof(errBuf), errno);
-//			Utility::Printf("errno=%d, msg=%s\n", errno, errBuf);
-//		}
-//		return;
-//	}
-//
-//	Renderer::GroupDataLocation* groupDataLocationsCPU = (Renderer::GroupDataLocation*)m_GroupDataLocationCPU.Map();
-//	const uint32_t chunkIndex = 0;
-//	for (uint32_t pageIndex = 0; pageIndex < pages.size(); ++pageIndex)
-//	{
-//		const Renderer::PageMetadata& page = pages[pageIndex];
-//		const uint32_t startGroupIndex = page.StartGroupIndex;
-//		const uint32_t groupCount = page.GroupCount;
-//		for (uint32_t groupOffset = 0; groupOffset < groupCount; ++groupOffset)
-//		{
-//			const uint32_t groupIndex = startGroupIndex + groupOffset;
-//			const Renderer::GroupMetadata& groupMeta = groups[groupIndex];
-//
-//			// 更新组数据位置
-//			groupDataLocationsCPU[groupIndex].ChunkIndex = chunkIndex;
-//			groupDataLocationsCPU[groupIndex].ByteOffset = Renderer::kPageSizeInBytes * pageIndex + groupMeta.OffsetInPage;
-//		}
-//	}
-//	m_GroupDataLocationCPU.Unmap();
-//
-//	GraphicsContext& gfx = GraphicsContext::Begin(L"GeometryStreaming::LoadAllGeometries");
-//	gfx.WriteBuffer(
-//		m_GeometryChunksGPU[chunkIndex],
-//		0,
-//		readBuffer.data(),
-//		readBuffer.size()
-//	);
-//
-//	gfx.TransitionResource(m_GeometryChunksGPU[chunkIndex], D3D12_RESOURCE_STATE_GENERIC_READ);
-//
-//	gfx.CopyBuffer(
-//		m_GroupDataLocationGPU,
-//		m_GroupDataLocationCPU
-//	);
-//	
-//	gfx.TransitionResource(
-//		m_GroupDataLocationGPU,
-//		D3D12_RESOURCE_STATE_GENERIC_READ
-//	);
-//
-//	gfx.Finish(true);
-//}
 
 void GeometryStreaming::PinRootPages(Model* model)
 {
@@ -278,7 +184,7 @@ void GeometryStreaming::PinRootPages(Model* model)
 			availableMemory / (1024 * 1024));
 	}
 
-	Renderer::GroupDataLocation* locations = (Renderer::GroupDataLocation*)m_GroupDataLocationCPU.Map();
+	Renderer::GroupDataLocation* locations = m_GroupDataLocations.data();
 	GraphicsContext& gfx = GraphicsContext::Begin(L"Pin Root Pages Upload");
 
 	for (uint32_t pageIdx : rootPageIndices)
@@ -317,12 +223,11 @@ void GeometryStreaming::PinRootPages(Model* model)
 		m_PageTableCPU[pageIdx].IsLoading = false;
 	}
 
-	m_GroupDataLocationCPU.Unmap();
-
-	gfx.CopyBuffer(m_GroupDataLocationGPU, m_GroupDataLocationCPU);
-	gfx.TransitionResource(m_GroupDataLocationGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
 	for (auto& chunk : m_GeometryChunksGPU)
 		gfx.TransitionResource(chunk, D3D12_RESOURCE_STATE_GENERIC_READ);
+
+	gfx.WriteBuffer(m_GroupDataLocationGPU, 0, m_GroupDataLocations.data(), m_GroupDataLocations.size() * sizeof(Renderer::GroupDataLocation));
+	gfx.TransitionResource(m_GroupDataLocationGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
 
 	gfx.Finish(true);
 
@@ -347,7 +252,7 @@ void GeometryStreaming::Shutdown()
 	}
 	m_GeometryChunksGPU.clear();
 
-	m_GroupDataLocationCPU.Destroy();
+	//m_GroupDataLocationCPU.Destroy();
 	m_GroupDataLocationGPU.Destroy();
 
 	m_GPURequestBuffer.Destroy();
@@ -434,7 +339,7 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 	}
 
 	Model* sourceModel = ModelInstanceManager::Get().GetSourceModel();
-	Renderer::GroupDataLocation* locations = (Renderer::GroupDataLocation*)m_GroupDataLocationCPU.Map();
+	Renderer::GroupDataLocation* locations = m_GroupDataLocations.data();
 	GraphicsContext& gfx = GraphicsContext::Begin(L"Streaming Upload");
 
 	ImmediateEvict(frameIndex, locations);
@@ -442,9 +347,6 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 	auto it = readyPages.begin();
 	for (; it != readyPages.end(); ++it)
 	{
-		//if (m_FreePool.empty())
-		//	ImmediateEvict(frameIndex, locations);
-
 		if (m_FreePool.empty()) break;
 
 		auto& item = *it;
@@ -481,12 +383,10 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 		);
 	}
 
-	m_GroupDataLocationCPU.Unmap();
 	if (m_NeedSyncAddressTable)
 	{
 		m_NeedSyncAddressTable = false;
-		gfx.TransitionResource(m_GroupDataLocationCPU, D3D12_RESOURCE_STATE_COPY_SOURCE);
-		gfx.CopyBuffer(m_GroupDataLocationGPU, m_GroupDataLocationCPU);
+		gfx.WriteBuffer(m_GroupDataLocationGPU, 0, m_GroupDataLocations.data(), m_GroupDataLocations.size() * sizeof(Renderer::GroupDataLocation));
 		gfx.TransitionResource(m_GroupDataLocationGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
 	}
 
@@ -519,11 +419,6 @@ void GeometryStreaming::OnPageIOComplete(uint32_t pageIdx, std::vector<uint8_t>&
 
 void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDataLocation* pLocationTable)
 {
-	//uint32_t totalSlots = ((uint64_t)Renderer::kChunkSizeInBytes * kMaxChunks) / Renderer::kPageSizeInBytes;
-	//uint32_t targetFreeCount = std::max(1u, (uint32_t)(totalSlots * 0.05f));
-
-	//if (m_FreePool.size() >= targetFreeCount) return;
-
 	struct Candidate {
 		uint32_t pageIdx;
 		uint64_t lastFrame;
@@ -548,15 +443,12 @@ void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDat
 		return a.lastFrame < b.lastFrame;
 		});
 
-	//uint32_t numToEvict = targetFreeCount - (uint32_t)m_FreePool.size();
 	uint32_t evictedCount = 0;
 
 	Model* sourceModel = ModelInstanceManager::Get().GetSourceModel();
 
 	for (const auto& cand : candidates)
 	{
-		//if (evictedCount >= numToEvict) break;
-
 		uint32_t pIdx = cand.pageIdx;
 		PageResidency& page = m_PageTableCPU[pIdx];
 		const auto& pageMeta = sourceModel->m_PageMetadatas[pIdx];

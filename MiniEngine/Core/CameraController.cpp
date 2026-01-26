@@ -19,6 +19,8 @@
 using namespace Math;
 using namespace GameCore;
 
+ExpVar g_CameraSpeed("Camera/CameraSpeed", 1.0f, -15.0f, 20.0f, 0.5f);
+
 FlyingFPSCamera::FlyingFPSCamera( Camera& camera, Vector3 worldUp ) : CameraController( camera )
 {
     m_WorldUp = Normalize(worldUp);
@@ -70,17 +72,17 @@ void FlyingFPSCamera::Update( float deltaTime )
 
     float yaw = GameInput::GetTimeCorrectedAnalogInput( GameInput::kAnalogRightStickX ) * m_HorizontalLookSensitivity * panScale;
     float pitch = GameInput::GetTimeCorrectedAnalogInput( GameInput::kAnalogRightStickY ) * m_VerticalLookSensitivity * panScale;
-    float forward =	m_MoveSpeed * speedScale * (
+    float forward = g_CameraSpeed * m_MoveSpeed * speedScale * (
         GameInput::GetTimeCorrectedAnalogInput( GameInput::kAnalogLeftStickY ) +
         (GameInput::IsPressed( GameInput::kKey_w ) ? deltaTime : 0.0f) +
         (GameInput::IsPressed( GameInput::kKey_s ) ? -deltaTime : 0.0f)
         );
-    float strafe = m_StrafeSpeed * speedScale * (
+    float strafe = g_CameraSpeed * m_StrafeSpeed * speedScale * (
         GameInput::GetTimeCorrectedAnalogInput( GameInput::kAnalogLeftStickX  ) +
         (GameInput::IsPressed( GameInput::kKey_d ) ? deltaTime : 0.0f) +
         (GameInput::IsPressed( GameInput::kKey_a ) ? -deltaTime : 0.0f)
         );
-    float ascent = m_StrafeSpeed * speedScale * (
+    float ascent = g_CameraSpeed * m_StrafeSpeed * speedScale * (
         GameInput::GetTimeCorrectedAnalogInput( GameInput::kAnalogRightTrigger ) -
         GameInput::GetTimeCorrectedAnalogInput( GameInput::kAnalogLeftTrigger ) +
         (GameInput::IsPressed( GameInput::kKey_e ) ? deltaTime : 0.0f) +
