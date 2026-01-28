@@ -12,6 +12,8 @@ namespace
 	// 使用内存映射读取文件，避免堆内存分配
 	cgltf_result CgltfReadFile(const struct cgltf_memory_options* memory_options, const struct cgltf_file_options* file_options, const char* path, cgltf_size* size, void** data)
 	{
+		memory_options;file_options;path;size;data;
+
 		std::wstring wpath = Utility::UTF8ToWideString(path);
 
 		HANDLE file = CreateFileW(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -42,6 +44,7 @@ namespace
 
 	void CgltfReleaseFile(const struct cgltf_memory_options* memory_options, const struct cgltf_file_options* file_options, void* data, cgltf_size size)
 	{
+		memory_options;file_options;data;size;
 		if (data) UnmapViewOfFile(data);
 	}
 }

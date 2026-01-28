@@ -188,9 +188,14 @@ void main(
         float4 h1 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.y, meshInstance.WorldMatrix, ViewProjMatrix);
         float4 h2 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.z, meshInstance.WorldMatrix, ViewProjMatrix);
 
+        float3x3 worldRotationScale = (float3x3) meshInstance.WorldMatrix;
+        float detWorld = determinant(worldRotationScale);
+        bool isWorldFlipped = detWorld < 0.0;
+        
         // 背面剔除
         bool twoSided = (meshletHeader.GetPSOFlags() & PSO_TWO_SIDED) > 0;
-        bool isVisible = twoSided || isFrontFacingHW(h0, h1, h2);
+        bool logicalFrontFacing = isFrontFacingHW(h0, h1, h2) ^ isWorldFlipped;
+        bool isVisible = twoSided || logicalFrontFacing;
         
         outIndices[gtid] = isVisible ? triIndices : uint3(0, 0, 0);
         sharedPrimitives[gtid].primitiveIndex = gtid;

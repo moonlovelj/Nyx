@@ -81,5 +81,8 @@ uint HashTriangleID(uint vertexID)
 #define VIEW_MODE_SHOW_MESHLET_LOD   1
 #define VIEW_MODE_SHOW_MESHLET_ID    2
 #define VIEW_MODE_SHOW_TRIANGLE      3
+#define VIEW_MODE_SHOW_MESH_ID       4
+#define VIEW_MODE_SHOW_INSTANCE_ID   5
+#define VIEW_MODE_SHOW_MATERIAL_ID   6
 
 #endif // __COMMON_HLSLI__

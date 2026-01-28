@@ -64,7 +64,7 @@ float4 SampleTextureWithDerivs(
 }
 
 float3 ComputeNormal(VSOutput vsOutput, Texture2D<float4> NormalTexture, 
-    SamplerState NormalSampler, MeshletHeader meshletHeader)
+    SamplerState NormalSampler, MeshletHeader meshletHeader, bool isFrontFacing)
 {
     MaterialConstant materilConstant = GetMaterialConstantSRV(meshletHeader.GetMaterialBufferIndex());
     uint psoFlags = meshletHeader.GetPSOFlags();
@@ -72,6 +72,10 @@ float3 ComputeNormal(VSOutput vsOutput, Texture2D<float4> NormalTexture,
     uint flags = materilConstant.flags;
 
     float3 normal = normalize(vsOutput.normal);
+    if (!isFrontFacing && (psoFlags & PSO_TWO_SIDED))
+    {
+        normal = -normal;
+    }
     
     if (!(psoFlags & PSO_HAS_TANGENT))
     {
@@ -103,7 +107,7 @@ struct MaterialProperties
     float3 Normal;
 };
 
-MaterialProperties GetMaterialProperties(VSOutput vsOutput, MeshletHeader meshletHeader)
+MaterialProperties GetMaterialProperties(VSOutput vsOutput, MeshletHeader meshletHeader, bool isFrontFacing)
 {
     MaterialConstant materilConstant = GetMaterialConstantSRV(meshletHeader.GetMaterialBufferIndex());
     uint psoFlags = meshletHeader.GetPSOFlags();
@@ -136,7 +140,7 @@ MaterialProperties GetMaterialProperties(VSOutput vsOutput, MeshletHeader meshle
     MatProps.Roughness = metallicRoughness.y;
     MatProps.Occlusion = SampleTextureWithDerivs(vsOutput, OcclusionTexture, OcclusionSampler, OCCLUSION_UV_OFFSET, flags, psoFlags).r;
     MatProps.Emissive = emissiveFactor * SampleTextureWithDerivs(vsOutput, EmissiveTexture, EmissiveSampler, EMISSIVE_UV_OFFSET, flags, psoFlags).rgb;
-    MatProps.Normal = ComputeNormal(vsOutput, NormalTexture, NormalSampler, meshletHeader);
+    MatProps.Normal = ComputeNormal(vsOutput, NormalTexture, NormalSampler, meshletHeader, isFrontFacing);
     return MatProps;
 }
 
@@ -152,7 +156,7 @@ struct BarycentricDerivs
     float3 lambda_correction; // 透视矫正重心坐标
     float3 ddx_lambda; // 重心坐标对 Screen X 的偏导
     float3 ddy_lambda; // 重心坐标对 Screen Y 的偏导
-    float  w[3]; // 三个点的 clip w 值
+    float3 oneOverW; // 预计算好的 1/w0, 1/w1, 1/w2
 };
 
 BarycentricDerivs CalculateBarycentricsAndDerivs(
@@ -174,12 +178,12 @@ BarycentricDerivs CalculateBarycentricsAndDerivs(
         float2 ndc = clipPos[i].xy / clipPos[i].w;
         // 注意 Y 轴方向，DX 是左上角(0,0)，NDC Y向上，所以 ndc.y 要反转
         screenPos[i] = (float2(ndc.x, -ndc.y) * 0.5f + 0.5f) * screenSize;
-        output.w[i] = clipPos[i].w;
+        output.oneOverW[i] = 1.0f / clipPos[i].w; 
     }
 
     // 计算面积 (的2倍)
     float area = EdgeFunction(screenPos[0], screenPos[1], screenPos[2]);
-    float invArea = 1.0f / area;
+    float invArea = rcp(sign(area + 1e-30f) * max(abs(area), 1e-7f));
 
     // 计算重心坐标
     float2 centerPos = pixelPos + 0.5f;
@@ -229,93 +233,41 @@ Derivs InterpolateWithDerivs(float2 val[3], BarycentricDerivs bary)
     Derivs d;
     
     // 属性需预除 w
-    float3 oneOverW = float3(1.0f / bary.w[0], 1.0f / bary.w[1], 1.0f / bary.w[2]);
-    float2 attr[3];
-    attr[0] = val[0] * oneOverW.x;
-    attr[1] = val[1] * oneOverW.y;
-    attr[2] = val[2] * oneOverW.z;
-
-    // 计算当前像素的 1/w 和 属性值 (Pre-divide)
-    float pixelOneOverW = dot(bary.lambda, oneOverW);
-    float2 pixelAttrPreDiv = attr[0] * bary.lambda.x + attr[1] * bary.lambda.y + attr[2] * bary.lambda.z;
+    float2 attrOverW[3];
+    attrOverW[0] = val[0] * bary.oneOverW.x;
+    attrOverW[1] = val[1] * bary.oneOverW.y;
+    attrOverW[2] = val[2] * bary.oneOverW.z;
     
-    // 最终属性值 (透视矫正后)
-    d.uv = pixelAttrPreDiv / pixelOneOverW;
-
-    // 对除法求导 (u/v)' = (u'v - uv') / v^2
-    // 需要求 d(pixelAttrPreDiv / pixelOneOverW) / dx
+     // 计算当前像素的 分子N 和 分母W
+    float W = dot(bary.lambda, bary.oneOverW);
+    float2 N = attrOverW[0] * bary.lambda.x +
+               attrOverW[1] * bary.lambda.y +
+               attrOverW[2] * bary.lambda.z;
     
-    // 计算 1/w 的导数
-    float ddx_oneOverW = dot(bary.ddx_lambda, oneOverW);
-    float ddy_oneOverW = dot(bary.ddy_lambda, oneOverW);
-
-    // 计算 PreDiv属性 的导数
-    float2 ddx_attrPre = attr[0] * bary.ddx_lambda.x + attr[1] * bary.ddx_lambda.y + attr[2] * bary.ddx_lambda.z;
-    float2 ddy_attrPre = attr[0] * bary.ddy_lambda.x + attr[1] * bary.ddy_lambda.y + attr[2] * bary.ddy_lambda.z;
-
-    // 应用除法法则
-    float w_sqr = pixelOneOverW * pixelOneOverW;
+    float invW = rcp(sign(W + 1e-30f) * max(abs(W), 1e-7f));
     
-    // ddx = (attr' * w - attr * w') / w^2
-    d.uv_dx = (ddx_attrPre * pixelOneOverW - pixelAttrPreDiv * ddx_oneOverW) / w_sqr;
-    d.uv_dy = (ddy_attrPre * pixelOneOverW - pixelAttrPreDiv * ddy_oneOverW) / w_sqr;
+    d.uv = N * invW;
+   
+
+     // 计算 N 和 W 的偏导数
+    float ddx_W = dot(bary.ddx_lambda, bary.oneOverW);
+    float ddy_W = dot(bary.ddy_lambda, bary.oneOverW);
+
+    float2 ddx_N = attrOverW[0] * bary.ddx_lambda.x +
+                   attrOverW[1] * bary.ddx_lambda.y +
+                   attrOverW[2] * bary.ddx_lambda.z;
+                   
+    float2 ddy_N = attrOverW[0] * bary.ddy_lambda.x +
+                   attrOverW[1] * bary.ddy_lambda.y +
+                   attrOverW[2] * bary.ddy_lambda.z;
+
+    // 应用优化后的除法导数公式
+    // 这里的 d.uv 就是 N/W
+    d.uv_dx = (ddx_N - d.uv * ddx_W) * invW;
+    d.uv_dy = (ddy_N - d.uv * ddy_W) * invW;
 
     return d;
 }
-
-//struct PrimitiveAttributes
-//{
-//    float3 position;
-//    float3 normal;
-//    float4 tangent;
-//    float2 uv0;
-//    float2 uv1;
-//};
-
-//PrimitiveAttributes LoadPrimitiveAttributes(
-//    ByteAddressBuffer geometryData, 
-//    uint vertexBufferOffset,
-//    uint psoFlags
-//    )
-//{
-//    PrimitiveAttributes attr;
-//    attr.position = asfloat(geometryData.Load3(vertexBufferOffset));
-//    vertexBufferOffset += 12;
-    
-//    uint PackedNormal = geometryData.Load(vertexBufferOffset);
-//    attr.normal = DecodeR10G10B10A2UNORMToFloat4(PackedNormal).xyz * 2 - 1;
-//    vertexBufferOffset += 4;
-    
-//    if (psoFlags & PSO_HAS_TANGENT)
-//    {
-//        uint PackedTangent = geometryData.Load(vertexBufferOffset);
-//        attr.tangent = DecodeR10G10B10A2UNORMToFloat4(PackedTangent) * 2 - 1;
-//        vertexBufferOffset += 4;
-//    }
-//    else
-//    {
-//        attr.tangent = float4(0, 0, 1, 1);
-//    }
-    
-//    uint PackedUV = geometryData.Load(vertexBufferOffset);
-//    vertexBufferOffset += 4;
-//    attr.uv0 = DecodeR16G16FLOATToFloat2(PackedUV);
-    
-//    if (psoFlags & PSO_HAS_UV1)
-//    {
-//        uint PackedUV1 = geometryData.Load(vertexBufferOffset);
-//        vertexBufferOffset += 4;
-//        attr.uv1 = DecodeR16G16FLOATToFloat2(PackedUV1);
-//    }
-//    else
-//    {
-//        attr.uv1 = attr.uv0;
-//    }
-
-//    // TODO: skinning normal and tangent
-    
-//    return attr;
-//}
 
 [RootSignature(Renderer_RootSig)]
 [numthreads(8, 8, 1)]
@@ -375,6 +327,10 @@ void main( uint2 DTid : SV_DispatchThreadID )
             BarycentricDerivs barycentricDerivs = CalculateBarycentricsAndDerivs(worldPos, DTid + float2(0.5, 0.5),
                 ViewProjMatrix, float2(ViewportWidth, ViewportHeight));
 
+            float3 worldPosition = worldPos[0] * barycentricDerivs.lambda_correction.x +
+                                  worldPos[1] * barycentricDerivs.lambda_correction.y +
+                                  worldPos[2] * barycentricDerivs.lambda_correction.z;
+            
             float4 normals[3] = {
                 float4(vertexAttrs[0].normal, 0),
                 float4(vertexAttrs[1].normal, 0),
@@ -413,7 +369,9 @@ void main( uint2 DTid : SV_DispatchThreadID )
             vsOutput.uv1_dx = derivs1.uv_dx;
             vsOutput.uv1_dy = derivs1.uv_dy;
             
-            MaterialProperties MatProps = GetMaterialProperties(vsOutput, meshletHeader);
+            float3 viewDir = normalize(ViewerPos - worldPosition);
+            bool isFrontFacing = dot(viewDir, vsOutput.normal) >= 0.0;
+            MaterialProperties MatProps = GetMaterialProperties(vsOutput, meshletHeader, isFrontFacing);
             SceneColorUAV[DTid] = float4(MatProps.Emissive, 1.0f);
             GBufferAUAV[DTid] = float4(MatProps.Normal, 1.0);
             GBufferBUAV[DTid] = MatProps.BaseColor;
@@ -430,6 +388,18 @@ void main( uint2 DTid : SV_DispatchThreadID )
             else if (ViewMode == VIEW_MODE_SHOW_TRIANGLE)
             {
                 GBufferDUAV[DTid].rgb = Uint32ToColorR16G16B16(primitiveIndex);
+            }
+            else if (ViewMode == VIEW_MODE_SHOW_MESH_ID)
+            {
+                GBufferDUAV[DTid].rgb = Uint32ToColorR16G16B16(inst.MeshBufferIdx);
+            }
+            else if (ViewMode == VIEW_MODE_SHOW_INSTANCE_ID)
+            {
+                GBufferDUAV[DTid].rgb = Uint32ToColorR16G16B16(payload.InstanceIndex);
+            }
+            else if (ViewMode == VIEW_MODE_SHOW_MATERIAL_ID)
+            {
+                GBufferDUAV[DTid].rgb = Uint32ToColorR16G16B16(meshletHeader.GetMaterialBufferIndex());
             }
             else
             {

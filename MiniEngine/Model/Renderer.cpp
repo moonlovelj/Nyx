@@ -86,7 +86,7 @@ namespace Renderer
     // 注意这个可视化仅在开启冻结前启用遮挡剔除，才能正确显示
 	BoolVar FreezeCull("Renderer/Freeze Cull", false);
     
-	const char* ViewModeLabels[] = { "Lit", "MeshletLOD", "MeshletID", "MeshletTriangle"};
+	const char* ViewModeLabels[] = { "Lit", "MeshletLOD", "MeshletID", "MeshletTriangle", "MeshID", "InstanceID", "MaterialID"};
 	EnumVar ViewMode("View/View Mode", 0, _countof(ViewModeLabels), ViewModeLabels);
 
     bool s_Initialized = false;

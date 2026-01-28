@@ -485,10 +485,13 @@ void BuildMaterials(ModelData& model, const glTF::GltfAsset& asset)
 					{
 					case cgltf_wrap_mode_clamp_to_edge:
 						modeSValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+						break;
 					case cgltf_wrap_mode_mirrored_repeat:
 						modeSValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+						break;
 					default:
 						modeSValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+						break;
 					}
 				}
 
@@ -499,10 +502,13 @@ void BuildMaterials(ModelData& model, const glTF::GltfAsset& asset)
 					{
 					case cgltf_wrap_mode_clamp_to_edge:
 						modeTValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+						break;
 					case cgltf_wrap_mode_mirrored_repeat:
 						modeTValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+						break;
 					default:
 						modeTValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+						break;
 					}
 				}
 

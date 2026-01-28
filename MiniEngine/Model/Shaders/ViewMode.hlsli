@@ -30,4 +30,10 @@ float3 Uint32ToColorR16G16B16(uint id)
     return float3(r, g, b);
 }
 
+float3 Uint2ToColorR16G16B16(uint2 id)
+{
+    uint h = HashUint(id.x) + (HashUint(id.y) * 33);
+    return Uint32ToColorR16G16B16(h);
+}
+
 #endif
