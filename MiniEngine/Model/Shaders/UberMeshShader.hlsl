@@ -5,7 +5,7 @@
 
 #define MAX_VERTS 128
 #define MAX_PRIMS 128
-#define MS_GROUP_SIZE 128
+#define MS_GROUP_SIZE 32
 
 struct VSOutput
 {
@@ -20,15 +20,12 @@ struct PrimitiveAttributes
     uint primitiveIndex : SV_PrimitiveID;
 };
 
-//groupshared float4 s_ClipPositions[MAX_VERTS];
-//groupshared uint s_VisiblePrimitiveCount;
-
-bool isFrontFacingHW(float4 ha, float4 hb, float4 hc)
+inline bool isFrontFacingHW(float4 ha, float4 hb, float4 hc)
 {
     return determinant(float3x3(ha.xyw, hb.xyw, hc.xyw)) >= 0;
 }
 
-float4 GetClipPosition(ByteAddressBuffer geometryChunksBuffer, 
+inline float4 GetClipPosition(ByteAddressBuffer geometryChunksBuffer,
     uint vertexByteOffset,
     uint vertexStride,
     uint localVertexIdx,
@@ -53,13 +50,6 @@ void main(
     out indices uint3 outIndices[MAX_PRIMS],
     out primitives PrimitiveAttributes sharedPrimitives[MAX_PRIMS])
 {
-    //if (gtid == 0)
-    //{
-    //    s_VisiblePrimitiveCount = 0;
-    //}
-    
-    //GroupMemoryBarrierWithGroupSync();
-    
 #ifdef UBER_MESH_SHADER_PASS1
     StructuredBuffer<QueueState> taskStateSRV = GetTaskQueueStateBufferSRV();
     const uint commandStart = taskStateSRV[0].PassState[0].VisibleMeshletCount;
@@ -92,19 +82,12 @@ void main(
     // --------------------------------------------------------
     // 顶点处理 (Vertex Processing)
     // --------------------------------------------------------
-    
-    // 每个线程最多处理两个顶点
-    // TODO 这里可以尝试更好的分配线程负载
-    [unroll]
-    for (uint i = 0; i < 2; ++i)
-    {
-        uint localVertexIdx = gtid * 2 + i;
-        if (localVertexIdx < vertexCount)
-        {
-            // 顶点拉取
-            uint vertexOffset = vertexByteOffset + vertexStride * localVertexIdx;
 
-            // Position (总是存在)
+    for (uint vertexID = gtid; vertexID < vertexCount; vertexID += MS_GROUP_SIZE)
+    {
+        if (vertexID < vertexCount)
+        {
+            uint vertexOffset = vertexByteOffset + vertexStride * vertexID;
             float4 position = float4(asfloat(geometryChunksBuffer.Load3(vertexOffset)), 1.0);
             vertexOffset += 12;
 
@@ -119,7 +102,7 @@ void main(
                 if ((mat.flags & MAT_FLAG_BASE_COLOR_UV) && (psoFlags & PSO_HAS_UV1))
                 {
                     if (psoFlags & PSO_HAS_UV0)
-                        uvLoadOffset += 4; 
+                        uvLoadOffset += 4;
                     uint PackedUV = geometryChunksBuffer.Load(uvLoadOffset);
                     uv0 = DecodeR16G16FLOATToFloat2(PackedUV);
 
@@ -154,86 +137,45 @@ void main(
             //    position = mul(skinPosMat, position);
             //}
 
-            float4x4 WorldMatrix = meshInstance.WorldMatrix;
-            //float4x3 WorldIT = meshInstance.WorldIT;
-            float3 worldPos = mul(WorldMatrix, position).xyz;
+            float3 worldPos = mul(meshInstance.WorldMatrix, position).xyz;
             float4 clipPos = mul(ViewProjMatrix, float4(worldPos, 1.0));
             
-            //s_ClipPositions[localVertexIdx] = clipPos;
-            
-            verts[localVertexIdx].position = clipPos;
-            verts[localVertexIdx].commandIndex = commandIndex;
+            verts[vertexID].position = clipPos;
+            verts[vertexID].commandIndex = commandIndex;
             uint packedMaterialInfo = (meshletHeader.GetMaterialBufferIndex() & 0xFFFF)
                                     | ((mat.flags & 0xFF) << 16);
                                     
-            verts[localVertexIdx].packedMaterialInfo = packedMaterialInfo;
-            verts[localVertexIdx].uv0 = uv0;
+            verts[vertexID].packedMaterialInfo = packedMaterialInfo;
+            verts[vertexID].uv0 = uv0;
 
         }
     }
-    
-    //GroupMemoryBarrierWithGroupSync();
-    
+
     // --------------------------------------------------------
     // 图元处理 (Primitive Processing)
     // --------------------------------------------------------
-    //bool isVisible = false;
-    //uint3 triIndices;
-    if (gtid < primitiveCount)
+    for (uint primitiveID = gtid; primitiveID < primitiveCount; primitiveID += MS_GROUP_SIZE)
     {
-        uint3 triIndices = LoadAndUnpackTriangle(geometryChunksBuffer, indexByteOffset, gtid);
+        if (primitiveID < primitiveCount)
+        {
+            uint3 triIndices = LoadAndUnpackTriangle(geometryChunksBuffer, indexByteOffset, primitiveID);
         
-        // 这里重新Load并且计算，要比使用group shared memory性能好
-        float4 h0 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.x, meshInstance.WorldMatrix, ViewProjMatrix);
-        float4 h1 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.y, meshInstance.WorldMatrix, ViewProjMatrix);
-        float4 h2 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.z, meshInstance.WorldMatrix, ViewProjMatrix);
+            // 这里重新Load并且计算，要比使用group shared memory性能好
+            float4 h0 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.x, meshInstance.WorldMatrix, ViewProjMatrix);
+            float4 h1 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.y, meshInstance.WorldMatrix, ViewProjMatrix);
+            float4 h2 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.z, meshInstance.WorldMatrix, ViewProjMatrix);
 
-        float3x3 worldRotationScale = (float3x3) meshInstance.WorldMatrix;
-        float detWorld = determinant(worldRotationScale);
-        bool isWorldFlipped = detWorld < 0.0;
+            float3x3 worldRotationScale = (float3x3) meshInstance.WorldMatrix;
+            float detWorld = determinant(worldRotationScale);
+            bool isWorldFlipped = detWorld < 0.0;
         
-        // 背面剔除
-        bool twoSided = (meshletHeader.GetPSOFlags() & PSO_TWO_SIDED) > 0;
-        bool logicalFrontFacing = isFrontFacingHW(h0, h1, h2) ^ isWorldFlipped;
-        bool isVisible = twoSided || logicalFrontFacing;
+            // 背面剔除
+            bool twoSided = (meshletHeader.GetPSOFlags() & PSO_TWO_SIDED) > 0;
+            bool logicalFrontFacing = isFrontFacingHW(h0, h1, h2) ^ isWorldFlipped;
+            bool isVisible = twoSided || logicalFrontFacing;
         
-        outIndices[gtid] = isVisible ? triIndices : uint3(0, 0, 0);
-        sharedPrimitives[gtid].primitiveIndex = gtid;
+            outIndices[primitiveID] = isVisible ? triIndices : uint3(0, 0, 0);
+            sharedPrimitives[primitiveID].primitiveIndex = primitiveID;
+        }
     }
-    
-    //uint4 ballot = WaveActiveBallot(isVisible);
-    //uint waveOffset = WavePrefixCountBits(isVisible);
-    //uint waveTotalVisible = countbits(ballot.x) + countbits(ballot.y) + countbits(ballot.z) + countbits(ballot.w);
-
-    //uint threadGroupOffset;
-    //if (WaveIsFirstLane())
-    //{
-    //    InterlockedAdd(s_VisiblePrimitiveCount, waveTotalVisible, threadGroupOffset);
-    //}
-    
-    //threadGroupOffset = WaveReadLaneFirst(threadGroupOffset);
-
-    //GroupMemoryBarrierWithGroupSync();
-    
-    //SetMeshOutputCounts(vertexCount, s_VisiblePrimitiveCount);
-    
-    // // 写入顶点输出
-    //[unroll]
-    //for (uint j = 0; j < 2; ++j)
-    //{
-    //    uint vIdx = gtid * 2 + j;
-    //    if (vIdx < vertexCount)
-    //    {
-    //        verts[vIdx].position = s_ClipPositions[vIdx];
-    //        verts[vIdx].commandIndex = commandIndex;
-    //    }
-    //}
-
-    //// 写入图元输出 (流压缩后的位置)
-    //if (isVisible)
-    //{
-    //    uint finalOutIndex = threadGroupOffset + waveOffset;
-    //    outIndices[finalOutIndex] = triIndices;
-    //    sharedPrimitives[finalOutIndex].primitiveIndex = gtid;
-    //}
 }
