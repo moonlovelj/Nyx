@@ -65,7 +65,7 @@ private:
 
 CREATE_APPLICATION( SceneViewer )
 
-ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 6.0f, -5.0f, 20.0f, 0.1f); // unit: lx
+ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 1.0f, -5.0f, 20.0f, 0.1f); // unit: lx
 NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0f, 0.1f );
 NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f);
 NumVar g_SunLightSize("Viewer/Lighting/Sun Light Size", 0.5f, 0.0f, 2.0f, 0.1f);
@@ -171,11 +171,11 @@ void SceneViewer::Startup( void )
 
     // MotionBlur::Enable = true;
     //TemporalEffects::EnableTAA = false;
-	//FXAA::Enable = true;
+	FXAA::Enable = true;
 	//PostEffects::EnableHDR = false;
     //SSAO::Enable = false;
     //PostEffects::BloomEnable = false;
-    //PostEffects::EnableAdaptation = false;
+    PostEffects::EnableAdaptation = false;
     
     Renderer::Initialize();
 
@@ -203,13 +203,13 @@ void SceneViewer::Startup( void )
     if (CommandLineArgs::GetString(L"model", gltfFileName) == false)
     {
         auto startTime = std::chrono::steady_clock::now();
-        auto model = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
+        //auto model = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
 		//m_ModelInst = Renderer::LoadModel(L"Assets/old_federal_building/scene.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/DamagedHelmet/glTF/DamagedHelmet.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/Jinx/scene.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/lumber_mill_wood_factory_gltf/scene.gltf", forceRebuild);
-		//auto model = Renderer::LoadModel(L"Assets/zorah_main_public.gltf/zorah_main_public.gltf", forceRebuild);
+		auto model = Renderer::LoadModel(L"Assets/zorah_main_public.gltf/zorah_main_public.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/San_Miguel/scene.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/Dragon/Dragon.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/japanese_metal_lantern_vfvjccaqx_gltf_raw/Japanese_Metal_Lantern_vfvjccaqx_Raw.gltf", forceRebuild);
@@ -220,8 +220,8 @@ void SceneViewer::Startup( void )
 		auto durationTime = duration_cast<std::chrono::milliseconds>(endTime - startTime);
 		Utility::Printf("Model loading time: %lld ms\n", durationTime.count());
 
+		//ModelInstanceManager::Get().Initialize(model, 1);
 		ModelInstanceManager::Get().Initialize(model, 1);
-		//ModelInstanceManager::Get().Initialize(model, 120 * 120);
 		OrientedBox obb = ModelInstanceManager::Get().GetModelInstance(0).GetBoundingBox();
 		//OrientedBox obb = ModelInstanceManager::Get().GetModelInstance(0).GetBoundingBox();
         modelRadius = Length(obb.GetDimensions()) * 0.5f;
@@ -242,7 +242,7 @@ void SceneViewer::Startup( void )
 		m_Camera.SetEyeAtUp(eye, obb.GetCenter(), Vector3(kYUnitVector));
     }
 
-    m_Camera.SetZRange(0.01f, 100000.0f);
+    m_Camera.SetZRange(0.01f, 80000.0f);
 	if (gltfFileName.size() == 0)
     { 
         FlyingFPSCamera* flyingCamera = new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector));
@@ -398,6 +398,8 @@ void SceneViewer::RenderScene( void )
 
         globals.ViewportWidth = g_SceneColorBuffer.GetWidth();
         globals.ViewportHeight = g_SceneColorBuffer.GetHeight();
+		globals.InvViewportWidth = 1.0f / (float)g_SceneColorBuffer.GetWidth();
+		globals.InvViewportHeight = 1.0f / (float)g_SceneColorBuffer.GetHeight();
 
         globals.FrameIndexMod2 = TemporalEffects::GetFrameIndexMod2();
         globals.IBLLutTextureSize = IBL::g_IBLLutSize;
