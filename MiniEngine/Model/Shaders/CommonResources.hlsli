@@ -61,6 +61,8 @@ cbuffer GlobalConstants : register(b2)
 
     uint ViewportWidth;
     uint ViewportHeight;
+    float InvViewportWidth;
+    float InvViewportHeight;
 
     uint FrameIndexMod2;
 

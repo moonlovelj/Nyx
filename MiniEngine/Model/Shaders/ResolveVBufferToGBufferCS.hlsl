@@ -217,55 +217,88 @@ BarycentricDerivs CalculateBarycentricsAndDerivs(
     return output;
 }
 
-float4 InterpolateOnly(float4 val[3], BarycentricDerivs bary)
+struct Barycentrics
 {
-    return val[0] * bary.lambda_correction.x + 
-           val[1] * bary.lambda_correction.y + 
-           val[2] * bary.lambda_correction.z;   
+    float3 Value;
+    float3 ValueDDX;
+    float3 ValueDDY;
+};
+
+/** Calculates perspective correct barycentric coordinates and partial derivatives using screen derivatives. */
+Barycentrics CalculateTriangleBarycentrics(
+    float4 clipPos[3],
+    float2 pixelPos, // 当前像素坐标
+    float4x4 viewProj,
+    float2 ViewInvSize)
+{
+    Barycentrics barycentrics;
+    const float2 PixelClip = pixelPos * ViewInvSize * float2(2, -2) + float2(-1, 1);
+
+    const float3 RcpW = rcp(float3(clipPos[0].w, clipPos[1].w, clipPos[2].w));
+    const float3 Pos0 = clipPos[0].xyz * RcpW.x;
+    const float3 Pos1 = clipPos[1].xyz * RcpW.y;
+    const float3 Pos2 = clipPos[2].xyz * RcpW.z;
+
+    const float3 Pos120X = float3(Pos1.x, Pos2.x, Pos0.x);
+    const float3 Pos120Y = float3(Pos1.y, Pos2.y, Pos0.y);
+    const float3 Pos201X = float3(Pos2.x, Pos0.x, Pos1.x);
+    const float3 Pos201Y = float3(Pos2.y, Pos0.y, Pos1.y);
+
+    const float3 C_dx = Pos201Y - Pos120Y;
+    const float3 C_dy = Pos120X - Pos201X;
+
+    const float3 C = C_dx * (PixelClip.x - Pos120X) + C_dy * (PixelClip.y - Pos120Y); // Evaluate the 3 edge functions
+    const float3 G = C * RcpW;
+
+    const float H = dot(C, RcpW);
+    const float RcpH = rcp(H);
+
+	// UVW = C * RcpW / dot(C, RcpW)
+    barycentrics.Value = G * RcpH;
+
+	// Texture coordinate derivatives:
+	// UVW = G / H where G = C * RcpW and H = dot(C, RcpW)
+	// UVW' = (G' * H - G * H') / H^2
+	// float2 TexCoordDX = UVW_dx.y * TexCoord10 + UVW_dx.z * TexCoord20;
+	// float2 TexCoordDY = UVW_dy.y * TexCoord10 + UVW_dy.z * TexCoord20;
+    const float3 G_dx = C_dx * RcpW;
+    const float3 G_dy = C_dy * RcpW;
+
+    const float H_dx = dot(C_dx, RcpW);
+    const float H_dy = dot(C_dy, RcpW);
+
+    barycentrics.ValueDDX = (G_dx * H - G * H_dx) * (RcpH * RcpH) * (2.0f * ViewInvSize.x);
+    barycentrics.ValueDDY = (G_dy * H - G * H_dy) * (RcpH * RcpH) * (-2.0f * ViewInvSize.y);
+
+    return barycentrics;
+}
+
+float4 InterpolateOnly(float4 val[3], Barycentrics barycentris)
+{
+    return val[0] * barycentris.Value.x +
+           val[1] * barycentris.Value.y +
+           val[2] * barycentris.Value.z;
 }
 
 // 属性插值并计算导数 (透视矫正链式法则)
 // val: 顶点的属性数组 (如 uv0, uv1, uv2)
 // w: 顶点的 w 数组 (clipPos.w)
 // bary: 重心数据
-Derivs InterpolateWithDerivs(float2 val[3], BarycentricDerivs bary)
+Derivs InterpolateWithDerivs(float2 val[3], Barycentrics barycentris)
 {
     Derivs d;
+    d.uv = val[0] * barycentris.Value.x +
+            val[1] * barycentris.Value.y +
+            val[2] * barycentris.Value.z;
     
-    // 属性需预除 w
-    float2 attrOverW[3];
-    attrOverW[0] = val[0] * bary.oneOverW.x;
-    attrOverW[1] = val[1] * bary.oneOverW.y;
-    attrOverW[2] = val[2] * bary.oneOverW.z;
+    d.uv_dx = val[0] * barycentris.ValueDDX.x +
+               val[1] * barycentris.ValueDDX.y +
+               val[2] * barycentris.ValueDDX.z;
+
+    d.uv_dy = val[0] * barycentris.ValueDDY.x + 
+               val[1] * barycentris.ValueDDY.y +
+               val[2] * barycentris.ValueDDY.z;
     
-     // 计算当前像素的 分子N 和 分母W
-    float W = dot(bary.lambda, bary.oneOverW);
-    float2 N = attrOverW[0] * bary.lambda.x +
-               attrOverW[1] * bary.lambda.y +
-               attrOverW[2] * bary.lambda.z;
-    
-    float invW = rcp(sign(W + 1e-30f) * max(abs(W), 1e-7f));
-    
-    d.uv = N * invW;
-   
-
-     // 计算 N 和 W 的偏导数
-    float ddx_W = dot(bary.ddx_lambda, bary.oneOverW);
-    float ddy_W = dot(bary.ddy_lambda, bary.oneOverW);
-
-    float2 ddx_N = attrOverW[0] * bary.ddx_lambda.x +
-                   attrOverW[1] * bary.ddx_lambda.y +
-                   attrOverW[2] * bary.ddx_lambda.z;
-                   
-    float2 ddy_N = attrOverW[0] * bary.ddy_lambda.x +
-                   attrOverW[1] * bary.ddy_lambda.y +
-                   attrOverW[2] * bary.ddy_lambda.z;
-
-    // 应用优化后的除法导数公式
-    // 这里的 d.uv 就是 N/W
-    d.uv_dx = (ddx_N - d.uv * ddx_W) * invW;
-    d.uv_dy = (ddy_N - d.uv * ddy_W) * invW;
-
     return d;
 }
 
@@ -324,19 +357,25 @@ void main( uint2 DTid : SV_DispatchThreadID )
             worldPos[1] = mul(WorldMatrix, localPosition1).xyz;
             worldPos[2] = mul(WorldMatrix, localPosition2).xyz;
 
-            BarycentricDerivs barycentricDerivs = CalculateBarycentricsAndDerivs(worldPos, DTid + float2(0.5, 0.5),
-                ViewProjMatrix, float2(ViewportWidth, ViewportHeight));
+            float4 clipPos[3];
+            clipPos[0] = mul(ViewProjMatrix, float4(worldPos[0], 1.0f));
+            clipPos[1] = mul(ViewProjMatrix, float4(worldPos[1], 1.0f));
+            clipPos[2] = mul(ViewProjMatrix, float4(worldPos[2], 1.0f));
+            
+            Barycentrics barycentris =
+                CalculateTriangleBarycentrics(clipPos, DTid + float2(0.5, 0.5),
+                ViewProjMatrix, float2(InvViewportWidth, InvViewportHeight));
 
-            float3 worldPosition = worldPos[0] * barycentricDerivs.lambda_correction.x +
-                                  worldPos[1] * barycentricDerivs.lambda_correction.y +
-                                  worldPos[2] * barycentricDerivs.lambda_correction.z;
+            float3 worldPosition = worldPos[0] * barycentris.Value.x +
+                                  worldPos[1] * barycentris.Value.y +
+                                  worldPos[2] * barycentris.Value.z;
             
             float4 normals[3] = {
                 float4(vertexAttrs[0].normal, 0),
                 float4(vertexAttrs[1].normal, 0),
                 float4(vertexAttrs[2].normal, 0)
             };
-            float3 normal = InterpolateOnly(normals, barycentricDerivs).xyz;
+            float3 normal = InterpolateOnly(normals, barycentris).xyz;
 
             float4 tangents[3] = {
                 vertexAttrs[0].tangent,
@@ -344,21 +383,21 @@ void main( uint2 DTid : SV_DispatchThreadID )
                 vertexAttrs[2].tangent
             };
             
-            float4 tangent = InterpolateOnly(tangents, barycentricDerivs);
+            float4 tangent = InterpolateOnly(tangents, barycentris);
             float2 uvs0[3] = {
                 vertexAttrs[0].uv0,
                 vertexAttrs[1].uv0,
                 vertexAttrs[2].uv0
             };
             
-            Derivs derivs0 = InterpolateWithDerivs(uvs0, barycentricDerivs);
+            Derivs derivs0 = InterpolateWithDerivs(uvs0, barycentris);
 
             float2 uvs1[3] = {
                 vertexAttrs[0].uv1,
                 vertexAttrs[1].uv1,
                 vertexAttrs[2].uv1
             };
-            Derivs derivs1 = InterpolateWithDerivs(uvs1, barycentricDerivs);
+            Derivs derivs1 = InterpolateWithDerivs(uvs1, barycentris);
             
             vsOutput.normal = mul(WorldIT, normal).xyz;
             vsOutput.tangent = float4(mul(WorldIT, tangent.xyz).xyz, tangent.w);
@@ -369,9 +408,11 @@ void main( uint2 DTid : SV_DispatchThreadID )
             vsOutput.uv1_dx = derivs1.uv_dx;
             vsOutput.uv1_dy = derivs1.uv_dy;
             
-            float3 viewDir = normalize(ViewerPos - worldPosition);
-            bool isFrontFacing = dot(viewDir, vsOutput.normal) >= 0.0;
-            MaterialProperties MatProps = GetMaterialProperties(vsOutput, meshletHeader, isFrontFacing);
+            float3x3 worldRotationScale = (float3x3) meshInstance.WorldMatrix;
+            float detWorld = determinant(worldRotationScale);
+            bool isWorldFlipped = detWorld < 0.0;
+            bool logicalFrontFacing = IsFrontFacing(clipPos[0], clipPos[1], clipPos[2]) ^ isWorldFlipped;
+            MaterialProperties MatProps = GetMaterialProperties(vsOutput, meshletHeader, logicalFrontFacing);
             SceneColorUAV[DTid] = float4(MatProps.Emissive, 1.0f);
             GBufferAUAV[DTid] = float4(MatProps.Normal, 1.0);
             GBufferBUAV[DTid] = MatProps.BaseColor;

@@ -252,42 +252,31 @@ void Graphics::Initialize(bool RequireDXRSupport)
 
     if (!bUseWarpDriver)
     {
-        SIZE_T MaxSize = 0;
+		ComPtr<IDXGIFactory6> factory6;
+		CreateDXGIFactory1(IID_PPV_ARGS(&factory6));
 
-        for (uint32_t Idx = 0; DXGI_ERROR_NOT_FOUND != dxgiFactory->EnumAdapters1(Idx, &pAdapter); ++Idx)
-        {
-            DXGI_ADAPTER_DESC1 desc;
+		for (UINT i = 0;
+			factory6->EnumAdapterByGpuPreference(
+				i,
+				DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+				IID_PPV_ARGS(&pAdapter)) != DXGI_ERROR_NOT_FOUND;
+			++i)
+		{
+			DXGI_ADAPTER_DESC1 desc;
             pAdapter->GetDesc1(&desc);
 
-            // Is a software adapter?
-            if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
-                continue;
+			if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
+				continue;
 
-            // Is this the desired vendor desired?
-            if (desiredVendor != 0 && desiredVendor != desc.VendorId)
-                continue;
-
-            // Can create a D3D12 device?
-            if (FAILED(D3D12CreateDevice(pAdapter.Get(), D3D_FEATURE_LEVEL_11_0, MY_IID_PPV_ARGS(&pDevice))))
-                continue;
-
-            // Does support DXR if required?
-            if (RequireDXRSupport && !IsDirectXRaytracingSupported(pDevice.Get()))
-                continue;
-
-            // By default, search for the adapter with the most memory because that's usually the dGPU.
-            if (desc.DedicatedVideoMemory < MaxSize)
-                continue;
-
-            MaxSize = desc.DedicatedVideoMemory;
-
-            if (g_Device != nullptr)
-                g_Device->Release();
-
-            g_Device = pDevice.Detach();
+			if (FAILED(D3D12CreateDevice(
+                pAdapter.Get(),
+				D3D_FEATURE_LEVEL_11_0,
+				IID_PPV_ARGS(&g_Device))))
+				continue;
 
             Utility::Printf(L"Selected GPU:  %s (%u MB)\n", desc.Description, desc.DedicatedVideoMemory >> 20);
-        }
+			break;
+		}
     }
 
     if (RequireDXRSupport && !g_Device)

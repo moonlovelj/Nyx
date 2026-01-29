@@ -92,4 +92,9 @@ VertexAttributes LoadVertexAttributes(
     return attrs;
 }
 
+bool IsFrontFacing(float4 ha, float4 hb, float4 hc)
+{
+    return determinant(float3x3(ha.xyw, hb.xyw, hc.xyw)) >= 0;
+}
+
 #endif

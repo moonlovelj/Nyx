@@ -93,6 +93,8 @@ __declspec(align(256)) struct GlobalConstants
     uint32_t FirstLightIndex[4];
     uint32_t ViewportWidth;
     uint32_t ViewportHeight;
+	float InvViewportWidth;
+	float InvViewportHeight;
     uint32_t FrameIndexMod2;
     uint32_t IBLLutTextureSize;
     uint32_t IBLSpecularLDMapMipCount;

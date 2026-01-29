@@ -3,7 +3,7 @@
 #include "DataCodec.hlsli"
 #include "GeometryCommon.hlsli"
 
-#define MAX_VERTS 256
+#define MAX_VERTS 128
 #define MAX_PRIMS 128
 #define MS_GROUP_SIZE 128
 
