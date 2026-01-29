@@ -83,8 +83,10 @@ void main(
     // 顶点处理 (Vertex Processing)
     // --------------------------------------------------------
 
-    for (uint vertexID = gtid; vertexID < vertexCount; vertexID += MS_GROUP_SIZE)
+    [unroll]
+    for (uint i = 0; i < MAX_VERTS; i += MS_GROUP_SIZE)
     {
+        const uint vertexID = i + gtid;
         if (vertexID < vertexCount)
         {
             uint vertexOffset = vertexByteOffset + vertexStride * vertexID;
@@ -154,8 +156,10 @@ void main(
     // --------------------------------------------------------
     // 图元处理 (Primitive Processing)
     // --------------------------------------------------------
-    for (uint primitiveID = gtid; primitiveID < primitiveCount; primitiveID += MS_GROUP_SIZE)
+    [unroll]
+    for (uint j = 0; j < MAX_PRIMS; j += MS_GROUP_SIZE)
     {
+        const uint primitiveID = j + gtid;
         if (primitiveID < primitiveCount)
         {
             uint3 triIndices = LoadAndUnpackTriangle(geometryChunksBuffer, indexByteOffset, primitiveID);
