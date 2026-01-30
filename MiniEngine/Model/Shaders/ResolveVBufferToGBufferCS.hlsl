@@ -420,27 +420,30 @@ void main( uint2 DTid : SV_DispatchThreadID )
             GBufferDUAV[DTid] = float4(0, 0, 0, ViewMode);
             if (ViewMode == VIEW_MODE_SHOW_MESHLET_LOD)
             {
-                GBufferDUAV[DTid].rgb = Uint32ToColorR16G16B16(meshletHeader.GetLODLevel());
+                if (meshletHeader.GetLODLevel() == 0)
+                    GBufferDUAV[DTid].rgb = float3(0.8, 0.8, 0.8);
+                else
+                    GBufferDUAV[DTid].rgb = MakeDebugColor(meshletHeader.GetLODLevel(), 0x1f3d5b79u);
             }
             else if (ViewMode == VIEW_MODE_SHOW_MESHLET_ID)
             {
-                GBufferDUAV[DTid].rgb = Uint32ToColorR16G16B16(vsOutput.meshletIndex);
+                GBufferDUAV[DTid].rgb = MakeDebugColor(vsOutput.meshletIndex, 0x6a09e667u);
             }
             else if (ViewMode == VIEW_MODE_SHOW_TRIANGLE)
             {
-                GBufferDUAV[DTid].rgb = Uint32ToColorR16G16B16(primitiveIndex);
+                GBufferDUAV[DTid].rgb = MakeDebugColor(primitiveIndex, 0xbb67ae85u);
             }
             else if (ViewMode == VIEW_MODE_SHOW_MESH_ID)
             {
-                GBufferDUAV[DTid].rgb = Uint32ToColorR16G16B16(inst.MeshBufferIdx);
+                GBufferDUAV[DTid].rgb = MakeDebugColor(inst.MeshBufferIdx, 0x3c6ef372u);
             }
             else if (ViewMode == VIEW_MODE_SHOW_INSTANCE_ID)
             {
-                GBufferDUAV[DTid].rgb = Uint32ToColorR16G16B16(payload.InstanceIndex);
+                GBufferDUAV[DTid].rgb = MakeDebugColor(payload.InstanceIndex, 0xa54ff53au);
             }
             else if (ViewMode == VIEW_MODE_SHOW_MATERIAL_ID)
             {
-                GBufferDUAV[DTid].rgb = Uint32ToColorR16G16B16(meshletHeader.GetMaterialBufferIndex());
+                GBufferDUAV[DTid].rgb = MakeDebugColor(meshletHeader.GetMaterialBufferIndex(), 0x510e527fu);
             }
             else
             {

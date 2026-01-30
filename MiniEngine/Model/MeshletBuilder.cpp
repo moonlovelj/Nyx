@@ -416,10 +416,8 @@ std::vector<uint32_t> MeshletBuilder::GroupMeshlets(
 		float acc[4]{};
 		for (uint32_t mid : g.MeshletIDs)
 		{
-			float bs[4];
-			ComputeMeshletSphere(buildArgs, current[mid], bs);
-			if (first) { std::copy(bs, bs + 4, acc); first = false; }
-			else MergeSphere(acc, bs, acc);
+			if (first) { std::memcpy(acc, current[mid].BoundSphere, sizeof(float) * 4); first = false; }
+			else MergeSphere(acc, current[mid].BoundSphere, acc);
 		}
 		std::copy(acc, acc + 4, g.GroupSphere);
 
@@ -612,12 +610,34 @@ bool MeshletBuilder::SimplifyGroup(
 		options,
 		&resultError);
 
-	simplifiedLocal.resize(newCount);
-
-	// 简化失败判定
 	float ratio = float(newCount) / float(localIndices.size());
+	if (ratio > buildArgs.settings.SimplificationFailurePercentage && 
+		buildArgs.settings.bSimplifyFallbackSloppy)
+	{
+		float sloppyError = 0.0f;
+		size_t sloppyCount = meshopt_simplifySloppy(
+			simplifiedLocal.data(),
+			localIndices.data(), localIndices.size(),
+			localPositions.data(), localVertexCount, sizeof(float) * 3,
+			localLocks.empty() ? nullptr : localLocks.data(),
+			targetIndexCount,
+			FLT_MAX,
+			&sloppyError);
+		float sloppyRatio = float(sloppyCount) / float(localIndices.size());
+		if (sloppyRatio <= buildArgs.settings.SimplificationFailurePercentage)
+		{
+			float errorScale = meshopt_simplifyScale(localPositions.data(), localVertexCount, sizeof(float) * 3);
+			newCount = sloppyCount;
+			resultError = sloppyError * errorScale * buildArgs.settings.SimplifySloppyErrorFactor;
+			ratio = sloppyRatio;
+		}
+		
+	}
+
 	if (ratio > buildArgs.settings.SimplificationFailurePercentage)
 		return false;
+
+	simplifiedLocal.resize(newCount);
 
 	outError = resultError;
 
