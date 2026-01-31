@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -44,7 +44,12 @@ float3 ScaleBuffer(float2 uv)
 [RootSignature(Present_RootSig)]
 float3 main( float4 position : SV_Position, float2 uv : TexCoord0 ) : SV_Target0
 {
-    float3 MainColor = ApplyREC2084Curve( saturate(ScaleBuffer(uv) / 10000.0) );
+    float3 scene = ScaleBuffer(uv);
+    scene = REC709toREC2020(scene);
+    float3 L = scene * PaperWhiteRatio;
+    float maxN = MaxBrightness / 10000.0;
+    L = L / (1.0 + L / maxN);
+    float3 MainColor = ApplyREC2084Curve(clamp(L, 0.0, maxN));
 
     float4 OverlayColor = OverlayBuffer[(int2)position.xy];
     OverlayColor.rgb = RemoveSRGBCurve(OverlayColor.rgb);

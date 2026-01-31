@@ -36,6 +36,7 @@
 #include <execution>
 #include <omp.h>
 #include <atomic>
+#include <limits>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -903,24 +904,59 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
     FileHeader header;
     std::memcpy(header.id, "MINI", 4);
     header.version = CURRENT_MINI_FILE_VERSION;
-    header.numNodes = (uint32_t)data.m_SceneGraph.size();
-    header.numMeshes = (uint32_t)data.m_Meshes.size();
-    header.numMaterials = (uint32_t)data.m_MaterialConstants.size();
-    header.numTextures = (uint32_t)data.m_TextureNames.size();
+	auto CleanupTempFiles = [&]()
+		{
+			if (streamCtx.TempFilesToClean.empty()) return;
+			Utility::Printf("Deleting temp files...\n");
+			#pragma omp parallel for schedule(dynamic)
+			for (int i = 0; i < (int)streamCtx.TempFilesToClean.size(); ++i)
+			{
+				_wremove(streamCtx.TempFilesToClean[i].c_str());
+			}
+			streamCtx.TempFilesToClean.clear();
+		};
+
+	auto CheckedU32 = [&](size_t value, const char* label, uint32_t& out) -> bool
+		{
+			if (value > std::numeric_limits<uint32_t>::max())
+			{
+				Utility::Printf("Error: %s count overflow.\n", label);
+				return false;
+			}
+			out = static_cast<uint32_t>(value);
+			return true;
+		};
+
+	if (!CheckedU32(data.m_SceneGraph.size(), "Scene graph node", header.numNodes)) { CleanupTempFiles(); return false; }
+	if (!CheckedU32(data.m_Meshes.size(), "Mesh", header.numMeshes)) { CleanupTempFiles(); return false; }
+	if (!CheckedU32(data.m_MaterialConstants.size(), "Material", header.numMaterials)) { CleanupTempFiles(); return false; }
+	if (!CheckedU32(data.m_TextureNames.size(), "Texture", header.numTextures)) { CleanupTempFiles(); return false; }
 
 	// Cluster 数据
-	header.groupCount = (uint32_t)data.m_GroupInfos.size();
-	header.hierarchyNodeCount = (uint32_t)data.m_Nodes.size();
-	header.pageCount = (uint32_t)data.m_Pages.size();
+	if (!CheckedU32(data.m_GroupInfos.size(), "Group", header.groupCount)) { CleanupTempFiles(); return false; }
+	if (!CheckedU32(data.m_Nodes.size(), "Hierarchy node", header.hierarchyNodeCount)) { CleanupTempFiles(); return false; }
+	if (!CheckedU32(data.m_Pages.size(), "Page", header.pageCount)) { CleanupTempFiles(); return false; }
 
-    header.stringTableSize = 0;
-    for (const std::string& str : data.m_TextureNames)
-        header.stringTableSize += (uint32_t)str.size() + 1;
-    header.keyFrameDataSize = (uint32_t)data.m_AnimationKeyFrameData.size();
-    header.numAnimationCurves = (uint32_t)data.m_AnimationCurves.size();
-    header.numAnimations = (uint32_t)data.m_Animations.size();
-    header.numJoints = (uint32_t)data.m_JointIndices.size();
-    header.numCameras = (uint32_t)data.m_Cameras.size();
+	uint64_t stringTableSize = 0;
+	for (const std::string& str : data.m_TextureNames)
+	{
+		const uint64_t add = static_cast<uint64_t>(str.size()) + 1u;
+		if (stringTableSize > std::numeric_limits<uint32_t>::max() - add)
+		{
+			Utility::Printf("Error: Texture string table size overflow.\n");
+			CleanupTempFiles();
+			return false;
+		}
+		stringTableSize += add;
+	}
+	header.stringTableSize = static_cast<uint32_t>(stringTableSize);
+
+	if (!CheckedU32(data.m_AnimationCurves.size(), "Animation curve", header.numAnimationCurves)) { CleanupTempFiles(); return false; }
+	if (!CheckedU32(data.m_Animations.size(), "Animation", header.numAnimations)) { CleanupTempFiles(); return false; }
+	if (!CheckedU32(data.m_JointIndices.size(), "Joint", header.numJoints)) { CleanupTempFiles(); return false; }
+	if (!CheckedU32(data.m_Cameras.size(), "Camera", header.numCameras)) { CleanupTempFiles(); return false; }
+	if (!CheckedU32(data.m_AnimationKeyFrameData.size(), "Animation key frame data", header.keyFrameDataSize)) { CleanupTempFiles(); return false; }
+
     header.boundingSphere[0] = data.m_BoundingSphere.GetCenter().GetX();
     header.boundingSphere[1] = data.m_BoundingSphere.GetCenter().GetY();
     header.boundingSphere[2] = data.m_BoundingSphere.GetCenter().GetZ();
@@ -936,36 +972,68 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	// 计算 Header 及元数据总大小
 	// -------------------------------------------------------------
 	uint64_t metadataSize = sizeof(FileHeader);
-	metadataSize += header.numNodes * sizeof(GraphNode);
+	auto AddSize = [&](uint64_t add, const char* label) -> bool
+		{
+			if (add > std::numeric_limits<uint64_t>::max() - metadataSize)
+			{
+				Utility::Printf("Error: %s size overflow.\n", label);
+				return false;
+			}
+			metadataSize += add;
+			return true;
+		};
+
+	if (!AddSize(static_cast<uint64_t>(header.numNodes) * sizeof(GraphNode), "Scene graph")) { CleanupTempFiles(); return false; }
 	for (const Mesh* mesh : data.m_Meshes)
-		metadataSize += sizeof(Mesh) + sizeof(Mesh::Draw) * (mesh->numDraws - 1);
-	metadataSize += header.numMaterials * sizeof(MaterialConstantData);
-	metadataSize += header.numMaterials * sizeof(MaterialTextureData);
-	metadataSize += header.stringTableSize; // Texture Names
-	metadataSize += header.numTextures * sizeof(uint8_t); // Options
+	{
+		if (!mesh || mesh->numDraws == 0)
+		{
+			Utility::Printf("Error: Mesh with zero draws encountered during save.\n");
+			CleanupTempFiles();
+			return false;
+		}
+		const uint64_t meshSize = sizeof(Mesh) + static_cast<uint64_t>(mesh->numDraws - 1) * sizeof(Mesh::Draw);
+		if (!AddSize(meshSize, "Mesh data")) { CleanupTempFiles(); return false; }
+	}
+	if (!AddSize(static_cast<uint64_t>(header.numMaterials) * sizeof(MaterialConstantData), "Material constants")) { CleanupTempFiles(); return false; }
+	if (!AddSize(static_cast<uint64_t>(header.numMaterials) * sizeof(MaterialTextureData), "Material textures")) { CleanupTempFiles(); return false; }
+	if (!AddSize(header.stringTableSize, "Texture names")) { CleanupTempFiles(); return false; }
+	if (!AddSize(static_cast<uint64_t>(header.numTextures) * sizeof(uint8_t), "Texture options")) { CleanupTempFiles(); return false; }
 	if (header.numAnimations > 0) {
-		metadataSize += header.keyFrameDataSize;
-		metadataSize += header.numAnimationCurves * sizeof(AnimationCurve);
-		metadataSize += header.numAnimations * sizeof(AnimationSet);
+		if (!AddSize(header.keyFrameDataSize, "Animation keyframes")) { CleanupTempFiles(); return false; }
+		if (!AddSize(static_cast<uint64_t>(header.numAnimationCurves) * sizeof(AnimationCurve), "Animation curves")) { CleanupTempFiles(); return false; }
+		if (!AddSize(static_cast<uint64_t>(header.numAnimations) * sizeof(AnimationSet), "Animation sets")) { CleanupTempFiles(); return false; }
 	}
 	if (header.numJoints) {
-		metadataSize += header.numJoints * sizeof(uint16_t);
-		metadataSize += header.numJoints * sizeof(Matrix4);
+		if (!AddSize(static_cast<uint64_t>(header.numJoints) * sizeof(uint16_t), "Joint indices")) { CleanupTempFiles(); return false; }
+		if (!AddSize(static_cast<uint64_t>(header.numJoints) * sizeof(Matrix4), "Joint matrices")) { CleanupTempFiles(); return false; }
 	}
 	if (header.numCameras) {
-		metadataSize += header.numCameras * sizeof(CameraData);
+		if (!AddSize(static_cast<uint64_t>(header.numCameras) * sizeof(CameraData), "Cameras")) { CleanupTempFiles(); return false; }
 	}
-	if (header.groupCount > 0) metadataSize += header.groupCount * sizeof(GroupMetadata);
-	if (header.hierarchyNodeCount > 0) metadataSize += header.hierarchyNodeCount * sizeof(HierarchyNode);
-	if (header.pageCount > 0) metadataSize += header.pageCount * sizeof(PageMetadata);
-	if (header.pageCount > 0) metadataSize += header.pageCount * sizeof(PageCompressionInfo);
+	if (header.groupCount > 0 && !AddSize(static_cast<uint64_t>(header.groupCount) * sizeof(GroupMetadata), "Group metadata")) { CleanupTempFiles(); return false; }
+	if (header.hierarchyNodeCount > 0 && !AddSize(static_cast<uint64_t>(header.hierarchyNodeCount) * sizeof(HierarchyNode), "Hierarchy nodes")) { CleanupTempFiles(); return false; }
+	if (header.pageCount > 0 && !AddSize(static_cast<uint64_t>(header.pageCount) * sizeof(PageMetadata), "Page metadata")) { CleanupTempFiles(); return false; }
+	if (header.pageCount > 0 && !AddSize(static_cast<uint64_t>(header.pageCount) * sizeof(PageCompressionInfo), "Page compression info")) { CleanupTempFiles(); return false; }
 
-	// 计算对齐
-	const uint64_t alignedOffset = Math::AlignUp(metadataSize, Renderer::kPageSizeInBytes);
+	// 计算 Geometry Blob 偏移
 	const uint32_t pageSize = Renderer::kPageSizeInBytes;
+	const uint64_t geometryBlobOffset = metadataSize;
+	if (streamCtx.TotalGeometrySize > std::numeric_limits<uint64_t>::max() - (pageSize - 1))
+	{
+		Utility::Printf("Error: Geometry size alignment overflow.\n");
+		CleanupTempFiles();
+		return false;
+	}
 	const uint64_t uncompressedSize = Math::AlignUp(streamCtx.TotalGeometrySize, (size_t)pageSize);
+	if (streamCtx.TotalGeometrySize > 0 && header.pageCount == 0)
+	{
+		Utility::Printf("Error: Geometry data exists but page count is zero.\n");
+		CleanupTempFiles();
+		return false;
+	}
 
-	header.geometryBlobOffset = alignedOffset;
+	header.geometryBlobOffset = geometryBlobOffset;
 	header.geometryBlobSize = 0;
 	header.geometryUncompressedSize = uncompressedSize;
 	header.geometryCompressionType = Renderer::kGeometryCompressionLZ4;
@@ -977,21 +1045,85 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	// -------------------------------------------------------------
 	// 写入 Header + Metadata (预留压缩表)
 	// -------------------------------------------------------------
-	std::fstream outFile(filePath, std::ios::out | std::ios::binary | std::ios::trunc);
-	if (!outFile) return false;
+	uint64_t maxCompressedSize = 0;
+	if (header.pageCount > 0)
+	{
+		const uint64_t maxPerPage = static_cast<uint64_t>(LZ4_compressBound((int)pageSize));
+		if (maxPerPage == 0 || header.pageCount > (std::numeric_limits<uint64_t>::max() / maxPerPage))
+		{
+			Utility::Printf("Error: Compressed geometry size overflow.\n");
+			CleanupTempFiles();
+			return false;
+		}
+		maxCompressedSize = maxPerPage * header.pageCount;
+	}
+
+	HANDLE hFile = INVALID_HANDLE_VALUE;
+	HANDLE hMapping = NULL;
+	uint8_t* pMappedData = nullptr;
+
+	auto CleanupFileHandles = [&]()
+		{
+			if (pMappedData) UnmapViewOfFile(pMappedData);
+			if (hMapping) CloseHandle(hMapping);
+			if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
+			pMappedData = nullptr;
+			hMapping = NULL;
+			hFile = INVALID_HANDLE_VALUE;
+		};
+
+	hFile = CreateFileW(filePath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) { CleanupTempFiles(); return false; }
+
+	// 预扩展文件大小
+	if (geometryBlobOffset > std::numeric_limits<uint64_t>::max() - maxCompressedSize)
+	{
+		Utility::Printf("Error: Final file size overflow.\n");
+		CleanupFileHandles();
+		CleanupTempFiles();
+		return false;
+	}
+	const uint64_t finalFileSize = geometryBlobOffset + maxCompressedSize; // allocate worst-case size
+	LARGE_INTEGER liSize;
+	liSize.QuadPart = finalFileSize;
+	if (!SetFilePointerEx(hFile, liSize, NULL, FILE_BEGIN) || !SetEndOfFile(hFile))
+	{
+		Utility::Printf("Error: Failed to resize output file.\n");
+		CleanupFileHandles();
+		CleanupTempFiles();
+		return false;
+	}
+
+	hMapping = CreateFileMappingW(hFile, NULL, PAGE_READWRITE, 0, 0, NULL);
+	if (!hMapping) {
+		CleanupFileHandles();
+		CleanupTempFiles();
+		return false;
+	}
+
+	pMappedData = (uint8_t*)MapViewOfFile(hMapping, FILE_MAP_WRITE, 0, 0, 0);
+	if (!pMappedData) {
+		CleanupFileHandles();
+		CleanupTempFiles();
+		return false;
+	}
 
 	// 写入 Header 和 Metadata
 	// -------------------------------------------------------------
-	auto Write = [&](const void* src, size_t size) {
-		outFile.write(reinterpret_cast<const char*>(src), size);
+	uint8_t* pCursor = pMappedData;
+	auto Write = [&](const void* src, size_t size) 
+		{
+			std::memcpy(pCursor, src, size);
+			pCursor += size;
 		};
+
 	auto WriteZeros = [&](uint64_t size) {
 		constexpr size_t kZeroChunk = 64 * 1024;
 		static const std::vector<char> kZeros(kZeroChunk, 0);
 		while (size > 0)
 		{
 			const size_t chunk = (size_t)std::min<uint64_t>(size, kZeros.size());
-			outFile.write(kZeros.data(), chunk);
+			Write(kZeros.data(), chunk);
 			size -= chunk;
 		}
 		};
@@ -1029,19 +1161,19 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	uint64_t pageCompressionInfoOffset = 0;
 	if (header.pageCount > 0)
 	{
-		pageCompressionInfoOffset = (uint64_t)outFile.tellp();
+		pageCompressionInfoOffset = (uint64_t)(pCursor - pMappedData);
 		WriteZeros(header.pageCount * sizeof(PageCompressionInfo));
 	}
 
-	// Zero padding until alignedOffset
-	const uint64_t currentOffset = (uint64_t)outFile.tellp();
-	if (currentOffset < alignedOffset)
+	// Verify metadata size matches expected blob offset
+	const uint64_t currentOffset = (uint64_t)(pCursor - pMappedData);
+	if (currentOffset != geometryBlobOffset)
 	{
-		WriteZeros(alignedOffset - currentOffset);
+		Utility::Printf("Error: Metadata size mismatch.\n");
+		CleanupFileHandles();
+		CleanupTempFiles();
+		return false;
 	}
-
-	outFile.flush();
-	outFile.close();
 
 	// -------------------------------------------------------------
 	// 并行压缩 Geometry Pages (低内存占用，直接写盘)
@@ -1049,6 +1181,9 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	std::atomic<uint64_t> compressedWriteOffset{ 0 };
 	if (streamCtx.TotalGeometrySize > 0)
 	{
+		std::atomic<bool> hadError{ false };
+		uint8_t* pBlobBase = pMappedData + geometryBlobOffset;
+
 		struct PageJobSpan
 		{
 			uint32_t JobIndex;
@@ -1059,6 +1194,7 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 		std::vector<std::vector<PageJobSpan>> pageJobs(pageCount);
 
 		uint64_t runningOffset = 0;
+		bool jobMapError = false;
 		for (uint32_t jobIndex = 0; jobIndex < streamCtx.PendingWrites.size(); ++jobIndex)
 		{
 			const auto& job = streamCtx.PendingWrites[jobIndex];
@@ -1068,20 +1204,22 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 			{
 				pageJobs[pageIdx].push_back({ jobIndex, offsetInPage });
 			}
+			else
+			{
+				Utility::Printf("Error: Pending write %u exceeds page bounds.\n", jobIndex);
+				jobMapError = true;
+				break;
+			}
 			runningOffset += job.SizeBytes;
 		}
+		if (jobMapError || runningOffset != streamCtx.TotalGeometrySize)
+		{
+			Utility::Printf("Error: Pending write size mismatch.\n");
+			CleanupFileHandles();
+			CleanupTempFiles();
+			return false;
+		}
 
-		HANDLE hWriteFile = CreateFileW(
-			filePath.c_str(),
-			GENERIC_WRITE,
-			0,
-			NULL,
-			OPEN_EXISTING,
-			FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
-			NULL);
-		if (hWriteFile == INVALID_HANDLE_VALUE) return false;
-
-		std::atomic<bool> compressFailed = false;
 		std::atomic<uint32_t> completedPages = 0;
 		const uint32_t reportStep = std::max(1u, pageCount / 20);
 
@@ -1089,11 +1227,10 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 		#pragma omp parallel for schedule(dynamic)
 		for (int pageIdx = 0; pageIdx < (int)pageCount; ++pageIdx)
 		{
-			if (compressFailed.load(std::memory_order_relaxed))
-				continue;
-
+			if (hadError.load(std::memory_order_relaxed)) continue;
 			std::vector<uint8_t> pageBuffer(pageSize, 0);
 
+			bool pageError = false;
 			for (const auto& span : pageJobs[pageIdx])
 			{
 				const auto& job = streamCtx.PendingWrites[span.JobIndex];
@@ -1106,11 +1243,21 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 				else
 				{
 					std::ifstream localStream(job.TempSourcePath, std::ios::in | std::ios::binary);
-					if (!localStream) { compressFailed.store(true, std::memory_order_relaxed); break; }
+					if (!localStream) 
+					{ 
+						Utility::Printf("Error: Failed to open temp file %s for reading.\n", Utility::WideStringToUTF8(job.TempSourcePath).c_str());
+						pageError = true;
+						break; 
+					}
 
 					localStream.seekg(job.SourceOffset);
 					localStream.read(reinterpret_cast<char*>(pDest), job.SizeBytes);
-					if (!localStream) { compressFailed.store(true, std::memory_order_relaxed); break; }
+					if (!localStream) 
+					{ 
+						Utility::Printf("Error: Failed to read data from temp file %s.\n", Utility::WideStringToUTF8(job.TempSourcePath).c_str());
+						pageError = true;
+						break; 
+					}
 
 					if (job.BaseGroupIndexPatchValue > 0)
 					{
@@ -1127,8 +1274,11 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 				}
 			}
 
-			if (compressFailed.load(std::memory_order_relaxed))
+			if (pageError)
+			{
+				hadError.store(true, std::memory_order_relaxed);
 				continue;
+			}
 
 			std::vector<char> compressed((size_t)LZ4_compressBound((int)pageSize));
 			const int compressedSize = LZ4_compress_default(
@@ -1138,36 +1288,22 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 				(int)compressed.size());
 			if (compressedSize <= 0)
 			{
-				compressFailed.store(true, std::memory_order_relaxed);
+				Utility::Printf("Error: LZ4 compression failed on page %d.\n", pageIdx);
+				hadError.store(true, std::memory_order_relaxed);
 				continue;
 			}
 
 			const uint64_t pageOffset = compressedWriteOffset.fetch_add((uint64_t)compressedSize);
+			if (pageOffset + (uint64_t)compressedSize > maxCompressedSize)
+			{
+				Utility::Printf("Error: Compressed data exceeds reserved size on page %d.\n", pageIdx);
+				hadError.store(true, std::memory_order_relaxed);
+				continue;
+			}
 			pageCompressionInfos[pageIdx].CompressedOffset = pageOffset;
 			pageCompressionInfos[pageIdx].CompressedSize = (uint32_t)compressedSize;
 
-			OVERLAPPED ov = {};
-			const uint64_t fileOffset = alignedOffset + pageOffset;
-			ov.Offset = (DWORD)(fileOffset & 0xFFFFFFFF);
-			ov.OffsetHigh = (DWORD)(fileOffset >> 32);
-
-			DWORD bytesWritten = 0;
-			if (!WriteFile(hWriteFile, compressed.data(), (DWORD)compressedSize, NULL, &ov))
-			{
-				const DWORD err = GetLastError();
-				if (err != ERROR_IO_PENDING)
-				{
-					compressFailed.store(true, std::memory_order_relaxed);
-					continue;
-				}
-			}
-
-			if (!GetOverlappedResult(hWriteFile, &ov, &bytesWritten, TRUE) ||
-				bytesWritten != (DWORD)compressedSize)
-			{
-				compressFailed.store(true, std::memory_order_relaxed);
-				continue;
-			}
+			std::memcpy(pBlobBase + pageOffset, compressed.data(), compressedSize);
 
 			const uint32_t done = ++completedPages;
 			if ((done % reportStep) == 0 || done == pageCount)
@@ -1177,15 +1313,13 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 			}
 		}
 
-		const uint64_t finalCompressedSize = compressedWriteOffset.load();
-		LARGE_INTEGER liSize;
-		liSize.QuadPart = alignedOffset + finalCompressedSize;
-		SetFilePointerEx(hWriteFile, liSize, NULL, FILE_BEGIN);
-		SetEndOfFile(hWriteFile);
-
-		CloseHandle(hWriteFile);
-
-		if (compressFailed.load(std::memory_order_relaxed)) { return false; }
+		if (hadError.load(std::memory_order_relaxed))
+		{
+			Utility::Printf("Error: Geometry compression failed. Aborting save.\n");
+			CleanupFileHandles();
+			CleanupTempFiles();
+			return false;
+		}
 	}
 
 	header.geometryBlobSize = compressedWriteOffset.load();
@@ -1193,28 +1327,39 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	Utility::Printf("Total compressed geometry size: %llu MB\n", compressedWriteOffset.load() / (1024 * 1024));
 
 	// 回写 Header 和压缩表
-	outFile.clear();
-	outFile.open(filePath, std::ios::in | std::ios::out | std::ios::binary);
-	if (!outFile) return false;
-	outFile.seekp(0, std::ios::beg);
+	pCursor = pMappedData;
 	Write(&header, sizeof(FileHeader));
 	if (header.pageCount > 0)
 	{
-		outFile.seekp(pageCompressionInfoOffset, std::ios::beg);
+		pCursor = pMappedData + pageCompressionInfoOffset;
 		Write(pageCompressionInfos.data(), header.pageCount * sizeof(PageCompressionInfo));
 	}
 
-	outFile.flush();
-	outFile.close();
+	if (!FlushViewOfFile(pMappedData, 0))
+	{
+		Utility::Printf("Failed to flush view of file: %d\n", GetLastError());
+	}
+
+	UnmapViewOfFile(pMappedData);
+	pMappedData = nullptr;
+	CloseHandle(hMapping);
+	hMapping = NULL;
+
+	LARGE_INTEGER finalliSize;
+	finalliSize.QuadPart = geometryBlobOffset + compressedWriteOffset.load();
+	if (!SetFilePointerEx(hFile, finalliSize, NULL, FILE_BEGIN)) {
+		Utility::Printf("SetFilePointerEx failed: %lu\n", GetLastError());
+	}
+	if (!SetEndOfFile(hFile)) {
+		Utility::Printf("SetEndOfFile failed: %lu\n", GetLastError());
+	}
+
+	FlushFileBuffers(hFile);
+
+	CleanupFileHandles();
 
 	// 清理临时文件
-	Utility::Printf("Deleting temp files...\n");
-	#pragma omp parallel for schedule(dynamic)
-	for(int i = 0; i < (int)streamCtx.TempFilesToClean.size(); ++i)
-	{
-		_wremove(streamCtx.TempFilesToClean[i].c_str());
-	}
-	streamCtx.TempFilesToClean.clear();
+	CleanupTempFiles();
 
 	Utility::Printf("Build geometry result:\n");
 	Utility::Printf("Group count: %d\n", header.groupCount);
