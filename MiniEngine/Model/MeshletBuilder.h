@@ -23,7 +23,8 @@ struct MeshletBuildSettings
 
 	// 简化目标与失败阈值
 	float TargetSimplifyRatio = 0.5f;
-	float SimplificationFailurePercentage = 0.85f;
+	float SimplificationFailurePercentage = 0.51f;
+	float SimplificationSloppyFailurePercentage = 0.85f;
 	float minReductionRatio = 0.01f; // 低于这个值则停止简化
 
 	float LODErrorMergePrevious = 1.5f; // 用来保证单调

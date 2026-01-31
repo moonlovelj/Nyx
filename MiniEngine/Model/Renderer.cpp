@@ -82,6 +82,7 @@ namespace Renderer
     BoolVar SeparateZPass("Renderer/Separate Z Pass", false);
     BoolVar DeferredRendering("Renderer/Deferred Rendering", true);
 	BoolVar UseOcclusionCull("Renderer/Occlusion Cull", true);
+	NumVar PixelErrorThreshold("Renderer/Pixel Error Threshold", 1.0f, 0.5f, 10.0f, 0.25f);
 
     // 注意这个可视化仅在开启冻结前启用遮挡剔除，才能正确显示
 	BoolVar FreezeCull("Renderer/Freeze Cull", false);
@@ -699,9 +700,7 @@ void Renderer::FrustrumCulling(GraphicsContext& gfxContext,
 	auto* cameraProj = static_cast<const Camera*>(camera);
     if (cameraProj)
     {
-        // (cotHalfFov * screenHeight) / 2.0;
-		float cotHalfFov = 1.0f / std::tanf(0.5f * cameraProj->GetFOV());
-        screenErrorConstant = cotHalfFov * viewport.Height * 0.5f;
+        screenErrorConstant = std::tanf(0.5f * cameraProj->GetFOV()) * 2.f / viewport.Height;
     }
 	uint32_t maxCommands = bucketer.GetMaxCommands(psoIdx);
 	context.SetConstants(kCommandConstants, maxCommands, 
@@ -826,9 +825,7 @@ void Renderer::DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlo
 	auto* cameraProj = static_cast<const Camera*>(camera);
 	if (cameraProj)
 	{
-		// (tanHalfFov * 2) / viewport.Height;
-		float tanHalfFov = std::tanf(0.5f * cameraProj->GetFOV());
-		screenErrorConstant = tanHalfFov * 2 / viewport.Height;
+		screenErrorConstant = std::tanf(0.5f * cameraProj->GetFOV()) * 2 / viewport.Height * PixelErrorThreshold;
 	}
 	context.SetConstants(kCommandConstants, 0,
 		screenErrorConstant);

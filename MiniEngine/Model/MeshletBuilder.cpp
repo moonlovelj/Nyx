@@ -611,31 +611,36 @@ bool MeshletBuilder::SimplifyGroup(
 		&resultError);
 
 	float ratio = float(newCount) / float(localIndices.size());
-	if (ratio > buildArgs.settings.SimplificationFailurePercentage && 
-		buildArgs.settings.bSimplifyFallbackSloppy)
-	{
-		float sloppyError = 0.0f;
-		size_t sloppyCount = meshopt_simplifySloppy(
-			simplifiedLocal.data(),
-			localIndices.data(), localIndices.size(),
-			localPositions.data(), localVertexCount, sizeof(float) * 3,
-			localLocks.empty() ? nullptr : localLocks.data(),
-			targetIndexCount,
-			FLT_MAX,
-			&sloppyError);
-		float sloppyRatio = float(sloppyCount) / float(localIndices.size());
-		if (sloppyRatio <= buildArgs.settings.SimplificationFailurePercentage)
-		{
-			float errorScale = meshopt_simplifyScale(localPositions.data(), localVertexCount, sizeof(float) * 3);
-			newCount = sloppyCount;
-			resultError = sloppyError * errorScale * buildArgs.settings.SimplifySloppyErrorFactor;
-			ratio = sloppyRatio;
-		}
-		
-	}
-
 	if (ratio > buildArgs.settings.SimplificationFailurePercentage)
-		return false;
+	{
+		if (buildArgs.settings.bSimplifyFallbackSloppy)
+		{
+			float sloppyError = 0.0f;
+			size_t sloppyCount = meshopt_simplifySloppy(
+				simplifiedLocal.data(),
+				localIndices.data(), localIndices.size(),
+				localPositions.data(), localVertexCount, sizeof(float) * 3,
+				localLocks.empty() ? nullptr : localLocks.data(),
+				targetIndexCount,
+				FLT_MAX,
+				&sloppyError);
+			ratio = float(sloppyCount) / float(localIndices.size());
+			if (ratio <= buildArgs.settings.SimplificationSloppyFailurePercentage)
+			{
+				float errorScale = meshopt_simplifyScale(localPositions.data(), localVertexCount, sizeof(float) * 3);
+				newCount = sloppyCount;
+				resultError = sloppyError * errorScale * buildArgs.settings.SimplifySloppyErrorFactor;
+			}
+			else
+			{
+				return false;
+			}
+		}
+		else
+		{
+			return false;
+		}
+	}
 
 	simplifiedLocal.resize(newCount);
 
