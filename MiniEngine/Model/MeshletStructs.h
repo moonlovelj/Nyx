@@ -210,6 +210,13 @@ namespace Renderer
 		uint32_t StartGroupIndex;
 		uint32_t GroupCount;
 	};
+
+	struct PageCompressionInfo
+	{
+		uint64_t CompressedOffset; // Offset relative to geometry blob start
+		uint32_t CompressedSize;   // Bytes on disk for this page
+		uint32_t Reserved = 0;
+	};
 #endif
 
 #ifdef __cplusplus

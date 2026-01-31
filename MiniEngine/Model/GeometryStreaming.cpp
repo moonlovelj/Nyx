@@ -5,10 +5,12 @@
 #include "Model.h"
 #include "Renderer.h"
 #include "ModelInstanceManager.h"
+#include "lz4.h"
 
 #include <numeric>
 #include <condition_variable>
 #include <intrin.h>
+#include <cstring>
 
 namespace GeometryStreaming
 {
@@ -56,13 +58,41 @@ namespace GeometryStreaming
 	struct IORequest {
 		uint32_t PageIdx;
 		std::wstring FilePath;
-		uint64_t BaseOffset;
+		uint64_t FileOffset;
+		uint32_t CompressedSize;
+		uint32_t CompressionType;
 	};
 	std::thread m_IOThread;
 	std::deque<IORequest> m_IOQueue;
 	std::mutex m_IOQueueMutex;
 	std::condition_variable m_IOCV;
 	std::atomic<bool> m_StopIOThread{ false };
+
+	static bool ReadPageFromFile(const IORequest& req, std::vector<uint8_t>& pageData)
+	{
+		std::ifstream fs(req.FilePath, std::ios::in | std::ios::binary);
+		if (!fs) return false;
+
+		if (req.CompressionType == Renderer::kGeometryCompressionLZ4)
+		{
+			std::vector<char> compressed(req.CompressedSize);
+			fs.seekg(req.FileOffset, std::ios::beg);
+			fs.read(compressed.data(), compressed.size());
+			if (!fs) return false;
+
+			const int decoded = LZ4_decompress_safe(
+				compressed.data(),
+				reinterpret_cast<char*>(pageData.data()),
+				(int)compressed.size(),
+				(int)pageData.size());
+			return decoded == (int)pageData.size();
+		}
+
+		fs.seekg(req.FileOffset, std::ios::beg);
+		fs.read(reinterpret_cast<char*>(pageData.data()), pageData.size());
+		return !!fs;
+	}
+
 	void IOThreadFunc()
 	{
 		while (true)
@@ -79,18 +109,14 @@ namespace GeometryStreaming
 				m_IOQueue.pop_front();
 			}
 
-			std::vector<uint8_t> pageData(Renderer::kPageSizeInBytes);
-			std::ifstream fs(req.FilePath, std::ios::in | std::ios::binary);
-			if (fs)
+			std::vector<uint8_t> pageData(Renderer::kPageSizeInBytes, 0);
+			if (ReadPageFromFile(req, pageData))
 			{
-				fs.seekg(req.BaseOffset + (static_cast<uint64_t>(req.PageIdx) * Renderer::kPageSizeInBytes), std::ios::beg);
-				fs.read((char*)pageData.data(), pageData.size());
 				OnPageIOComplete(req.PageIdx, std::move(pageData));
 			}
 			else
 			{
-				// Error handling: maybe mark as not loading or log
-				// currently just decrementing counter to avoid hangs
+				OnPageIOComplete(req.PageIdx, std::move(pageData));
 			}
 		}
 	}
@@ -199,12 +225,31 @@ void GeometryStreaming::PinRootPages(Model* model)
 		PhysicalSlot slot = m_FreePool.back();
 		m_FreePool.pop_back();
 
-		std::vector<uint8_t> pageData(Renderer::kPageSizeInBytes);
-		std::ifstream fs(model->m_StreamingFilePath, std::ios::in | std::ios::binary);
-		//fs.seekg(model->m_GeometryBlobOffsetInFile + (pageIdx * Renderer::kPageSizeInBytes));
-		uint64_t fileOffset = model->m_GeometryBlobOffsetInFile + (static_cast<uint64_t>(pageIdx) * static_cast<uint64_t>(Renderer::kPageSizeInBytes));
-		fs.seekg(fileOffset);
-		fs.read((char*)pageData.data(), pageData.size());
+		std::vector<uint8_t> pageData(Renderer::kPageSizeInBytes, 0);
+		IORequest req = {};
+		req.PageIdx = pageIdx;
+		req.FilePath = model->m_StreamingFilePath;
+		req.CompressionType = model->m_GeometryCompressionType;
+
+		if (req.CompressionType == Renderer::kGeometryCompressionLZ4 &&
+			pageIdx < model->m_PageCompressionInfos.size())
+		{
+			const auto& info = model->m_PageCompressionInfos[pageIdx];
+			req.FileOffset = model->m_GeometryBlobOffsetInFile + info.CompressedOffset;
+			req.CompressedSize = info.CompressedSize;
+		}
+		else
+		{
+			req.CompressionType = Renderer::kGeometryCompressionNone;
+			req.FileOffset = model->m_GeometryBlobOffsetInFile +
+				(static_cast<uint64_t>(pageIdx) * static_cast<uint64_t>(Renderer::kPageSizeInBytes));
+			req.CompressedSize = Renderer::kPageSizeInBytes;
+		}
+
+		if (!ReadPageFromFile(req, pageData))
+		{
+			std::memset(pageData.data(), 0, pageData.size());
+		}
 
 		uint32_t byteOffset = slot.SlotIndex * Renderer::kPageSizeInBytes;
 		gfx.WriteBuffer(m_GeometryChunksGPU[slot.ChunkIndex], byteOffset, pageData.data(), pageData.size());
@@ -402,11 +447,27 @@ void GeometryStreaming::EnqueueAsyncLoad(uint32_t pageIdx)
 	Model* sourceModel = ModelInstanceManager::Get().GetSourceModel();
 	{
 		std::lock_guard<std::mutex> lock(m_IOQueueMutex);
-		m_IOQueue.push_back({
-			pageIdx,
-			sourceModel->m_StreamingFilePath,
-			sourceModel->m_GeometryBlobOffsetInFile
-			});
+		IORequest req = {};
+		req.PageIdx = pageIdx;
+		req.FilePath = sourceModel->m_StreamingFilePath;
+		req.CompressionType = sourceModel->m_GeometryCompressionType;
+
+		if (req.CompressionType == Renderer::kGeometryCompressionLZ4 &&
+			pageIdx < sourceModel->m_PageCompressionInfos.size())
+		{
+			const auto& info = sourceModel->m_PageCompressionInfos[pageIdx];
+			req.FileOffset = sourceModel->m_GeometryBlobOffsetInFile + info.CompressedOffset;
+			req.CompressedSize = info.CompressedSize;
+		}
+		else
+		{
+			req.CompressionType = Renderer::kGeometryCompressionNone;
+			req.FileOffset = sourceModel->m_GeometryBlobOffsetInFile +
+				(static_cast<uint64_t>(pageIdx) * static_cast<uint64_t>(Renderer::kPageSizeInBytes));
+			req.CompressedSize = Renderer::kPageSizeInBytes;
+		}
+
+		m_IOQueue.push_back(std::move(req));
 	}
 	m_IOCV.notify_one();
 }

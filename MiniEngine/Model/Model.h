@@ -38,6 +38,12 @@ namespace Renderer
 
 	inline constexpr uint32_t kPageSizeInBytes = 512u * 1024u;             // 512 KB
 	inline constexpr uint32_t kChunkSizeInBytes = kPageSizeInBytes * 1u * 1024u; // 512 MB
+
+	enum GeometryCompressionType : uint32_t
+	{
+		kGeometryCompressionNone = 0,
+		kGeometryCompressionLZ4 = 1,
+	};
 }
 
 //
@@ -159,6 +165,7 @@ public:
 	std::vector<Renderer::GroupMetadata> m_GroupMetadatas;
 
 	std::vector<Renderer::PageMetadata> m_PageMetadatas;
+	std::vector<Renderer::PageCompressionInfo> m_PageCompressionInfos;
 
 	// BVH 树 (需要上传到 GPU，这里暂存 CPU 端)
 	std::vector<Renderer::HierarchyNode> m_Nodes;
@@ -166,6 +173,8 @@ public:
 	// 用于记录流式加载
 	std::wstring m_StreamingFilePath;
 	uint64_t m_GeometryBlobOffsetInFile = 0;
+	uint64_t m_GeometryUncompressedSize = 0;
+	uint32_t m_GeometryCompressionType = 0;
 
 protected:
     void Destroy();

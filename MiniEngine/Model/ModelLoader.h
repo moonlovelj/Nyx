@@ -25,7 +25,7 @@
 
 namespace glTF { class Asset; struct Mesh; }
 
-#define CURRENT_MINI_FILE_VERSION 21
+#define CURRENT_MINI_FILE_VERSION 23
 
 namespace Renderer
 {
@@ -144,7 +144,9 @@ namespace Renderer
         uint32_t numTextures;
 
 		uint64_t geometryBlobOffset;
-		uint64_t geometryBlobSize;
+		uint64_t geometryBlobSize;          // Compressed size on disk
+		uint64_t geometryUncompressedSize;  // Aligned uncompressed size
+		uint32_t geometryCompressionType;
 		uint32_t groupCount;
 		uint32_t hierarchyNodeCount;
         uint32_t pageCount;

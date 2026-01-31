@@ -68,17 +68,17 @@
     </Manifest>
     <ClCompile>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">..\ThirdParty\metis\5.1.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">..\ThirdParty\metis\5.1.0\include;..\ThirdParty\lz4;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OpenMPSupport Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</OpenMPSupport>
     </ClCompile>
     <ClCompile>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">..\ThirdParty\metis\5.1.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">..\ThirdParty\metis\5.1.0\include;..\ThirdParty\lz4;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OpenMPSupport Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">true</OpenMPSupport>
     </ClCompile>
     <ClCompile>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Release|x64'">stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|x64'">..\ThirdParty\metis\5.1.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|x64'">..\ThirdParty\metis\5.1.0\include;..\ThirdParty\lz4;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OpenMPSupport Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</OpenMPSupport>
     </ClCompile>
     <FxCompile>
@@ -127,6 +127,7 @@
     <ClCompile Include="IndexOptimizePostTransform.cpp" />
     <ClCompile Include="InstanceResourceManager.cpp" />
     <ClCompile Include="LightManager.cpp" />
+    <ClCompile Include="..\ThirdParty\lz4\lz4.c" />
     <ClCompile Include="MeshConvert.cpp" />
     <ClCompile Include="MeshletBuilder.cpp" />
     <ClCompile Include="MeshOptimizer\allocator.cpp" />

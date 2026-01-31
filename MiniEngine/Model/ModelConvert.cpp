@@ -26,6 +26,7 @@
 #include "../Core/Math/Quaternion.h"
 #include "MeshOptimizer/MeshOptimizer.h"
 #include "metis.h"
+#include "lz4.h"
 
 #include <fstream>
 #include <map>
@@ -34,6 +35,7 @@
 #include <algorithm>
 #include <execution>
 #include <omp.h>
+#include <atomic>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -956,52 +958,42 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	if (header.groupCount > 0) metadataSize += header.groupCount * sizeof(GroupMetadata);
 	if (header.hierarchyNodeCount > 0) metadataSize += header.hierarchyNodeCount * sizeof(HierarchyNode);
 	if (header.pageCount > 0) metadataSize += header.pageCount * sizeof(PageMetadata);
+	if (header.pageCount > 0) metadataSize += header.pageCount * sizeof(PageCompressionInfo);
 
 	// 计算对齐
 	const uint64_t alignedOffset = Math::AlignUp(metadataSize, Renderer::kPageSizeInBytes);
-	// 补齐最后的 Geometry Page 对齐
 	const uint32_t pageSize = Renderer::kPageSizeInBytes;
-	const size_t   blobSize = streamCtx.TotalGeometrySize;
-	const size_t   alignedBlobSize = Math::AlignUp(blobSize, pageSize);
-
-	const uint64_t finalFileSize = alignedOffset + alignedBlobSize;
+	const uint64_t uncompressedSize = Math::AlignUp(streamCtx.TotalGeometrySize, (size_t)pageSize);
 
 	header.geometryBlobOffset = alignedOffset;
-	header.geometryBlobSize = static_cast<uint64_t>(alignedBlobSize);
+	header.geometryBlobSize = 0;
+	header.geometryUncompressedSize = uncompressedSize;
+	header.geometryCompressionType = Renderer::kGeometryCompressionLZ4;
+
+	std::vector<PageCompressionInfo> pageCompressionInfos;
+	if (header.pageCount > 0)
+		pageCompressionInfos.resize(header.pageCount);
 
 	// -------------------------------------------------------------
-	// 使用内存映射文件进行并行写入
+	// 写入 Header + Metadata (预留压缩表)
 	// -------------------------------------------------------------
-	Utility::Printf("Allocating file space: %llu MB...\n", finalFileSize / (1024 * 1024));
-
-	HANDLE hFile = CreateFileW(filePath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-	if (hFile == INVALID_HANDLE_VALUE) return false;
-
-	// 预扩展文件大小
-	LARGE_INTEGER liSize;
-	liSize.QuadPart = finalFileSize;
-	SetFilePointerEx(hFile, liSize, NULL, FILE_BEGIN);
-	SetEndOfFile(hFile);
-
-	HANDLE hMapping = CreateFileMappingW(hFile, NULL, PAGE_READWRITE, 0, 0, NULL);
-	if (!hMapping) {
-		CloseHandle(hFile);
-		return false;
-	}
-
-	uint8_t* pMappedData = (uint8_t*)MapViewOfFile(hMapping, FILE_MAP_WRITE, 0, 0, 0);
-	if (!pMappedData) {
-		CloseHandle(hMapping);
-		CloseHandle(hFile);
-		return false;
-	}
+	std::fstream outFile(filePath, std::ios::out | std::ios::binary | std::ios::trunc);
+	if (!outFile) return false;
 
 	// 写入 Header 和 Metadata
 	// -------------------------------------------------------------
-	uint8_t* pCursor = pMappedData;
 	auto Write = [&](const void* src, size_t size) {
-		std::memcpy(pCursor, src, size);
-		pCursor += size;
+		outFile.write(reinterpret_cast<const char*>(src), size);
+		};
+	auto WriteZeros = [&](uint64_t size) {
+		constexpr size_t kZeroChunk = 64 * 1024;
+		static const std::vector<char> kZeros(kZeroChunk, 0);
+		while (size > 0)
+		{
+			const size_t chunk = (size_t)std::min<uint64_t>(size, kZeros.size());
+			outFile.write(kZeros.data(), chunk);
+			size -= chunk;
+		}
 		};
 
 	Write(&header, sizeof(FileHeader));
@@ -1034,83 +1026,186 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	if (header.hierarchyNodeCount > 0) Write(data.m_Nodes.data(), header.hierarchyNodeCount * sizeof(HierarchyNode));
 	if (header.pageCount > 0) Write(data.m_Pages.data(), header.pageCount * sizeof(PageMetadata));
 
-	// Zero padding until alignedOffset
-	uint64_t currentOffset = pCursor - pMappedData;
-	if (currentOffset < alignedOffset) {
-		std::memset(pMappedData + currentOffset, 0, alignedOffset - currentOffset);
+	uint64_t pageCompressionInfoOffset = 0;
+	if (header.pageCount > 0)
+	{
+		pageCompressionInfoOffset = (uint64_t)outFile.tellp();
+		WriteZeros(header.pageCount * sizeof(PageCompressionInfo));
 	}
 
-	// 并行写入 Geometry Blob
-    // -------------------------------------------------------------
+	// Zero padding until alignedOffset
+	const uint64_t currentOffset = (uint64_t)outFile.tellp();
+	if (currentOffset < alignedOffset)
+	{
+		WriteZeros(alignedOffset - currentOffset);
+	}
+
+	outFile.flush();
+	outFile.close();
+
+	// -------------------------------------------------------------
+	// 并行压缩 Geometry Pages (低内存占用，直接写盘)
+	// -------------------------------------------------------------
+	std::atomic<uint64_t> compressedWriteOffset{ 0 };
 	if (streamCtx.TotalGeometrySize > 0)
 	{
-		uint8_t* pBlobBase = pMappedData + alignedOffset;
-		std::vector<uint64_t> jobOffsets(streamCtx.PendingWrites.size());
+		struct PageJobSpan
+		{
+			uint32_t JobIndex;
+			uint32_t OffsetInPage;
+		};
+
+		const uint32_t pageCount = header.pageCount;
+		std::vector<std::vector<PageJobSpan>> pageJobs(pageCount);
+
 		uint64_t runningOffset = 0;
-		for (size_t i = 0; i < streamCtx.PendingWrites.size(); ++i) {
-			jobOffsets[i] = runningOffset;
-			runningOffset += streamCtx.PendingWrites[i].SizeBytes;
+		for (uint32_t jobIndex = 0; jobIndex < streamCtx.PendingWrites.size(); ++jobIndex)
+		{
+			const auto& job = streamCtx.PendingWrites[jobIndex];
+			const uint32_t pageIdx = static_cast<uint32_t>(runningOffset / pageSize);
+			const uint32_t offsetInPage = static_cast<uint32_t>(runningOffset % pageSize);
+			if (pageIdx < pageCount && offsetInPage + job.SizeBytes <= pageSize)
+			{
+				pageJobs[pageIdx].push_back({ jobIndex, offsetInPage });
+			}
+			runningOffset += job.SizeBytes;
 		}
 
-		Utility::Printf("Parallel writing geometry blobs (Total: %llu MB)...\n", streamCtx.TotalGeometrySize / (1024 * 1024));
-		// 并行循环
-		// dynamic 调度可以平衡不同大小的任务
+		HANDLE hWriteFile = CreateFileW(
+			filePath.c_str(),
+			GENERIC_WRITE,
+			0,
+			NULL,
+			OPEN_EXISTING,
+			FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
+			NULL);
+		if (hWriteFile == INVALID_HANDLE_VALUE) return false;
+
+		std::atomic<bool> compressFailed = false;
+		std::atomic<uint32_t> completedPages = 0;
+		const uint32_t reportStep = std::max(1u, pageCount / 20);
+
+		Utility::Printf("Compressing geometry pages (Total: %llu MB)...\n", streamCtx.TotalGeometrySize / (1024 * 1024));
 		#pragma omp parallel for schedule(dynamic)
-		for (int i = 0; i < (int)streamCtx.PendingWrites.size(); ++i)
+		for (int pageIdx = 0; pageIdx < (int)pageCount; ++pageIdx)
 		{
-			const auto& job = streamCtx.PendingWrites[i];
-			uint8_t* pDest = pBlobBase + jobOffsets[i];
-
-			// Padding
-			if (job.TempSourcePath.empty())
-			{
-				std::memset(pDest, 0, job.SizeBytes);
+			if (compressFailed.load(std::memory_order_relaxed))
 				continue;
-			}
 
-			// 真实数据
-			std::ifstream localStream(job.TempSourcePath, std::ios::in | std::ios::binary);
-			if (localStream)
+			std::vector<uint8_t> pageBuffer(pageSize, 0);
+
+			for (const auto& span : pageJobs[pageIdx])
 			{
-				localStream.seekg(job.SourceOffset);
-				localStream.read((char*)pDest, job.SizeBytes);
+				const auto& job = streamCtx.PendingWrites[span.JobIndex];
+				uint8_t* pDest = pageBuffer.data() + span.OffsetInPage;
 
-				// 直接在映射的目标内存上修改
-				if (job.BaseGroupIndexPatchValue > 0)
+				if (job.TempSourcePath.empty())
 				{
-					auto* gHeader = reinterpret_cast<GroupHeader*>(pDest);
-					auto* mHeaders = reinterpret_cast<MeshletHeader*>(pDest + sizeof(GroupHeader));
+					std::memset(pDest, 0, job.SizeBytes);
+				}
+				else
+				{
+					std::ifstream localStream(job.TempSourcePath, std::ios::in | std::ios::binary);
+					if (!localStream) { compressFailed.store(true, std::memory_order_relaxed); break; }
 
-					for (uint32_t m = 0; m < gHeader->MeshletCount; ++m)
+					localStream.seekg(job.SourceOffset);
+					localStream.read(reinterpret_cast<char*>(pDest), job.SizeBytes);
+					if (!localStream) { compressFailed.store(true, std::memory_order_relaxed); break; }
+
+					if (job.BaseGroupIndexPatchValue > 0)
 					{
-						if (mHeaders[m].RefineGroupIndex != 0xFFFFFFFF)
+						auto* gHeader = reinterpret_cast<GroupHeader*>(pDest);
+						auto* mHeaders = reinterpret_cast<MeshletHeader*>(pDest + sizeof(GroupHeader));
+						for (uint32_t m = 0; m < gHeader->MeshletCount; ++m)
 						{
-							mHeaders[m].RefineGroupIndex += job.BaseGroupIndexPatchValue;
+							if (mHeaders[m].RefineGroupIndex != 0xFFFFFFFF)
+							{
+								mHeaders[m].RefineGroupIndex += job.BaseGroupIndexPatchValue;
+							}
 						}
 					}
 				}
 			}
+
+			if (compressFailed.load(std::memory_order_relaxed))
+				continue;
+
+			std::vector<char> compressed((size_t)LZ4_compressBound((int)pageSize));
+			const int compressedSize = LZ4_compress_default(
+				reinterpret_cast<const char*>(pageBuffer.data()),
+				compressed.data(),
+				(int)pageSize,
+				(int)compressed.size());
+			if (compressedSize <= 0)
+			{
+				compressFailed.store(true, std::memory_order_relaxed);
+				continue;
+			}
+
+			const uint64_t pageOffset = compressedWriteOffset.fetch_add((uint64_t)compressedSize);
+			pageCompressionInfos[pageIdx].CompressedOffset = pageOffset;
+			pageCompressionInfos[pageIdx].CompressedSize = (uint32_t)compressedSize;
+
+			OVERLAPPED ov = {};
+			const uint64_t fileOffset = alignedOffset + pageOffset;
+			ov.Offset = (DWORD)(fileOffset & 0xFFFFFFFF);
+			ov.OffsetHigh = (DWORD)(fileOffset >> 32);
+
+			DWORD bytesWritten = 0;
+			if (!WriteFile(hWriteFile, compressed.data(), (DWORD)compressedSize, NULL, &ov))
+			{
+				const DWORD err = GetLastError();
+				if (err != ERROR_IO_PENDING)
+				{
+					compressFailed.store(true, std::memory_order_relaxed);
+					continue;
+				}
+			}
+
+			if (!GetOverlappedResult(hWriteFile, &ov, &bytesWritten, TRUE) ||
+				bytesWritten != (DWORD)compressedSize)
+			{
+				compressFailed.store(true, std::memory_order_relaxed);
+				continue;
+			}
+
+			const uint32_t done = ++completedPages;
+			if ((done % reportStep) == 0 || done == pageCount)
+			{
+				const float percent = (float)done / (float)pageCount * 100.0f;
+				Utility::Printf("Compressing Pages: %u/%u (%.1f%%)\n", done, pageCount, percent);
+			}
 		}
-		// 尾部 Padding
-		if (alignedBlobSize > blobSize) {
-			std::memset(pBlobBase + blobSize, 0, alignedBlobSize - blobSize);
-		}
+
+		const uint64_t finalCompressedSize = compressedWriteOffset.load();
+		LARGE_INTEGER liSize;
+		liSize.QuadPart = alignedOffset + finalCompressedSize;
+		SetFilePointerEx(hWriteFile, liSize, NULL, FILE_BEGIN);
+		SetEndOfFile(hWriteFile);
+
+		CloseHandle(hWriteFile);
+
+		if (compressFailed.load(std::memory_order_relaxed)) { return false; }
 	}
 
-	// 显式刷入系统缓存
-	if (!FlushViewOfFile(pMappedData, 0)) {
-		Utility::Printf("Failed to flush view of file: %d\n", GetLastError());
+	header.geometryBlobSize = compressedWriteOffset.load();
+
+	Utility::Printf("Total compressed geometry size: %llu MB\n", compressedWriteOffset.load() / (1024 * 1024));
+
+	// 回写 Header 和压缩表
+	outFile.clear();
+	outFile.open(filePath, std::ios::in | std::ios::out | std::ios::binary);
+	if (!outFile) return false;
+	outFile.seekp(0, std::ios::beg);
+	Write(&header, sizeof(FileHeader));
+	if (header.pageCount > 0)
+	{
+		outFile.seekp(pageCompressionInfoOffset, std::ios::beg);
+		Write(pageCompressionInfos.data(), header.pageCount * sizeof(PageCompressionInfo));
 	}
 
-	UnmapViewOfFile(pMappedData);
-	CloseHandle(hMapping);
-
-	// 强制物理落盘
-	if (!FlushFileBuffers(hFile)) {
-		Utility::Printf("Failed to flush file buffers to disk: %d\n", GetLastError());
-	}
-
-	CloseHandle(hFile);
+	outFile.flush();
+	outFile.close();
 
 	// 清理临时文件
 	Utility::Printf("Deleting temp files...\n");

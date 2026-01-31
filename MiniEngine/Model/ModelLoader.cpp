@@ -222,8 +222,10 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
 
     std::shared_ptr<Model> model(new Model);
 
-    model->m_StreamingFilePath = miniFileName;
+	model->m_StreamingFilePath = miniFileName;
 	model->m_GeometryBlobOffsetInFile = header.geometryBlobOffset;
+	model->m_GeometryUncompressedSize = header.geometryUncompressedSize;
+	model->m_GeometryCompressionType = header.geometryCompressionType;
 
     model->m_NumNodes = header.numNodes;
     model->m_SceneGraph.reset(new GraphNode[header.numNodes]);
@@ -355,6 +357,12 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
     {
         model->m_PageMetadatas.resize(header.pageCount);
         inFile.read((char*)model->m_PageMetadatas.data(), header.pageCount * sizeof(PageMetadata));
+
+		if (header.geometryCompressionType != kGeometryCompressionNone)
+		{
+			model->m_PageCompressionInfos.resize(header.pageCount);
+			inFile.read((char*)model->m_PageCompressionInfos.data(), header.pageCount * sizeof(PageCompressionInfo));
+		}
 	}
 
     return model;
