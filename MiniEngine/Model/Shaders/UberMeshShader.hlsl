@@ -2,10 +2,15 @@
 #include "CommonResources.hlsli"
 #include "DataCodec.hlsli"
 #include "GeometryCommon.hlsli"
+#include "WaveUtil.hlsli"
 
 #define MAX_VERTS 128
 #define MAX_PRIMS 128
 #define MS_GROUP_SIZE 32
+
+groupshared uint s_PrimCount;
+groupshared uint s_PrimOutIndex[MAX_PRIMS];
+groupshared uint3 s_PrimIndices[MAX_PRIMS];
 
 struct VSOutput
 {
@@ -38,6 +43,50 @@ inline float4 GetClipPosition(ByteAddressBuffer geometryChunksBuffer,
     float3 worldPos = mul(worldMatrix, position).xyz;
     float4 clipPos = mul(vpMatrix, float4(worldPos, 1.0));
     return clipPos;         
+}
+
+inline float2 GetScreenPos(float4 clipPos)
+{
+    float2 ndc = clipPos.xy / clipPos.w;
+    return (ndc * 0.5f + 0.5f) * float2((float)ViewportWidth, (float)ViewportHeight);
+}
+
+inline uint GetClipCullBits(float4 hPos)
+{
+    uint bits = 0;
+    bits |= (hPos.x < -hPos.w) ? 1u : 0u;
+    bits |= (hPos.x >  hPos.w) ? 2u : 0u;
+    bits |= (hPos.y < -hPos.w) ? 4u : 0u;
+    bits |= (hPos.y >  hPos.w) ? 8u : 0u;
+    bits |= (hPos.z <  0.0f)  ? 16u : 0u;
+    bits |= (hPos.z >  hPos.w) ? 32u : 0u;
+    bits |= (hPos.w <= 0.0f) ? 64u : 0u;
+    return bits;
+}
+
+inline bool IsTriangleOutsideFrustum(float4 h0, float4 h1, float4 h2)
+{
+    uint cullBits = GetClipCullBits(h0) & GetClipCullBits(h1) & GetClipCullBits(h2);
+    return cullBits != 0;
+}
+
+inline bool IsTinyTriangle(float4 h0, float4 h1, float4 h2)
+{
+    float2 a = GetScreenPos(h0);
+    float2 b = GetScreenPos(h1);
+    float2 c = GetScreenPos(h2);
+
+    float2 pixelMin = min(a, min(b, c));
+    float2 pixelMax = max(a, max(b, c));
+
+    const float epsilon = 1.0f / 256.0f;
+    pixelMin -= epsilon;
+    pixelMax += epsilon;
+
+    int2 ipMin = int2(round(pixelMin));
+    int2 ipMax = int2(round(pixelMax));
+
+    return (ipMin.x == ipMax.x) || (ipMin.y == ipMax.y);
 }
 
 [RootSignature(Renderer_RootSig)]
@@ -76,9 +125,71 @@ void main(
     uint vertexByteOffset = groupByteOffset + meshletHeader.VertexOffset;
     uint indexByteOffset = groupByteOffset + meshletHeader.TriangleOffset;
     uint vertexStride = meshletHeader.GetVertexStride();
-    
-    SetMeshOutputCounts(vertexCount, primitiveCount);
-    
+
+    float3x3 worldRotationScale = (float3x3)meshInstance.WorldMatrix;
+    float detWorld = determinant(worldRotationScale);
+    bool isWorldFlipped = detWorld < 0.0;
+    bool twoSided = (meshletHeader.GetPSOFlags() & PSO_TWO_SIDED) > 0;
+
+    if (gtid == 0)
+    {
+        s_PrimCount = 0;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    // --------------------------------------------------------
+    // 图元剔除 + Wave 紧凑 (Primitive Culling + Wave Compaction)
+    // --------------------------------------------------------
+    [unroll]
+    for (uint j = 0; j < MAX_PRIMS; j += MS_GROUP_SIZE)
+    {
+        const uint primitiveID = j + gtid;
+        bool inRange = primitiveID < primitiveCount;
+        bool isVisible = false;
+        uint3 triIndices = uint3(0, 0, 0);
+
+        if (inRange)
+        {
+            triIndices = LoadAndUnpackTriangle(geometryChunksBuffer, indexByteOffset, primitiveID);
+
+            // 这里重新Load并且计算，要比使用group shared memory性能好
+            float4 h0 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.x, meshInstance.WorldMatrix, ViewProjMatrix);
+            float4 h1 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.y, meshInstance.WorldMatrix, ViewProjMatrix);
+            float4 h2 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.z, meshInstance.WorldMatrix, ViewProjMatrix);
+
+            bool logicalFrontFacing = isFrontFacingHW(h0, h1, h2) ^ isWorldFlipped;
+            isVisible = twoSided || logicalFrontFacing;
+
+            if (isVisible)
+            {
+                isVisible = !IsTriangleOutsideFrustum(h0, h1, h2);
+            }
+
+            if (isVisible)
+            {
+                float minW = min(h0.w, min(h1.w, h2.w));
+                if (minW > 0.0f)
+                {
+                    isVisible = !IsTinyTriangle(h0, h1, h2);
+                }
+            }
+        }
+
+        uint outIndex = 0;
+        WaveInterlockedAddScalar(s_PrimCount, isVisible, 1, outIndex);
+
+        if (inRange)
+        {
+            s_PrimOutIndex[primitiveID] = isVisible ? outIndex : 0xFFFFFFFFu;
+            s_PrimIndices[primitiveID] = triIndices;
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    uint finalPrimCount = s_PrimCount;
+    SetMeshOutputCounts(vertexCount, finalPrimCount);
+
     // --------------------------------------------------------
     // 顶点处理 (Vertex Processing)
     // --------------------------------------------------------
@@ -100,7 +211,7 @@ void main(
                 uint uvLoadOffset = vertexOffset + 4; // normal
                 if (psoFlags & PSO_HAS_TANGENT)
                     uvLoadOffset += 4; // tangent
-                
+
                 if ((mat.flags & MAT_FLAG_BASE_COLOR_UV) && (psoFlags & PSO_HAS_UV1))
                 {
                     if (psoFlags & PSO_HAS_UV0)
@@ -141,12 +252,12 @@ void main(
 
             float3 worldPos = mul(meshInstance.WorldMatrix, position).xyz;
             float4 clipPos = mul(ViewProjMatrix, float4(worldPos, 1.0));
-            
+
             verts[vertexID].position = clipPos;
             verts[vertexID].commandIndex = commandIndex;
             uint packedMaterialInfo = (meshletHeader.GetMaterialBufferIndex() & 0xFFFF)
                                     | ((mat.flags & 0xFF) << 16);
-                                    
+
             verts[vertexID].packedMaterialInfo = packedMaterialInfo;
             verts[vertexID].uv0 = uv0;
 
@@ -154,7 +265,7 @@ void main(
     }
 
     // --------------------------------------------------------
-    // 图元处理 (Primitive Processing)
+    // 图元输出 (Primitive Emit)
     // --------------------------------------------------------
     [unroll]
     for (uint j = 0; j < MAX_PRIMS; j += MS_GROUP_SIZE)
@@ -162,24 +273,12 @@ void main(
         const uint primitiveID = j + gtid;
         if (primitiveID < primitiveCount)
         {
-            uint3 triIndices = LoadAndUnpackTriangle(geometryChunksBuffer, indexByteOffset, primitiveID);
-        
-            // 这里重新Load并且计算，要比使用group shared memory性能好
-            float4 h0 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.x, meshInstance.WorldMatrix, ViewProjMatrix);
-            float4 h1 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.y, meshInstance.WorldMatrix, ViewProjMatrix);
-            float4 h2 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.z, meshInstance.WorldMatrix, ViewProjMatrix);
-
-            float3x3 worldRotationScale = (float3x3) meshInstance.WorldMatrix;
-            float detWorld = determinant(worldRotationScale);
-            bool isWorldFlipped = detWorld < 0.0;
-        
-            // 背面剔除
-            bool twoSided = (meshletHeader.GetPSOFlags() & PSO_TWO_SIDED) > 0;
-            bool logicalFrontFacing = isFrontFacingHW(h0, h1, h2) ^ isWorldFlipped;
-            bool isVisible = twoSided || logicalFrontFacing;
-        
-            outIndices[primitiveID] = isVisible ? triIndices : uint3(0, 0, 0);
-            sharedPrimitives[primitiveID].primitiveIndex = primitiveID;
+            uint outIndex = s_PrimOutIndex[primitiveID];
+            if (outIndex != 0xFFFFFFFFu)
+            {
+                outIndices[outIndex] = s_PrimIndices[primitiveID];
+                sharedPrimitives[outIndex].primitiveIndex = primitiveID;
+            }
         }
     }
 }
