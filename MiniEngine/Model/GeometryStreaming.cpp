@@ -14,8 +14,11 @@
 
 namespace GeometryStreaming
 {
-	const uint32_t kMaxChunks = 16;
+	const uint32_t kMaxChunks = 32;
+	const uint32_t kInitialChunks = 1;
+	const uint32_t kMaxPinnedRootPages = 4096 + 2048;
 	constexpr uint32_t kNumReadbackBuffers = 3;
+	uint32_t m_SlotsPerChunk = 0;
 	StructuredBuffer m_HierarchyNodesGPU;
 	std::vector<ByteAddressBuffer> m_GeometryChunksGPU;
 	StructuredBuffer m_GroupDataLocationGPU;
@@ -67,6 +70,61 @@ namespace GeometryStreaming
 	std::mutex m_IOQueueMutex;
 	std::condition_variable m_IOCV;
 	std::atomic<bool> m_StopIOThread{ false };
+
+	static void LogChunkStats(const wchar_t* tag)
+	{
+		const uint64_t allocatedChunks = static_cast<uint64_t>(m_GeometryChunksGPU.size());
+		const uint64_t allocatedBytes = allocatedChunks * static_cast<uint64_t>(Renderer::kChunkSizeInBytes);
+		const size_t allocatedSlots = static_cast<size_t>(allocatedChunks) * static_cast<size_t>(m_SlotsPerChunk);
+		const size_t freeSlots = m_FreePool.size();
+		const size_t usedSlots = allocatedSlots > freeSlots ? (allocatedSlots - freeSlots) : 0;
+		const uint64_t usedBytes = static_cast<uint64_t>(usedSlots) * static_cast<uint64_t>(Renderer::kPageSizeInBytes);
+		Utility::Printf(L"GeometryStreaming: %ls chunks=%llu/%u, allocated=%llu MB, used=%llu MB, freeSlots=%zu\n",
+			tag,
+			allocatedChunks,
+			kMaxChunks,
+			allocatedBytes / (1024 * 1024),
+			usedBytes / (1024 * 1024),
+			freeSlots);
+	}
+
+	static bool AllocateChunk()
+	{
+		if (m_GeometryChunksGPU.size() >= kMaxChunks)
+		{
+			LogChunkStats(L"chunk limit reached");
+			return false;
+		}
+
+		ByteAddressBuffer chunk;
+		chunk.Create(L"Geometry Chunk ", Renderer::kChunkSizeInBytes / 4, 4);
+
+		const uint32_t chunkIndex = static_cast<uint32_t>(m_GeometryChunksGPU.size());
+		m_GeometryChunksGPU.push_back(std::move(chunk));
+		Renderer::SetBindlessResourceDescriptor(
+			SRV_GEOMETRY_CHUNK_DATA_BUFFER + chunkIndex,
+			m_GeometryChunksGPU[chunkIndex].GetSRV()
+		);
+
+		for (uint32_t s = 0; s < m_SlotsPerChunk; ++s)
+			m_FreePool.push_back({ chunkIndex, s });
+
+		LogChunkStats(L"allocated chunk");
+		return true;
+	}
+
+	static bool EnsureFreeSlots(uint32_t requiredSlots)
+	{
+		while (m_FreePool.size() < requiredSlots)
+		{
+			if (!AllocateChunk())
+			{
+				LogChunkStats(L"out of VRAM for request");
+				return false;
+			}
+		}
+		return true;
+	}
 
 	static bool ReadPageFromFile(const IORequest& req, std::vector<uint8_t>& pageData)
 	{
@@ -145,20 +203,15 @@ void GeometryStreaming::Initialize(const std::vector<Renderer::HierarchyNode>& n
 		m_FenceValues[i] = 0;
 	}
 
-	uint32_t slotsPerChunk = Renderer::kChunkSizeInBytes / Renderer::kPageSizeInBytes;
+	m_SlotsPerChunk = Renderer::kChunkSizeInBytes / Renderer::kPageSizeInBytes;
 	m_FreePool.clear();
-	for (uint32_t i = 0; i < kMaxChunks; ++i)
+	m_GeometryChunksGPU.clear();
+	m_GeometryChunksGPU.reserve(kMaxChunks);
+	const uint32_t initialChunks = std::min(kInitialChunks, kMaxChunks);
+	for (uint32_t i = 0; i < initialChunks; ++i)
 	{
-		ByteAddressBuffer chunk;
-		chunk.Create(L"Geometry Chunk ", Renderer::kChunkSizeInBytes / 4, 4);
-		m_GeometryChunksGPU.push_back(std::move(chunk));
-		Renderer::SetBindlessResourceDescriptor(
-			SRV_GEOMETRY_CHUNK_DATA_BUFFER + i,
-			m_GeometryChunksGPU[i].GetSRV()
-		);
-
-		for (uint32_t s = 0; s < slotsPerChunk; ++s)
-			m_FreePool.push_back({ i, s });
+		if (!AllocateChunk())
+			break;
 	}
 
 	//std::reverse(m_FreePool.begin(), m_FreePool.end());
@@ -185,7 +238,7 @@ void GeometryStreaming::PinRootPages(Model* model)
 {
 	if (!model) return;
 
-	std::set<uint32_t> rootPageIndices;
+	std::vector<uint32_t> rootPageCounts(m_PageTableCPU.size(), 0);
 	for (const auto& node : model->m_Nodes)
 	{
 		if (node.Internal.IsGroup && node.MaxParrentError == std::numeric_limits<float>::infinity())
@@ -194,14 +247,42 @@ void GeometryStreaming::PinRootPages(Model* model)
 			if (groupIdx < model->m_GroupMetadatas.size())
 			{
 				uint32_t pageIdx = model->m_GroupMetadatas[groupIdx].PageIndex;
-				rootPageIndices.insert(pageIdx);
+				if (pageIdx < rootPageCounts.size())
+					rootPageCounts[pageIdx] += 1;
 			}
 		}
 	}
 
-	if (rootPageIndices.empty()) return;
+	std::vector<uint32_t> rootPages;
+	rootPages.reserve(rootPageCounts.size());
+	for (uint32_t i = 0; i < (uint32_t)rootPageCounts.size(); ++i)
+	{
+		if (rootPageCounts[i] > 0)
+			rootPages.push_back(i);
+	}
 
-	const uint64_t requiredMemory = static_cast<uint64_t>(rootPageIndices.size()) * static_cast<uint64_t>(Renderer::kPageSizeInBytes);
+	if (rootPages.empty()) return;
+
+	std::sort(rootPages.begin(), rootPages.end(), [&](uint32_t a, uint32_t b) {
+		if (rootPageCounts[a] != rootPageCounts[b]) return rootPageCounts[a] > rootPageCounts[b];
+		return a < b;
+		});
+
+	size_t pinBudget = rootPages.size();
+	pinBudget = std::min(pinBudget, static_cast<size_t>(kMaxPinnedRootPages));
+
+	if (!EnsureFreeSlots((uint32_t)pinBudget))
+	{
+		pinBudget = std::min(pinBudget, m_FreePool.size());
+	}
+
+	if (pinBudget == 0)
+	{
+		Utility::Printf(L"GeometryStreaming: No free slots to pin root pages (budget=%zu).\n", pinBudget);
+		return;
+	}
+
+	const uint64_t requiredMemory = static_cast<uint64_t>(pinBudget) * static_cast<uint64_t>(Renderer::kPageSizeInBytes);
 	const uint64_t availableMemory = static_cast<uint64_t>(m_FreePool.size()) * static_cast<uint64_t>(Renderer::kPageSizeInBytes);
 	if (requiredMemory > availableMemory)
 	{
@@ -213,14 +294,16 @@ void GeometryStreaming::PinRootPages(Model* model)
 	Renderer::GroupDataLocation* locations = m_GroupDataLocations.data();
 	GraphicsContext& gfx = GraphicsContext::Begin(L"Pin Root Pages Upload");
 
-	for (uint32_t pageIdx : rootPageIndices)
+	size_t pinnedCount = 0;
+	for (uint32_t pageIdx : rootPages)
 	{
+		if (pinnedCount >= pinBudget)
+			break;
+
 		if (m_PageTableCPU[pageIdx].ChunkIndex != INVALID_CHUNK_INDEX) continue;
 
-		if (m_FreePool.empty()) {
-			ASSERT(false, "VRAM Pool too small to even fit Root Pages!");
+		if (m_FreePool.empty() && !AllocateChunk())
 			break;
-		}
 
 		PhysicalSlot slot = m_FreePool.back();
 		m_FreePool.pop_back();
@@ -266,6 +349,7 @@ void GeometryStreaming::PinRootPages(Model* model)
 		m_PageTableCPU[pageIdx].SlotIndex = slot.SlotIndex;
 		m_PageTableCPU[pageIdx].IsPinned = true;
 		m_PageTableCPU[pageIdx].IsLoading = false;
+		pinnedCount++;
 	}
 
 	for (auto& chunk : m_GeometryChunksGPU)
@@ -276,7 +360,15 @@ void GeometryStreaming::PinRootPages(Model* model)
 
 	gfx.Finish(true);
 
-	Utility::Printf(L"GeometryStreaming: Pinned %zu root pages.\n", rootPageIndices.size());
+	if (pinnedCount < rootPages.size())
+	{
+		Utility::Printf(L"GeometryStreaming: Pinned %zu/%zu root pages (budget=%u, maxChunks=%u).\n",
+			pinnedCount, rootPages.size(), kMaxPinnedRootPages, kMaxChunks);
+	}
+	else
+	{
+		Utility::Printf(L"GeometryStreaming: Pinned %zu root pages.\n", pinnedCount);
+	}
 }
 
 void GeometryStreaming::Shutdown()
@@ -346,12 +438,16 @@ void GeometryStreaming::Update(uint32_t frameIndex)
 
 		m_ReadbackRequestMaskBuffer[readbackBufferIndex].Unmap();
 
-		for (uint32_t pageIdx : m_PagesToLoad)
+		for (auto it = m_PagesToLoad.begin(); it != m_PagesToLoad.end(); )
 		{
+			if (!EnsureFreeSlots(1))
+				break;
+
+			uint32_t pageIdx = *it;
 			m_PageTableCPU[pageIdx].IsLoading = true;
 			EnqueueAsyncLoad(pageIdx);
+			it = m_PagesToLoad.erase(it);
 		}
-		m_PagesToLoad.clear();
 	}
 
 	SyncMemoryAndAddressTable(frameIndex);
@@ -392,7 +488,8 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 	auto it = readyPages.begin();
 	for (; it != readyPages.end(); ++it)
 	{
-		if (m_FreePool.empty()) break;
+		if (m_FreePool.empty() && !AllocateChunk())
+			break;
 
 		auto& item = *it;
 		PhysicalSlot slot = m_FreePool.back();
@@ -487,7 +584,7 @@ void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDat
 	std::vector<Candidate> candidates;
 	candidates.reserve(m_PageTableCPU.size());
 
-	const uint32_t kEvictionGraceFrames = 120;
+	const uint32_t kEvictionGraceFrames = 30;
 	for (uint32_t i = 0; i < (uint32_t)m_PageTableCPU.size(); ++i)
 	{
 		const auto& info = m_PageTableCPU[i];
