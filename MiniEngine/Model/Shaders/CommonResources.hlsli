@@ -408,13 +408,11 @@ RWTexture2D<float4> GetGBufferDUAV()
     return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_GBUFFER_D];
 }
 
-// bufferOffset = psoIdx
 RWByteAddressBuffer GetIndirectVisibleFlagsBufferUAV(uint bufferOffset)
 {
     return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_INDIRECT_VISIBLE_FLAGS_BASE + bufferOffset];
 }
 
-// bufferOffset = psoIdx
 AppendStructuredBuffer<uint> GetIndirectCullingResultsBufferUAV(uint bufferOffset)
 {
     return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_INDIRECT_CULLING_RESULTS_BASE + bufferOffset];

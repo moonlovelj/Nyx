@@ -56,6 +56,7 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
     InstanceConstant inst = GetInstanceConstantSRV(instanceIndex);
     MeshConstant meshInstance = GetMeshConstantSRV(inst.MeshBufferIdx);
     const bool bInFrustrum = IsSphereInFrustum(meshInstance.WorldMatrix, node.BoundSphere);
+    const bool bLargeEnough = !IsSphereTiny(meshInstance.WorldMatrix, node.BoundSphere, TINY_NODE_PIXEL_DIAMETER);
     const bool bTestForLod = !TestForLod(meshInstance.WorldMatrix, ViewerPos, node.MaxParrentError, node.BoundSphere);
     bool bNotOccluded = true;
 #ifdef DAG_CULL_PASS0
@@ -68,7 +69,7 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
 #endif
     
     
-    bVisible = bVisible && bInFrustrum && bTestForLod && bNotOccluded;
+    bVisible = bVisible && bInFrustrum && bTestForLod && bNotOccluded && bLargeEnough;
     
     bool bIsLeaf = node.IsGroup();
 
@@ -212,6 +213,7 @@ void ProcessClusterBatch(uint clusterBatchStartIndex, uint clusterBatchReadySize
         InstanceConstant inst = GetInstanceConstantSRV(meshletPayload.InstanceIndex);
         MeshConstant meshInstance = GetMeshConstantSRV(inst.MeshBufferIdx);
         const bool bIsInFustrum = IsSphereInFrustum(meshInstance.WorldMatrix, meshletHeader.BoundSphere);
+        const bool bLargeEnough = !IsSphereTiny(meshInstance.WorldMatrix, meshletHeader.BoundSphere, TINY_CLUSTER_PIXEL_DIAMETER);
         bool bNotOccluded = true;
 #ifdef DAG_CULL_PASS0
         bNotOccluded = IsSphereNotOccluded(GetPrevSceneHZBSRV(FrameIndexMod2), PrevViewerPos, 
@@ -252,7 +254,7 @@ void ProcessClusterBatch(uint clusterBatchStartIndex, uint clusterBatchReadySize
         
         bool bAlphaBlend = (meshletHeader.GetPSOFlags() & PSO_ALPHA_BLEND);
         uint level = meshletHeader.GetLODLevel();
-        if (bIsInFustrum && bNotOccluded && bTestForLod && !bAlphaBlend)
+        if (bIsInFustrum && bNotOccluded && bTestForLod && !bAlphaBlend && bLargeEnough)
         {
             globallycoherent RWStructuredBuffer<QueueState> taskStateUAV = GetTaskQueueStateBufferUAV();
             uint writeOffset;

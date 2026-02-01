@@ -6,6 +6,8 @@
 #define FLT_MAX 3.402823466e+38
 
 #define DESIRED_FOOTPRINT_PIXELS 4
+#define TINY_NODE_PIXEL_DIAMETER 8.0f
+#define TINY_CLUSTER_PIXEL_DIAMETER 4.0f
 
 bool IsSphereInFrustum(float4x4 WorldMatrix, float4 sphereLS)
 {
@@ -39,6 +41,27 @@ bool IsSphereInFrustum(float4x4 WorldMatrix, float4 sphereLS)
                 return false;
         }
     return true;
+}
+
+bool IsSphereTiny(float4x4 WorldMatrix, float4 sphereLS, float pixelThreshold)
+{
+    float3 column0 = float3(WorldMatrix._m00, WorldMatrix._m10, WorldMatrix._m20);
+    float3 column1 = float3(WorldMatrix._m01, WorldMatrix._m11, WorldMatrix._m21);
+    float3 column2 = float3(WorldMatrix._m02, WorldMatrix._m12, WorldMatrix._m22);
+    float sphereScale = max(length(column0), max(length(column1), length(column2)));
+
+    float4 sphereWS = float4(mul(WorldMatrix, float4(sphereLS.xyz, 1)).xyz, sphereScale * sphereLS.w);
+    float4 sphereVS = float4(mul(ViewMatrix, float4(sphereWS.xyz, 1)).xyz, sphereWS.w);
+
+    float viewZ = -sphereVS.z;
+    if (viewZ <= 1e-6f || viewZ <= sphereVS.w)
+        return false;
+
+    float cotHalfFovY = ProjMatrix._m11;
+    float screenErrorConstant = cotHalfFovY * ViewportHeight * 0.5f;
+
+    float radiusPixels = sphereVS.w * screenErrorConstant / viewZ;
+    return (radiusPixels * 2.0f) < pixelThreshold;
 }
 
 float GetMipLevel(float2 texelRectSize)
