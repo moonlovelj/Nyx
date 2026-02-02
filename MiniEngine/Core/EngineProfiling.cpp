@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -14,14 +14,16 @@
 #include "pch.h"
 #include "SystemTime.h"
 #include "Display.h"
-#include "TextRenderer.h"
 #include "GraphRenderer.h"
 #include "GameInput.h"
 #include "GpuTimeManager.h"
 #include "CommandContext.h"
+#include "ImGuiManager.h"
+#include "imgui.h"
 #include <vector>
 #include <unordered_map>
 #include <array>
+#include <algorithm>
 
 using namespace Graphics;
 using namespace GraphRenderer;
@@ -305,10 +307,6 @@ public:
 
     void GatherTimes(uint32_t FrameIndex)
     {
-        if (sm_SelectedScope == this)
-        {
-            GraphRenderer::SetSelectedIndex(m_GpuTimer.GetTimerIndex());
-        }
         if (EngineProfiling::Paused)
         {
             for (auto node : m_Children)
@@ -353,21 +351,19 @@ public:
         s_TotalCpuTime.RecordStat(FrameIndex, TotalCpuTime);
         s_TotalGpuTime.RecordStat(FrameIndex, TotalGpuTime);
 
-        GraphRenderer::Update(XMFLOAT2(TotalCpuTime, TotalGpuTime), 0, GraphType::Global);
     }
 
     static float GetTotalCpuTime(void) { return s_TotalCpuTime.GetAvg(); }
     static float GetTotalGpuTime(void) { return s_TotalGpuTime.GetAvg(); }
     static float GetFrameDelta(void) { return s_FrameDelta.GetAvg(); }
 
-    static void Display( TextContext& Text, float x )
+    static const StatHistory& GetTotalCpuHistory(void) { return s_TotalCpuTime; }
+    static const StatHistory& GetTotalGpuHistory(void) { return s_TotalGpuTime; }
+    static const StatHistory& GetFrameDeltaHistory(void) { return s_FrameDelta; }
+
+    static void RenderImGuiTree( void )
     {
-        float curX = Text.GetCursorX();
-        Text.DrawString("  ");
-        float indent = Text.GetCursorX() - curX;
-        Text.SetCursorX(curX);
-        sm_RootScope.DisplayNode( Text, x - indent, indent );
-        sm_RootScope.StoreToGraph();
+        sm_RootScope.RenderImGuiRow(0);
     }
 
     void Toggle()
@@ -380,8 +376,7 @@ public:
 
 private:
 
-    void DisplayNode( TextContext& Text, float x, float indent );
-    void StoreToGraph(void);
+    void RenderImGuiRow( int depth );
     void DeleteChildren( void )
     {
         for (auto node : m_Children)
@@ -406,9 +401,6 @@ private:
     static StatHistory s_FrameDelta;
     static NestedTimingTree sm_RootScope;
     static NestedTimingTree* sm_CurrentNode;
-    static NestedTimingTree* sm_SelectedScope;
-
-    static bool sm_CursorOnGraph;
 
 };
 
@@ -417,8 +409,6 @@ StatHistory NestedTimingTree::s_TotalGpuTime;
 StatHistory NestedTimingTree::s_FrameDelta;
 NestedTimingTree NestedTimingTree::sm_RootScope(L"");
 NestedTimingTree* NestedTimingTree::sm_CurrentNode = &NestedTimingTree::sm_RootScope;
-NestedTimingTree* NestedTimingTree::sm_SelectedScope = &NestedTimingTree::sm_RootScope;
-bool NestedTimingTree::sm_CursorOnGraph = false;
 namespace EngineProfiling
 {
     BoolVar DrawFrameRate("Display Frame Rate", true);
@@ -428,8 +418,9 @@ namespace EngineProfiling
     
     void Update( void )
     {
-        if (GameInput::IsFirstPressed( GameInput::kStartButton ) 
-            || GameInput::IsFirstPressed( GameInput::kKey_space ))
+        if (!ImGuiManager::WantsCaptureKeyboard()
+            && (GameInput::IsFirstPressed( GameInput::kStartButton )
+            || GameInput::IsFirstPressed( GameInput::kKey_space )))
         {
             Paused = !Paused;
         }
@@ -451,49 +442,95 @@ namespace EngineProfiling
         return Paused;
     }
 
-    void DisplayFrameRate( TextContext& Text )
+    void RenderImGui()
     {
-        if (!DrawFrameRate)
-            return;
-        
-        float cpuTime = NestedTimingTree::GetTotalCpuTime();
-        float gpuTime = NestedTimingTree::GetTotalGpuTime();
-        float frameRate = 1.0f / NestedTimingTree::GetFrameDelta();
+        ImGuiIO& io = ImGui::GetIO();
+        const float margin = 10.0f;
+        const float minWidth = 320.0f;
+        const float maxWidth = 480.0f;
+        const float rightWidth = std::min(maxWidth, std::max(minWidth, io.DisplaySize.x * 0.32f));
+        const float graphHeight = std::min(180.0f, std::max(120.0f, io.DisplaySize.y * 0.18f));
+        float rightX = io.DisplaySize.x - rightWidth - margin;
+        float rightY = margin;
 
-        Text.DrawFormattedString( "CPU %7.3f ms, GPU %7.3f ms, %3u Hz\n",
-            cpuTime, gpuTime, (uint32_t)(frameRate + 0.5f));
-    }
+        if (DrawFrameRate)
+        {
+            float cpuTime = NestedTimingTree::GetTotalCpuTime();
+            float gpuTime = NestedTimingTree::GetTotalGpuTime();
+            float frameRate = 1.0f / NestedTimingTree::GetFrameDelta();
 
-    void DisplayPerfGraph( GraphicsContext& Context )
-    {
+            ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_Always);
+            ImGui::SetNextWindowBgAlpha(0.35f);
+            ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
+
+            if (ImGui::Begin("Frame Rate", nullptr, flags))
+                ImGui::Text("CPU %.3f ms | GPU %.3f ms | %u Hz", cpuTime, gpuTime, (uint32_t)(frameRate + 0.5f));
+            ImGui::End();
+        }
+
         if (DrawPerfGraph)
-            GraphRenderer::RenderGraphs(Context, GraphType::Global );
-    }
+        {
+            bool open = DrawPerfGraph;
+            ImGui::SetNextWindowPos(ImVec2(rightX, rightY), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(rightWidth, graphHeight), ImGuiCond_FirstUseEver);
+            ImGuiWindowFlags flags = 0;
+            if (ImGui::Begin("Performance Graph", &open, flags))
+            {
+                const StatHistory& cpuHist = NestedTimingTree::GetTotalCpuHistory();
+                const StatHistory& gpuHist = NestedTimingTree::GetTotalGpuHistory();
+                float maxRange = std::max(cpuHist.GetMax(), gpuHist.GetMax()) * 1.1f;
+                if (maxRange <= 0.0f)
+                    maxRange = 1.0f;
 
-    void Display( TextContext& Text, float x, float y, float /*w*/, float /*h*/ )
-    {
-        Text.ResetCursor(x, y);
+                ImGui::PlotLines("CPU ms", cpuHist.GetHistory(), cpuHist.GetHistoryLength(), 0, nullptr, 0.0f, maxRange, ImVec2(0, 80));
+                ImGui::PlotLines("GPU ms", gpuHist.GetHistory(), gpuHist.GetHistoryLength(), 0, nullptr, 0.0f, maxRange, ImVec2(0, 80));
+            }
+            ImGui::End();
+
+            rightY += graphHeight + margin;
+
+            if (open != (bool)DrawPerfGraph)
+            {
+                if (open)
+                    DrawPerfGraph.Increment();
+                else
+                    DrawPerfGraph.Decrement();
+            }
+        }
 
         if (DrawProfiler)
         {
-            //Text.GetCommandContext().SetScissor((uint32_t)Floor(x), (uint32_t)Floor(y), (uint32_t)Ceiling(w), (uint32_t)Ceiling(h));
+            bool open = DrawProfiler;
+            const float profilerHeight = std::max(240.0f, io.DisplaySize.y - rightY - margin);
+            ImGui::SetNextWindowPos(ImVec2(rightX, rightY), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(rightWidth, profilerHeight), ImGuiCond_FirstUseEver);
+            ImGuiWindowFlags flags = 0;
+            if (ImGui::Begin("Profiler", &open, flags))
+            {
+                ImGuiTableFlags tableFlags = ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY;
+                if (ImGui::BeginTable("ProfilerTable", 3, tableFlags))
+                {
+                    ImGui::TableSetupColumn("Scope", ImGuiTableColumnFlags_WidthStretch);
+                    ImGui::TableSetupColumn("CPU ms", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+                    ImGui::TableSetupColumn("GPU ms", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+                    ImGui::TableHeadersRow();
 
-            NestedTimingTree::Update();
+                    NestedTimingTree::RenderImGuiTree();
 
-            Text.SetColor( Color(0.5f, 1.0f, 1.0f) );
-            Text.DrawString("Engine Profiling");
-            Text.SetColor(Color(0.8f, 0.8f, 0.8f));
-            Text.SetTextSize(20.0f);
-            Text.DrawString("           CPU    GPU");
-            Text.SetTextSize(24.0f);
-            Text.NewLine();
-            Text.SetTextSize(20.0f);
-            Text.SetColor( Color(1.0f, 1.0f, 1.0f) );
+                    ImGui::EndTable();
+                }
+            }
+            ImGui::End();
 
-            NestedTimingTree::Display( Text, x );
+            if (open != (bool)DrawProfiler)
+            {
+                if (open)
+                    DrawProfiler.Increment();
+                else
+                    DrawProfiler.Decrement();
+            }
         }
-
-        Text.GetCommandContext().SetScissor(0, 0, g_DisplayWidth, g_DisplayHeight);
     }
 
 } // EngineProfiling
@@ -510,104 +547,49 @@ void NestedTimingTree::PopProfilingMarker( CommandContext* Context )
     sm_CurrentNode = sm_CurrentNode->m_Parent;
 }
 
-void NestedTimingTree::Update( void )
-{
-    ASSERT(sm_SelectedScope != nullptr, "Corrupted profiling data structure");
-
-    if (sm_SelectedScope == &sm_RootScope)
-    {
-        sm_SelectedScope = sm_RootScope.FirstChild();
-        if (sm_SelectedScope == &sm_RootScope)
-            return;
-    }
-
-    if (GameInput::IsFirstPressed( GameInput::kDPadLeft )
-        || GameInput::IsFirstPressed( GameInput::kKey_left ))
-    {
-        //if still on graphs go back to text
-        if (sm_CursorOnGraph)
-            sm_CursorOnGraph = !sm_CursorOnGraph;
-        else
-            sm_SelectedScope->m_IsExpanded = false;
-    }
-    else if (GameInput::IsFirstPressed( GameInput::kDPadRight )
-        || GameInput::IsFirstPressed( GameInput::kKey_right ))
-    {
-        if (sm_SelectedScope->m_IsExpanded == true && !sm_CursorOnGraph)
-            sm_CursorOnGraph = true;
-        else
-            sm_SelectedScope->m_IsExpanded = true;
-        //if already expanded go over to graphs
-
-    }
-    else if (GameInput::IsFirstPressed( GameInput::kDPadDown )
-        || GameInput::IsFirstPressed( GameInput::kKey_down ))
-    {
-        sm_SelectedScope = sm_SelectedScope ? sm_SelectedScope->NextScope() : nullptr;
-    }
-    else if (GameInput::IsFirstPressed( GameInput::kDPadUp )
-        || GameInput::IsFirstPressed( GameInput::kKey_up ))
-    {
-        sm_SelectedScope = sm_SelectedScope ? sm_SelectedScope->PrevScope() : nullptr;
-    }
-    else if (GameInput::IsFirstPressed( GameInput::kAButton ) 
-        || GameInput::IsFirstPressed( GameInput::kKey_return ))
-    {
-        sm_SelectedScope->Toggle();
-    }
-
-}
-
-void NestedTimingTree::DisplayNode( TextContext& Text, float leftMargin, float indent )
+void NestedTimingTree::RenderImGuiRow( int depth )
 {
     if (this == &sm_RootScope)
     {
-        m_IsExpanded = true;
-        sm_RootScope.FirstChild()->m_IsExpanded = true;
-    }
-    else
-    {
-        if (sm_SelectedScope == this && !sm_CursorOnGraph)
-            Text.SetColor( Color(1.0f, 1.0f, 0.5f) );
-        else
-            Text.SetColor( Color(1.0f, 1.0f, 1.0f) );
-    
-
-        Text.SetLeftMargin(leftMargin);
-        Text.SetCursorX(leftMargin);
-
-        if (m_Children.size() == 0)
-            Text.DrawString("  ");
-        else if (m_IsExpanded)
-            Text.DrawString("- ");
-        else
-            Text.DrawString("+ ");
-
-        Text.DrawString(m_Name.c_str());
-        Text.SetCursorX(leftMargin + 300.0f);
-        Text.DrawFormattedString("%6.3f %6.3f   ", m_CpuTime.GetAvg(), m_GpuTime.GetAvg());
-
-        if (IsGraphed())
-        {
-            Text.SetColor(GraphRenderer::GetGraphColor(m_GraphHandle, GraphType::Profile));
-            Text.DrawString("  []\n");
-        }
-        else
-            Text.DrawString("\n");
-    }
-
-    if (!m_IsExpanded)
+        for (auto node : m_Children)
+            node->RenderImGuiRow(depth);
         return;
+    }
 
-    for (auto node : m_Children)
-        node->DisplayNode(Text, leftMargin + indent, indent);
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanFullWidth | ImGuiTreeNodeFlags_OpenOnArrow;
+    if (m_Children.empty())
+        flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+    if (depth <= 1)
+        flags |= ImGuiTreeNodeFlags_DefaultOpen;
+
+    std::string label = Utility::WideStringToUTF8(m_Name);
+    bool open = ImGui::TreeNodeEx(this, flags, "%s", label.c_str());
+
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+    {
+        ImGui::BeginTooltip();
+        ImGui::Text("Avg CPU %.3f ms | Avg GPU %.3f ms", m_CpuTime.GetAvg(), m_GpuTime.GetAvg());
+        float maxRange = std::max(m_CpuTime.GetMax(), m_GpuTime.GetMax()) * 1.1f;
+        if (maxRange <= 0.0f)
+            maxRange = 1.0f;
+        ImGui::PlotLines("CPU", m_CpuTime.GetHistory(), m_CpuTime.GetHistoryLength(), 0, nullptr, 0.0f, maxRange, ImVec2(220, 60));
+        ImGui::PlotLines("GPU", m_GpuTime.GetHistory(), m_GpuTime.GetHistoryLength(), 0, nullptr, 0.0f, maxRange, ImVec2(220, 60));
+        ImGui::EndTooltip();
+    }
+
+    ImGui::TableNextColumn();
+    ImGui::Text("%6.3f", m_CpuTime.GetAvg());
+    ImGui::TableNextColumn();
+    ImGui::Text("%6.3f", m_GpuTime.GetAvg());
+
+    if (!m_Children.empty() && open)
+    {
+        for (auto node : m_Children)
+            node->RenderImGuiRow(depth + 1);
+        ImGui::TreePop();
+    }
 }
 
-void NestedTimingTree::StoreToGraph(void)
-{
-    if (m_GraphHandle != PERF_GRAPH_ERROR)
-        GraphRenderer::Update( XMFLOAT2(m_CpuTime.GetLast(), m_GpuTime.GetLast()), m_GraphHandle, GraphType::Profile);
-
-    for (auto node : m_Children)
-        node->StoreToGraph();
-}

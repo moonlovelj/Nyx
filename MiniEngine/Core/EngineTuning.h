@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -16,6 +16,7 @@
 #include <string>
 #include <stdint.h>
 #include <float.h>
+#include <cmath>
 #include <map>
 #include <set>
 
@@ -91,6 +92,10 @@ public:
     NumVar& operator=( float val ) { m_Value = Clamp(val); return *this; }
     operator float() const { return m_Value; }
 
+    float GetMinValue() const { return m_MinValue; }
+    float GetMaxValue() const { return m_MaxValue; }
+    float GetStepSize() const { return m_StepSize; }
+
     virtual void Increment( void ) override { m_Value = Clamp(m_Value + m_StepSize); EngineVar::Increment(); }
     virtual void Decrement( void ) override { m_Value = Clamp(m_Value - m_StepSize); EngineVar::Decrement(); }
 
@@ -114,6 +119,10 @@ public:
     ExpVar& operator=( float val );	// m_Value = log2(val)
     operator float() const;			// returns exp2(m_Value)
 
+    float GetMinValue() const { return exp2f(m_MinValue); }
+    float GetMaxValue() const { return exp2f(m_MaxValue); }
+    float GetStepSize() const { return m_StepSize; }
+
     virtual void DisplayValue( TextContext& Text ) const override;
     virtual std::string ToString( void ) const override;
     virtual void SetValue( FILE* file, const std::string& setting ) override;
@@ -126,6 +135,10 @@ public:
     IntVar( const std::string& path, int32_t val, int32_t minValue = 0, int32_t maxValue = (1 << 24) - 1, int32_t stepSize = 1, ActionCallback pfnCallback = EngineVar::DefaultActionHandler);
     IntVar& operator=( int32_t val ) { m_Value = Clamp(val); return *this; }
     operator int32_t() const { return m_Value; }
+
+    int32_t GetMinValue() const { return m_MinValue; }
+    int32_t GetMaxValue() const { return m_MaxValue; }
+    int32_t GetStepSize() const { return m_StepSize; }
 
     virtual void Increment( void ) override { m_Value = Clamp(m_Value + m_StepSize); EngineVar::Increment(); }
     virtual void Decrement( void ) override { m_Value = Clamp(m_Value - m_StepSize); EngineVar::Decrement(); }
@@ -150,6 +163,9 @@ public:
     EnumVar& operator=( int32_t val ) { m_Value = Clamp(val); return *this; }
     operator int32_t() const { return m_Value; }
 
+    int32_t GetEnumCount() const { return m_EnumLength; }
+    const char* const* GetEnumLabels() const { return m_EnumLabels; }
+
     virtual void Increment( void ) override { m_Value = (m_Value + 1) % m_EnumLength; EngineVar::Increment(); }
     virtual void Decrement( void ) override { m_Value = (m_Value + m_EnumLength - 1) % m_EnumLength; EngineVar::Decrement(); }
 
@@ -173,6 +189,9 @@ public:
     DynamicEnumVar( const std::string& path, ActionCallback pfnCallback = EngineVar::DefaultActionHandler);
     DynamicEnumVar& operator=( int32_t val ) { m_Value = Clamp(val); return *this; }
     operator int32_t() const { return m_Value; }
+
+    int32_t GetEnumCount() const { return m_EnumCount; }
+    const std::vector<std::wstring>& GetEnumLabels() const { return m_EnumLabels; }
 
     virtual void Increment( void ) override { m_Value = (m_Value + 1) % m_EnumCount; EngineVar::Increment(); }
     virtual void Decrement( void ) override { m_Value = (m_Value + m_EnumCount - 1) % m_EnumCount; EngineVar::Decrement(); }

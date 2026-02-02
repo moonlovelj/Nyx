@@ -515,13 +515,13 @@
     <ClCompile Include="EngineTuning.cpp" />
     <ClCompile Include="FileUtility.cpp" />
     <ClCompile Include="FXAA.cpp" />
-    <ClCompile Include="Input.cpp" />
     <ClCompile Include="GameCore.cpp" />
     <ClCompile Include="GpuBuffer.cpp" />
     <ClCompile Include="GpuTimeManager.cpp" />
     <ClCompile Include="GraphicsCommon.cpp" />
     <ClCompile Include="GraphicsCore.cpp" />
     <ClCompile Include="GraphRenderer.cpp" />
+    <ClCompile Include="ImGuiManager.cpp" />
     <ClCompile Include="ImageScaling.cpp" />
     <ClCompile Include="LinearAllocator.cpp" />
     <ClCompile Include="Math\BoundingSphere.cpp" />
@@ -552,6 +552,14 @@
     <ClCompile Include="Util\CommandLineArg.cpp" />
     <ClCompile Include="IBL.cpp" />
     <ClCompile Include="HierarchicalDepthBuffer.cpp" />
+    <ClCompile Include="..\ThirdParty\imgui\imgui.cpp" />
+    <ClCompile Include="..\ThirdParty\imgui\imgui_demo.cpp" />
+    <ClCompile Include="..\ThirdParty\imgui\imgui_draw.cpp" />
+    <ClCompile Include="..\ThirdParty\imgui\imgui_tables.cpp" />
+    <ClCompile Include="..\ThirdParty\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="..\ThirdParty\imgui\backends\imgui_impl_win32.cpp" />
+    <ClCompile Include="..\ThirdParty\imgui\backends\imgui_impl_dx12.cpp" />
+    <ClCompile Include="GameInput.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BitonicSort.h" />
@@ -584,6 +592,7 @@
     <ClInclude Include="GraphicsCommon.h" />
     <ClInclude Include="GraphicsCore.h" />
     <ClInclude Include="GraphRenderer.h" />
+    <ClInclude Include="ImGuiManager.h" />
     <ClInclude Include="Hash.h" />
     <ClInclude Include="ImageScaling.h" />
     <ClInclude Include="LinearAllocator.h" />

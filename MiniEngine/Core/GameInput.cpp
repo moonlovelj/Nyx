@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -384,10 +384,19 @@ namespace
 #if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
         HWND foreground = GetForegroundWindow();
         bool visible = IsWindowVisible(foreground) != 0;
+        bool altHeld = (::GetKeyState(VK_MENU) & 0x8000) != 0;
 
         if (foreground != GameCore::g_hWnd // wouldn't be able to acquire
             || !visible)
         {
+            KbmZeroInputs();
+        }
+        else if (altHeld)
+        {
+            if (s_Mouse)
+                s_Mouse->Unacquire();
+            if (s_Keyboard)
+                s_Keyboard->Unacquire();
             KbmZeroInputs();
         }
         else

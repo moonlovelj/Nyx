@@ -14,7 +14,6 @@
 #pragma once
 
 #include <string>
-#include "TextRenderer.h"
 
 class CommandContext;
 
@@ -25,9 +24,7 @@ namespace EngineProfiling
     void BeginBlock(const std::wstring& name, CommandContext* Context = nullptr);
     void EndBlock(CommandContext* Context = nullptr);
 
-    void DisplayFrameRate(TextContext& Text);
-    void DisplayPerfGraph(GraphicsContext& Text);
-    void Display(TextContext& Text, float x, float y, float w, float h);
+    void RenderImGui();
     bool IsPaused();
 }
 

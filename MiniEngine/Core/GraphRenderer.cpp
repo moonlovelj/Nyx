@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -20,6 +20,7 @@
 #include "GameInput.h"
 #include "SystemTime.h"
 #include "EngineProfiling.h"
+#include "TextRenderer.h"
 
 #include "CompiledShaders/PerfGraphBackgroundVS.h"
 #include "CompiledShaders/PerfGraphVS.h"

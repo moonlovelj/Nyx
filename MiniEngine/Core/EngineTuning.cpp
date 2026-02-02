@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -15,14 +15,12 @@
 #include "pch.h"
 #include "TextRenderer.h"
 #include "GameInput.h"
-#include "Color.h"
-#include "Display.h"
-#include "CommandContext.h"
-#include "GraphRenderer.h"
+#include "EngineProfiling.h"
+#include "ImGuiManager.h"
+#include "imgui.h"
 
 using namespace std;
 using namespace Math;
-using namespace Graphics;
 
 namespace EngineTuning
 {
@@ -64,6 +62,7 @@ public:
     }
 
     void Display( TextContext& Text, float leftMargin, EngineVar* highlightedTweak );
+    void DisplayImGui( void );
 
     void SaveToFile( FILE* file, int fileMargin );
     void LoadSettingsFromFile( FILE* file );
@@ -150,6 +149,127 @@ void VariableGroup::Display( TextContext& Text, float leftMargin, EngineVar* hig
             Text.NewLine();
         }
         
+    }
+}
+
+namespace
+{
+    void DrawVarImGui( const std::string& name, EngineVar& var )
+    {
+        if (auto* boolVar = dynamic_cast<BoolVar*>(&var))
+        {
+            bool value = *boolVar;
+            if (ImGui::Checkbox(name.c_str(), &value))
+            {
+                if (value)
+                    boolVar->Increment();
+                else
+                    boolVar->Decrement();
+            }
+            return;
+        }
+
+        if (auto* intVar = dynamic_cast<IntVar*>(&var))
+        {
+            int value = *intVar;
+            if (ImGui::DragInt(name.c_str(), &value, (float)intVar->GetStepSize(), intVar->GetMinValue(), intVar->GetMaxValue()))
+            {
+                *intVar = value;
+                intVar->Bang();
+            }
+            return;
+        }
+
+        if (auto* numVar = dynamic_cast<NumVar*>(&var))
+        {
+            float value = *numVar;
+            if (ImGui::DragFloat(name.c_str(), &value, numVar->GetStepSize(), numVar->GetMinValue(), numVar->GetMaxValue(), "%.3f"))
+            {
+                *numVar = value;
+                numVar->Bang();
+            }
+            return;
+        }
+
+        if (auto* expVar = dynamic_cast<ExpVar*>(&var))
+        {
+            float value = *expVar;
+            ImGuiSliderFlags flags = ImGuiSliderFlags_Logarithmic;
+            if (ImGui::SliderFloat(name.c_str(), &value, expVar->GetMinValue(), expVar->GetMaxValue(), "%.3f", flags))
+            {
+                *expVar = value;
+                expVar->Bang();
+            }
+            return;
+        }
+
+        if (auto* enumVar = dynamic_cast<EnumVar*>(&var))
+        {
+            int value = *enumVar;
+            if (ImGui::Combo(name.c_str(), &value, enumVar->GetEnumLabels(), enumVar->GetEnumCount()))
+            {
+                *enumVar = value;
+                enumVar->Bang();
+            }
+            return;
+        }
+
+        if (auto* dynEnumVar = dynamic_cast<DynamicEnumVar*>(&var))
+        {
+            const auto& labels = dynEnumVar->GetEnumLabels();
+            std::vector<std::string> utf8Labels;
+            std::vector<const char*> labelPtrs;
+            utf8Labels.reserve(labels.size());
+            labelPtrs.reserve(labels.size());
+            for (const auto& label : labels)
+            {
+                utf8Labels.push_back(Utility::WideStringToUTF8(label));
+                labelPtrs.push_back(utf8Labels.back().c_str());
+            }
+
+            int value = *dynEnumVar;
+            if (!labelPtrs.empty() && ImGui::Combo(name.c_str(), &value, labelPtrs.data(), (int)labelPtrs.size()))
+            {
+                *dynEnumVar = value;
+                dynEnumVar->Bang();
+            }
+            return;
+        }
+
+        if (auto* trigger = dynamic_cast<CallbackTrigger*>(&var))
+        {
+            if (ImGui::Button(name.c_str()))
+                trigger->Bang();
+            return;
+        }
+
+        ImGui::Text("%s", name.c_str());
+    }
+}
+
+void VariableGroup::DisplayImGui( void )
+{
+    for (auto iter = m_Children.begin(); iter != m_Children.end(); ++iter)
+    {
+        EngineVar* child = iter->second;
+        ImGui::PushID(child);
+
+        if (auto* subGroup = dynamic_cast<VariableGroup*>(child))
+        {
+            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanFullWidth;
+            bool open = ImGui::TreeNodeEx(iter->first.c_str(), flags);
+            if (open)
+            {
+                subGroup->DisplayImGui();
+                ImGui::TreePop();
+            }
+        }
+        else
+        {
+            DrawVarImGui(iter->first, *child);
+        }
+
+        ImGui::PopID();
     }
 }
 
@@ -555,61 +675,16 @@ void EngineTuning::Initialize( void )
 
 }
 
-void HandleDigitalButtonPress( GameInput::DigitalInput button, float timeDelta, std::function<void ()> action )
-{
-    if (!GameInput::IsPressed(button))
-        return;
-
-    float durationHeld = GameInput::GetDurationPressed(button);
-
-    // Tick on the first press
-    if (durationHeld == 0.0f)
-    {
-        action();
-        return;
-    }
-
-    // After ward, tick at fixed intervals
-    float oldDuration = durationHeld - timeDelta;
-
-    // Before 2 seconds, use slow scale (200ms/tick), afterward use fast scale (50ms/tick).
-    float timeStretch = durationHeld < 2.0f ? 5.0f : 20.0f;
-
-    if (Floor(durationHeld * timeStretch) > Floor(oldDuration * timeStretch))
-        action();
-}
-
 void EngineTuning::Update( float frameTime )
 {
-    if (GameInput::IsFirstPressed( GameInput::kBackButton )
-        || GameInput::IsFirstPressed( GameInput::kKey_back ))
+    (void)frameTime;
+
+    if (ImGuiManager::WantsCaptureKeyboard())
+        return;
+
+    if (GameInput::IsFirstPressed(GameInput::kBackButton)
+        || GameInput::IsFirstPressed(GameInput::kKey_back))
         sm_IsVisible = !sm_IsVisible;
-
-    if (!sm_IsVisible)
-        return;
-
-    if (sm_SelectedVariable == nullptr || sm_SelectedVariable == &VariableGroup::sm_RootGroup)
-        sm_SelectedVariable = VariableGroup::sm_RootGroup.FirstVariable();
-
-    if (sm_SelectedVariable == nullptr)
-        return;
-
-    // Detect a DPad button press
-    HandleDigitalButtonPress(GameInput::kDPadRight, frameTime, []{ sm_SelectedVariable->Increment(); } );
-    HandleDigitalButtonPress(GameInput::kDPadLeft,	frameTime, []{ sm_SelectedVariable->Decrement(); } );
-    HandleDigitalButtonPress(GameInput::kDPadDown,	frameTime, []{ sm_SelectedVariable = sm_SelectedVariable->NextVar(); } );
-    HandleDigitalButtonPress(GameInput::kDPadUp,	frameTime, []{ sm_SelectedVariable = sm_SelectedVariable->PrevVar(); } );
-
-    HandleDigitalButtonPress(GameInput::kKey_right, frameTime, []{ sm_SelectedVariable->Increment(); } );
-    HandleDigitalButtonPress(GameInput::kKey_left,	frameTime, []{ sm_SelectedVariable->Decrement(); } );
-    HandleDigitalButtonPress(GameInput::kKey_down,	frameTime, []{ sm_SelectedVariable = sm_SelectedVariable->NextVar(); } );
-    HandleDigitalButtonPress(GameInput::kKey_up,	frameTime, []{ sm_SelectedVariable = sm_SelectedVariable->PrevVar(); } );
-
-    if (GameInput::IsFirstPressed( GameInput::kAButton )
-        || GameInput::IsFirstPressed( GameInput::kKey_return ))
-    {
-        sm_SelectedVariable->Bang();
-    }
 }
 
 /*
@@ -642,41 +717,36 @@ static CallbackTrigger Load("Load Settings", StartLoadFunc, nullptr);
 
 void EngineTuning::Display( GraphicsContext& Context, float x, float y, float w, float h )
 {
-    GraphRenderer::RenderGraphs(Context, GraphRenderer::GraphType::Profile);
+    (void)Context;
 
-    TextContext Text(Context);
-    Text.Begin();
+    EngineProfiling::RenderImGui();
 
-    EngineProfiling::DisplayFrameRate(Text);
-
-    Text.ResetCursor( x, y );
+    static bool s_ShowDemoWindow = false;
 
     if (!sm_IsVisible)
     {
-        EngineProfiling::Display(Text, x, y, w, h);
+        if (s_ShowDemoWindow)
+            ImGui::ShowDemoWindow(&s_ShowDemoWindow);
         return;
     }
 
-    s_ScrollTopTrigger = y + h * 0.2f;
-    s_ScrollBottomTrigger = y + h * 0.8f;
+    ImGui::SetNextWindowPos(ImVec2(x, y), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(w * 0.35f, h * 0.9f), ImGuiCond_FirstUseEver);
 
-    float hScale = g_DisplayWidth / 1920.0f;
-    float vScale = g_DisplayHeight / 1080.0f;
+    if (ImGui::Begin("Engine Tuning", &sm_IsVisible, ImGuiWindowFlags_MenuBar))
+    {
+        if (ImGui::BeginMenuBar())
+        {
+            ImGui::MenuItem("ImGui Demo", nullptr, &s_ShowDemoWindow);
+            ImGui::EndMenuBar();
+        }
 
-    Context.SetScissor((uint32_t)Floor(x * hScale), (uint32_t)Floor(y * vScale), 
-        (uint32_t)Ceiling((x + w) * hScale), (uint32_t)Ceiling((y + h) * vScale));
+        VariableGroup::sm_RootGroup.DisplayImGui();
+    }
+    ImGui::End();
 
-    Text.ResetCursor(x, y - s_ScrollOffset );
-    Text.SetColor( Color(0.5f, 1.0f, 1.0f) );
-    Text.DrawString("Engine Tuning\n");
-    Text.SetTextSize(20.0f);
-
-    VariableGroup::sm_RootGroup.Display( Text, x, sm_SelectedVariable );
-    
-    EngineProfiling::DisplayPerfGraph(Context);
-
-    Text.End();
-    Context.SetScissor(0, 0, g_DisplayWidth, g_DisplayHeight);
+    if (s_ShowDemoWindow)
+        ImGui::ShowDemoWindow(&s_ShowDemoWindow);
 }
 
 void EngineTuning::AddToVariableGraph( const string& path, EngineVar& var )

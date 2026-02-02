@@ -1,0 +1,24 @@
+# Normalize text files and enforce CRLF for VS-visible sources/projects.
+* text=auto
+
+*.sln text eol=crlf
+*.vcxproj text eol=crlf
+*.vcxproj.filters text eol=crlf
+*.vcxproj.user text eol=crlf
+*.props text eol=crlf
+*.targets text eol=crlf
+*.natvis text eol=crlf
+
+*.c text eol=crlf
+*.cc text eol=crlf
+*.cpp text eol=crlf
+*.cxx text eol=crlf
+*.h text eol=crlf
+*.hpp text eol=crlf
+*.inl text eol=crlf
+*.hlsl text eol=crlf
+*.hlsli text eol=crlf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

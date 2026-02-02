@@ -414,8 +414,7 @@ void Graphics::Initialize(bool RequireDXRSupport)
     TemporalEffects::Initialize();
     PostEffects::Initialize();
     SSAO::Initialize();
-    TextRenderer::Initialize();
-    GraphRenderer::Initialize();
+    // Legacy text/graph UI disabled in favor of ImGui.
     ParticleEffectManager::Initialize(3840, 2160);
 }
 
@@ -435,8 +434,7 @@ void Graphics::Shutdown( void )
     TemporalEffects::Shutdown();
     PostEffects::Shutdown();
     SSAO::Shutdown();
-    TextRenderer::Shutdown();
-    GraphRenderer::Shutdown();
+    // Legacy text/graph UI disabled in favor of ImGui.
     ParticleEffectManager::Shutdown();
     Display::Shutdown();
 
