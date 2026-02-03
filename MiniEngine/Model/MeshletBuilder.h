@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <vector>
 #include <cstdint>
 #include <span>
@@ -7,7 +7,6 @@
 #include <memory>
 #include <cmath>
 #include <unordered_map>
-#include "MeshOptimizer/meshoptimizer.h"
 #include "MeshletStructs.h"
 #include "../Core/Math/Vector.h"
 
@@ -35,6 +34,7 @@ struct MeshletBuildSettings
 	float SimplifySloppyErrorFactor = 2.0f;
 
 	bool bOutputDebugInfo = false;
+    bool bValidateBuild = false; // optional offline validation for LOD/structure
 };
 
 struct GroupPackage
@@ -121,6 +121,7 @@ private:
 		const MeshletBuildArgs& buildArgs,
 		const std::vector<Meshlet>& current,
 		std::span<const uint32_t> subsetIds,
+		std::span<const uint32_t> posRemap,
 		uint32_t LODLevel,
 		std::vector<Group>& groups);
 
@@ -151,6 +152,11 @@ private:
 
 	// Streaming Group + BVH
 	static MeshletBuildProducts BuildStreamingData(
+		const MeshletBuildArgs& buildArgs,
+		const std::vector<Group>& groups,
+		const std::vector<Meshlet>& meshlets);
+
+	static bool ValidateBuild(
 		const MeshletBuildArgs& buildArgs,
 		const std::vector<Group>& groups,
 		const std::vector<Meshlet>& meshlets);

@@ -1,4 +1,4 @@
-﻿//
+//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -24,7 +24,6 @@
 #include "../Core/Utility.h"
 #include "../Core/Math/Common.h"
 #include "../Core/Math/Quaternion.h"
-#include "MeshOptimizer/MeshOptimizer.h"
 #include "metis.h"
 #include "lz4.h"
 

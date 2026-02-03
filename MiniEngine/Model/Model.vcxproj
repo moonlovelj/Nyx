@@ -50,6 +50,15 @@
     <Import Project="..\PropertySheets\Desktop.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <EnableClangTidyCodeAnalysis>true</EnableClangTidyCodeAnalysis>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">
+    <EnableClangTidyCodeAnalysis>true</EnableClangTidyCodeAnalysis>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <EnableClangTidyCodeAnalysis>true</EnableClangTidyCodeAnalysis>
+  </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
@@ -68,18 +77,21 @@
     </Manifest>
     <ClCompile>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">..\ThirdParty\metis\5.1.0\include;..\ThirdParty\lz4;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">..\ThirdParty\metis\5.1.0\include;..\ThirdParty\lz4;..\ThirdParty\meshoptimizer;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OpenMPSupport Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</OpenMPSupport>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <ClCompile>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">..\ThirdParty\metis\5.1.0\include;..\ThirdParty\lz4;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">..\ThirdParty\metis\5.1.0\include;..\ThirdParty\lz4;..\ThirdParty\meshoptimizer;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OpenMPSupport Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">true</OpenMPSupport>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <ClCompile>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Release|x64'">stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|x64'">..\ThirdParty\metis\5.1.0\include;..\ThirdParty\lz4;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|x64'">..\ThirdParty\metis\5.1.0\include;..\ThirdParty\lz4;..\ThirdParty\meshoptimizer;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OpenMPSupport Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</OpenMPSupport>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <FxCompile>
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">6.6</ShaderModel>
@@ -106,7 +118,6 @@
     <ClInclude Include="MeshConvert.h" />
     <ClInclude Include="MeshletBuilder.h" />
     <ClInclude Include="MeshletStructs.h" />
-    <ClInclude Include="MeshOptimizer\meshoptimizer.h" />
     <ClInclude Include="Model.h" />
     <ClInclude Include="ModelInstanceManager.h" />
     <ClInclude Include="ModelLoader.h" />
@@ -118,6 +129,22 @@
     <ClInclude Include="TextureConvert.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\ThirdParty\meshoptimizer\allocator.cpp" />
+    <ClCompile Include="..\ThirdParty\meshoptimizer\clusterizer.cpp" />
+    <ClCompile Include="..\ThirdParty\meshoptimizer\indexanalyzer.cpp" />
+    <ClCompile Include="..\ThirdParty\meshoptimizer\indexcodec.cpp" />
+    <ClCompile Include="..\ThirdParty\meshoptimizer\indexgenerator.cpp" />
+    <ClCompile Include="..\ThirdParty\meshoptimizer\overdrawoptimizer.cpp" />
+    <ClCompile Include="..\ThirdParty\meshoptimizer\partition.cpp" />
+    <ClCompile Include="..\ThirdParty\meshoptimizer\quantization.cpp" />
+    <ClCompile Include="..\ThirdParty\meshoptimizer\rasterizer.cpp" />
+    <ClCompile Include="..\ThirdParty\meshoptimizer\simplifier.cpp" />
+    <ClCompile Include="..\ThirdParty\meshoptimizer\spatialorder.cpp" />
+    <ClCompile Include="..\ThirdParty\meshoptimizer\stripifier.cpp" />
+    <ClCompile Include="..\ThirdParty\meshoptimizer\vcacheoptimizer.cpp" />
+    <ClCompile Include="..\ThirdParty\meshoptimizer\vertexcodec.cpp" />
+    <ClCompile Include="..\ThirdParty\meshoptimizer\vertexfilter.cpp" />
+    <ClCompile Include="..\ThirdParty\meshoptimizer\vfetchoptimizer.cpp" />
     <ClCompile Include="Animation.cpp" />
     <ClCompile Include="BuildH3D.cpp" />
     <ClCompile Include="GeometryStreaming.cpp" />
@@ -130,22 +157,6 @@
     <ClCompile Include="..\ThirdParty\lz4\lz4.c" />
     <ClCompile Include="MeshConvert.cpp" />
     <ClCompile Include="MeshletBuilder.cpp" />
-    <ClCompile Include="MeshOptimizer\allocator.cpp" />
-    <ClCompile Include="MeshOptimizer\clusterizer.cpp" />
-    <ClCompile Include="MeshOptimizer\indexanalyzer.cpp" />
-    <ClCompile Include="MeshOptimizer\indexcodec.cpp" />
-    <ClCompile Include="MeshOptimizer\indexgenerator.cpp" />
-    <ClCompile Include="MeshOptimizer\overdrawoptimizer.cpp" />
-    <ClCompile Include="MeshOptimizer\partition.cpp" />
-    <ClCompile Include="MeshOptimizer\quantization.cpp" />
-    <ClCompile Include="MeshOptimizer\rasterizer.cpp" />
-    <ClCompile Include="MeshOptimizer\simplifier.cpp" />
-    <ClCompile Include="MeshOptimizer\spatialorder.cpp" />
-    <ClCompile Include="MeshOptimizer\stripifier.cpp" />
-    <ClCompile Include="MeshOptimizer\vcacheoptimizer.cpp" />
-    <ClCompile Include="MeshOptimizer\vertexcodec.cpp" />
-    <ClCompile Include="MeshOptimizer\vertexfilter.cpp" />
-    <ClCompile Include="MeshOptimizer\vfetchoptimizer.cpp" />
     <ClCompile Include="Model.cpp" />
     <ClCompile Include="ModelConvert.cpp" />
     <ClCompile Include="ModelH3D.cpp" />

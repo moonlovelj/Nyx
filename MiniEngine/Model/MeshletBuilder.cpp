@@ -1,4 +1,4 @@
-﻿#include "MeshletBuilder.h"
+#include "MeshletBuilder.h"
 #include "pch.h"
 #include <unordered_map>
 #include <numeric>
@@ -7,10 +7,12 @@
 #include <execution> 
 #include "../Core/Utility.h"
 #include "Model.h"
+#include "meshoptimizer.h"
 
 using namespace Renderer;
 
 static constexpr float kInfinity = std::numeric_limits<float>::infinity();
+static constexpr float kValidateEpsilon = 1e-4f;
 
 // 解码 DXGI_FORMAT_R10G10B10A2_UNORM 到 float3 法线（[-1,1]）
 inline Math::Vector3 DecodeNormal_R10G10B10A2(uint32_t packed)
@@ -78,6 +80,61 @@ struct LocalIndexCache {
 	}
 };
 
+static bool VertexAttributesDiffer(const MeshletBuildArgs& buildArgs, uint32_t a, uint32_t b)
+{
+	const unsigned char* va = buildArgs.VBData + size_t(a) * buildArgs.vertexStride;
+	const unsigned char* vb = buildArgs.VBData + size_t(b) * buildArgs.vertexStride;
+
+	size_t offset = 12; // position
+
+	// Normal (R10G10B10A2)
+	const uint32_t* na = reinterpret_cast<const uint32_t*>(va + offset);
+	const uint32_t* nb = reinterpret_cast<const uint32_t*>(vb + offset);
+	if (*na != *nb)
+		return true;
+	offset += 4;
+
+	if (buildArgs.psoFlags & PSOFlags::kHasTangent)
+	{
+		const uint32_t* ta = reinterpret_cast<const uint32_t*>(va + offset);
+		const uint32_t* tb = reinterpret_cast<const uint32_t*>(vb + offset);
+		if (*ta != *tb)
+			return true;
+		offset += 4;
+	}
+
+	if (buildArgs.psoFlags & PSOFlags::kHasUV0)
+	{
+		const uint32_t* uva = reinterpret_cast<const uint32_t*>(va + offset);
+		const uint32_t* uvb = reinterpret_cast<const uint32_t*>(vb + offset);
+		if (*uva != *uvb)
+			return true;
+		offset += 4;
+	}
+
+	return false;
+}
+
+static void BuildAttributeProtectLocks(const MeshletBuildArgs& buildArgs, std::span<const uint32_t> posRemap, std::vector<unsigned char>& outVertexLock)
+{
+	if (!buildArgs.settings.bUseSimplifyPermissive)
+		return;
+
+	const size_t vertexCount = posRemap.size();
+	for (size_t i = 0; i < vertexCount; ++i)
+	{
+		uint32_t r = posRemap[i];
+		if (r == i)
+			continue;
+
+		if (VertexAttributesDiffer(buildArgs, static_cast<uint32_t>(i), r))
+		{
+			outVertexLock[i] |= meshopt_SimplifyVertex_Protect;
+			outVertexLock[r] |= meshopt_SimplifyVertex_Protect;
+		}
+	}
+}
+
 MeshletBuildProducts MeshletBuilder::Build(
 	const MeshletBuildArgs& buildArgs)
 {
@@ -109,13 +166,15 @@ MeshletBuildProducts MeshletBuilder::Build(
 			0u, static_cast<uint32_t>(current.size()), lastTriCount);
 
 	std::vector<Group> currentGroups;
+	std::vector<unsigned char> baseVertexLocks(buildArgs.vertexCount, 0);
+	BuildAttributeProtectLocks(buildArgs, posRemap, baseVertexLocks);
 
 	// 迭代简化
 	uint32_t lodLevel = 1;
 	while (true)
 	{
 		// 基于共享顶点 / 空间接近度分组
-		auto groupIds= GroupMeshlets(buildArgs, current, activeIds, lodLevel-1, currentGroups);
+		auto groupIds= GroupMeshlets(buildArgs, current, activeIds, posRemap, lodLevel-1, currentGroups);
 		if (groupIds.empty())
 			break;
 
@@ -130,7 +189,7 @@ MeshletBuildProducts MeshletBuilder::Build(
 		}
 
 		// 构建顶点锁（跨组共享 position-only 顶点全部上锁）
-		std::vector<unsigned char> vertexLock(buildArgs.vertexCount, 0);
+		std::vector<unsigned char> vertexLock = baseVertexLocks;
 		BuildVertexLocksByGroups(currentGroups, groupIds, current, posRemap, buildArgs.vertexCount, vertexLock);
 
 		// 对每个组尝试简化 -> 生成下一层 meshlets
@@ -201,7 +260,7 @@ MeshletBuildProducts MeshletBuilder::Build(
 			for (auto& nm : const_cast<std::vector<Meshlet>&>(r.generated))
 			{
 				Meshlet out = std::move(nm);
-				ComputeMeshletSphere(buildArgs, out, out.BoundSphere);
+                std::memcpy(out.BoundSphere, r.groupSphere, sizeof(float) * 4);
 				newMeshlets.emplace_back(std::move(out));
 			}
 
@@ -252,7 +311,17 @@ MeshletBuildProducts MeshletBuilder::Build(
 		activeIds.swap(nextActive);
 	}
 
-	return BuildStreamingData(buildArgs, currentGroups, current);
+	MeshletBuildProducts products = BuildStreamingData(buildArgs, currentGroups, current);
+	if (buildArgs.settings.bValidateBuild)
+	{
+		const bool ok = ValidateBuild(buildArgs, currentGroups, current);
+		if (!ok)
+		{
+			Utility::Printf(L"[MeshletBuilder] Validation failed for meshBufferIndex=%u, materialBufferIndex=%u\n",
+				buildArgs.meshBufferIndex, buildArgs.materialBufferIndex);
+		}
+	}
+	return products;
 }
 
 std::vector<MeshletBuilder::Meshlet>
@@ -349,6 +418,15 @@ void MeshletBuilder::MergeSphere(const float a[4], const float b[4], float out[4
 	out[0] = newC.GetX(); out[1] = newC.GetY(); out[2] = newC.GetZ(); out[3] = newR;
 }
 
+static bool SphereContains(const float outer[4], const float inner[4], float eps)
+{
+	const float dx = inner[0] - outer[0];
+	const float dy = inner[1] - outer[1];
+	const float dz = inner[2] - outer[2];
+	const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+	return dist + inner[3] <= outer[3] + eps;
+}
+
 void MeshletBuilder::GeneratePositionRemap(
 	const MeshletBuildArgs& buildArgs,
 	std::vector<uint32_t>& outPosRemap)
@@ -360,6 +438,7 @@ std::vector<uint32_t> MeshletBuilder::GroupMeshlets(
 	const MeshletBuildArgs& buildArgs,
 	const std::vector<Meshlet>& current,
 	std::span<const uint32_t> subsetIds,
+	std::span<const uint32_t> posRemap,
 	uint32_t LODLevel,
 	std::vector<Group>& groups)
 {
@@ -388,7 +467,7 @@ std::vector<uint32_t> MeshletBuilder::GroupMeshlets(
 		{
 			uint8_t local = m.Triangles[t];           // 局部 0..N-1
 			uint32_t original = m.Vertices[local];    // 原始顶点索引
-			clusterIndices.push_back(original);
+			clusterIndices.push_back(posRemap[original]);
 		}
 	}
 
@@ -467,7 +546,8 @@ void MeshletBuilder::BuildVertexLocksByGroups(
 	// 写回到原始顶点锁
 	for (size_t v = 0; v < vertexCount; ++v)
 	{
-		outVertexLock[v] = lockedPos[posRemap[v]] ? 1 : 0;
+		if (lockedPos[posRemap[v]])
+			outVertexLock[v] |= meshopt_SimplifyVertex_Lock;
 	}
 }
 
@@ -574,8 +654,20 @@ bool MeshletBuilder::SimplifyGroup(
 		}
 	}
 
-	std::vector<float> attributeWeights(attributeValueCount, 0.5f);
-	if (buildArgs.psoFlags & PSOFlags::kHasTangent) attributeWeights[6] = 1.f;
+    std::vector<float> attributeWeights(attributeValueCount, 0.5f);
+    size_t attributeOffset = 3;
+    if (buildArgs.psoFlags & PSOFlags::kHasTangent)
+    {
+         attributeWeights[attributeOffset++] = 0.1f;
+         attributeWeights[attributeOffset++] = 0.1f;
+         attributeWeights[attributeOffset++] = 0.1f;
+         attributeWeights[attributeOffset++] = 0.5f;
+    }
+    if (buildArgs.psoFlags & PSOFlags::kHasUV0)
+    {
+        attributeWeights[attributeOffset++] = 0.1f;
+        attributeWeights[attributeOffset++] = 0.1f;
+    }
 
 	// 处理 Lock 数组 (局部化)
 	std::vector<unsigned char> localLocks;
@@ -1011,6 +1103,135 @@ MeshletBuildProducts MeshletBuilder::BuildStreamingData(
 	}
 
 	return products;
+}
+
+bool MeshletBuilder::ValidateBuild(
+	const MeshletBuildArgs& buildArgs,
+	const std::vector<Group>& groups,
+	const std::vector<Meshlet>& meshlets)
+{
+	const uint32_t invalidId = 0xFFFFFFFFu;
+	const size_t groupCount = groups.size();
+	bool ok = true;
+	uint32_t errorCount = 0;
+
+	auto Report = [&](const wchar_t* fmt, auto... args)
+	{
+		if (errorCount < 64)
+			Utility::Printf(fmt, args...);
+		errorCount++;
+		ok = false;
+	};
+
+	if (groupCount == 0 || meshlets.empty())
+	{
+		Report(L"[MeshletBuilder][Validate] Empty groups or meshlets (groups=%u, meshlets=%u)\n",
+			static_cast<uint32_t>(groupCount), static_cast<uint32_t>(meshlets.size()));
+		return false;
+	}
+
+	std::vector<uint32_t> refineRef(groupCount, 0);
+
+	// Meshlet -> group/refine validation
+	for (size_t mi = 0; mi < meshlets.size(); ++mi)
+	{
+		const Meshlet& m = meshlets[mi];
+		if (m.GroupID >= groupCount)
+		{
+			Report(L"[MeshletBuilder][Validate] Meshlet %u has invalid GroupID=%u (groups=%u)\n",
+				static_cast<uint32_t>(mi), m.GroupID, static_cast<uint32_t>(groupCount));
+			continue;
+		}
+
+		if (m.RefineGroupID != invalidId)
+		{
+			if (m.RefineGroupID >= groupCount)
+			{
+				Report(L"[MeshletBuilder][Validate] Meshlet %u has invalid RefineGroupID=%u (groups=%u)\n",
+					static_cast<uint32_t>(mi), m.RefineGroupID, static_cast<uint32_t>(groupCount));
+			}
+			else
+			{
+				refineRef[m.RefineGroupID]++;
+			}
+		}
+	}
+
+	// Group -> meshlet ownership and basic invariants
+	for (size_t gi = 0; gi < groupCount; ++gi)
+	{
+		const Group& g = groups[gi];
+		if (g.MeshletIDs.empty())
+		{
+			Report(L"[MeshletBuilder][Validate] Group %u has no meshlets\n", static_cast<uint32_t>(gi));
+			continue;
+		}
+
+		for (uint32_t mid : g.MeshletIDs)
+		{
+			if (mid >= meshlets.size())
+			{
+				Report(L"[MeshletBuilder][Validate] Group %u references out-of-range meshlet %u (meshlets=%u)\n",
+					static_cast<uint32_t>(gi), mid, static_cast<uint32_t>(meshlets.size()));
+				continue;
+			}
+			if (meshlets[mid].GroupID != gi)
+			{
+				Report(L"[MeshletBuilder][Validate] Meshlet %u GroupID mismatch (meshlet.GroupID=%u, expected=%u)\n",
+					mid, meshlets[mid].GroupID, static_cast<uint32_t>(gi));
+			}
+		}
+
+		if (std::isinf(g.ParrentError) && refineRef[gi] > 0)
+		{
+			Report(L"[MeshletBuilder][Validate] Group %u has infinite error but is referenced by %u coarse meshlets\n",
+				static_cast<uint32_t>(gi), refineRef[gi]);
+		}
+	}
+
+	// LOD monotonic + continuity checks
+	for (size_t mi = 0; mi < meshlets.size(); ++mi)
+	{
+		const Meshlet& m = meshlets[mi];
+		if (m.RefineGroupID == invalidId || m.RefineGroupID >= groupCount || m.GroupID >= groupCount)
+			continue;
+
+		const Group& coarse = groups[m.GroupID];
+		const Group& fine = groups[m.RefineGroupID];
+
+		if (coarse.LODLevel <= fine.LODLevel)
+		{
+			Report(L"[MeshletBuilder][Validate] LOD order invalid: meshlet %u coarse LOD=%u, refine LOD=%u\n",
+				static_cast<uint32_t>(mi), coarse.LODLevel, fine.LODLevel);
+		}
+
+		if (!std::isfinite(fine.ParrentError))
+		{
+			Report(L"[MeshletBuilder][Validate] Meshlet %u references refine group %u with non-finite error\n",
+				static_cast<uint32_t>(mi), m.RefineGroupID);
+		}
+
+		if (coarse.ParrentError + kValidateEpsilon < fine.ParrentError)
+		{
+			Report(L"[MeshletBuilder][Validate] Error not monotonic: meshlet %u coarseErr=%.6f < refineErr=%.6f\n",
+				static_cast<uint32_t>(mi), coarse.ParrentError, fine.ParrentError);
+		}
+
+		// Ensure culling bounds are conservative vs refine group bounds
+		if (!SphereContains(m.BoundSphere, fine.GroupSphere, kValidateEpsilon))
+		{
+			Report(L"[MeshletBuilder][Validate] Bounds not conservative: meshlet %u bound does not enclose refine group %u\n",
+				static_cast<uint32_t>(mi), m.RefineGroupID);
+		}
+	}
+
+	if (buildArgs.settings.bOutputDebugInfo)
+	{
+		Utility::Printf(L"[MeshletBuilder][Validate] Done. groups=%u meshlets=%u errors=%u\n",
+			static_cast<uint32_t>(groupCount), static_cast<uint32_t>(meshlets.size()), errorCount);
+	}
+
+	return ok;
 }
 
 std::vector<Renderer::HierarchyNode> MeshletBuilder::BuildHierarchy(
