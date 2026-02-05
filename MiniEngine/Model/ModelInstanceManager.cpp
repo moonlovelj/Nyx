@@ -108,6 +108,7 @@ namespace ModelInstanceManager
 	{
 		GeometryStreaming::Shutdown();
 		s_ModelInstances.clear();
+		s_SourceModel.reset();
 		InstanceResourceManager::Cleanup();
 		DrawCommandManager::Cleanup();
 		s_InstanceConstantsCPU.Destroy();

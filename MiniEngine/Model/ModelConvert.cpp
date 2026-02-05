@@ -24,7 +24,6 @@
 #include "../Core/Utility.h"
 #include "../Core/Math/Common.h"
 #include "../Core/Math/Quaternion.h"
-#include "metis.h"
 #include "lz4.h"
 
 #include <fstream>

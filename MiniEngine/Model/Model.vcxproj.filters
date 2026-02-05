@@ -49,8 +49,6 @@
     <ClCompile Include="MeshletBuilder.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="InstanceResourceManager.cpp" />
-    <ClCompile Include="ModelInstanceManager.cpp" />
     <ClCompile Include="CommandBucketer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -108,16 +106,22 @@
     <ClCompile Include="..\ThirdParty\meshoptimizer\vfetchoptimizer.cpp">
       <Filter>Source Files\meshoptimizer</Filter>
     </ClCompile>
+    <ClCompile Include="InstanceResourceManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ModelInstanceManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
       <UniqueIdentifier>{3e74f37f-1e1e-47ed-9c44-213389384278}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Shaders">
-      <UniqueIdentifier>{9169b7c9-f1a7-41d4-9098-58de36da850c}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Source Files\meshoptimizer">
       <UniqueIdentifier>{fc70d287-a9d4-4570-8157-7471c7034169}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Shaders">
+      <UniqueIdentifier>{9169b7c9-f1a7-41d4-9098-58de36da850c}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -166,12 +170,9 @@
     <ClInclude Include="MeshletBuilder.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="InstanceResourceManager.h" />
-    <ClInclude Include="ModelInstanceManager.h" />
     <ClInclude Include="CommandBucketer.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="MeshletStructs.h" />
     <ClInclude Include="GeometryStreaming.h">
       <Filter>Source Files</Filter>
     </ClInclude>
@@ -184,133 +185,142 @@
     <ClInclude Include="cgltf.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="InstanceResourceManager.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MeshletStructs.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ModelInstanceManager.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="Shaders\Common.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\FillLightGridCS.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\LightGrid.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\Lighting.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="packages.config" />
     <None Include="Shaders\LightingCommon.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\PCSS.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\MaterialCommon.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\VSToPSCommon.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\DataCodec.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\CommonResources.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\ViewMode.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\BindlessIndices.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\SharedHeader.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\CullCommon.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\WaveUtil.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\GeometryCommon.hlsli">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Shaders\SkyboxPS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\SkyboxVS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\DepthViewerPS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\DepthViewerVS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\FillLightGridCS_8.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\FillLightGridCS_16.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\FillLightGridCS_24.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\FillLightGridCS_32.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\ModelViewerPS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\ModelViewerVS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\DeferredLightingCS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\VBufferPS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\UberMeshShader.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\MeshBufferGenCS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\ResolveVBufferToGBufferCS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\InstanceCullPass0CS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\InstanceCullCS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\InstanceCullPass1CS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\DAGCullCS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\DAGCullPass0CS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\DAGCullPass1CS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\UberMeshShaderPass0.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\UberMeshShaderPass1.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\ExportDepthVS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\ExportDepthPS.hlsl">
-      <Filter>Shaders</Filter>
+      <Filter>Source Files\Shaders</Filter>
     </FxCompile>
   </ItemGroup>
 </Project>
