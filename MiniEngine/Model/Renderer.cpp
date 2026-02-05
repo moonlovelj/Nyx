@@ -1,4 +1,4 @@
-﻿//
+//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -1086,28 +1086,49 @@ void MeshSorter::RenderMeshedInternal(
     }
     else
     {
-		context.TransitionResource(CommandBucketer::Get().GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-		context.GetComputeContext().SetPipelineState(m_FreezeCullPSO);
-        context.GetComputeContext().SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-		context.GetComputeContext().Dispatch1D(1, 1);
+        uint32_t passIndex = 0;
+        {
+            // mesh buffer gen
+            context.TransitionResource(CommandBucketer::Get().GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
+            context.GetComputeContext().SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
+            context.GetComputeContext().SetConstants(kCommandConstants, passIndex); // pass index
+            context.GetComputeContext().Dispatch1D(1, 1);
+        }
 
-        context.TransitionResource(CommandBucketer::Get().GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-		context.TransitionResource(CommandBucketer::Get().GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-		context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
-        context.GetComputeContext().SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-		context.GetComputeContext().SetConstants(kCommandConstants, 0); // pass index
-		context.GetComputeContext().Dispatch1D(1, 1);
-
-		{
-			ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 0", context);
-			context.TransitionResource(CommandBucketer::Get().GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-			context.TransitionResource(CommandBucketer::Get().GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-			context.SetPipelineState(m_UberMeshPSO[0]);
+        {
+            ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 0", context);
+            context.TransitionResource(Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+            context.TransitionResource(Renderer::CommandBucketer::Get().GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.SetPipelineState(m_UberMeshPSO[passIndex]);
             context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-			context.SetConstants(kCommandConstants, 0, 0, psoIdx);
-			context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-			context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, CommandBucketer::Get().GetIndirectDispatchMeshGPU(), 0, 1);
-		}
+            context.SetConstants(kCommandConstants, 0, 0, psoIdx);
+            context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
+            context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), 0, 1);
+        }
+
+        passIndex = 1;
+        {
+            // mesh buffer gen
+            context.TransitionResource(CommandBucketer::Get().GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
+            context.GetComputeContext().SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
+            context.GetComputeContext().SetConstants(kCommandConstants, passIndex); // pass index
+            context.GetComputeContext().Dispatch1D(1, 1);
+        }
+
+        {
+            ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 1", context);
+            context.TransitionResource(Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+            context.TransitionResource(Renderer::CommandBucketer::Get().GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.SetPipelineState(m_UberMeshPSO[passIndex]);
+            context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
+            context.SetConstants(kCommandConstants, 0, 0, psoIdx);
+            context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
+            context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), 0, 1);
+        }
 
 		{
 			ExportDepth(context, inGlobals, m_Viewport, m_Scissor);
@@ -1118,74 +1139,6 @@ void MeshSorter::RenderMeshedInternal(
 			Renderer::GetCurrentHZB().GenerateHZB(context, g_SceneDepthBuffer);
 		}
     }
- //   
-    //auto& bucketer = Renderer::CommandBucketer::Get();
-    //context.CopyBufferRegion(bucketer.GetIndirectDispatchMeshGPU())
-
- //   auto& bucketer = Renderer::CommandBucketer::Get();
-	//if (!FreezeCull)
-	//{
-	//	CullingStage cullingStage = CullingStage::kNoCulled;
-	//	FrustrumCulling(context, inGlobals, m_Camera, m_Viewport, psoIdx);
- //       cullingStage = CullingStage::kFrustrumCulled;
-
- //       // 第一帧不执行
- //       if (UseOcclusionCull && bOcclusionCull && TemporalEffects::GetFrameIndex() > 1)
- //       {
-	//		OcclusionCulling(context, inGlobals, psoIdx,0);
- //           cullingStage = CullingStage::kOcclusionPass1Culled;
- //           FillCullingResult(context, inGlobals, psoIdx, cullingStage);
-
-	//		context.TransitionResource(bucketer.GetIndirectDispatchMeshes(psoIdx), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	//		context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
-	//		context.GetComputeContext().Dispatch1D(1, 1);
-	//		context.TransitionResource(bucketer.GetIndirectDispatchMeshes(psoIdx), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-
-	//		{
- //               ScopedTimer _prof(L"Dispatch Mesh Indirect", context);
-	//			context.SetPipelineState(s_PSOMap[psoIdx]);
-	//			context.SetConstants(kCommandConstants, 0,
-	//				0, psoIdx);
- //               context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
- //               context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, bucketer.GetIndirectDispatchMeshes(psoIdx), 0, 1);
-	//		}
-
- //           context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
- //           Renderer::GetCurrentHZB().GenerateHZB(context, g_SceneDepthBuffer);
-
- //           OcclusionCulling(context, inGlobals, psoIdx, 1);
- //           cullingStage = CullingStage::kOcclusionPass2Culled;
- //       }
-
- //       FillCullingResult(context, inGlobals, psoIdx, cullingStage);
-
-	//	context.TransitionResource(bucketer.GetIndirectDispatchMeshes(psoIdx), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	//	context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
-	//	context.GetComputeContext().Dispatch1D(1, 1);
-	//	context.TransitionResource(bucketer.GetIndirectDispatchMeshes(psoIdx), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-
-	//	ScopedTimer _prof(L"Dispatch Mesh Indirect", context);
-	//	context.SetPipelineState(s_PSOMap[psoIdx]);
-	//	context.SetConstants(kCommandConstants, 0, 0, psoIdx);
- //       context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
- //       context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, bucketer.GetIndirectDispatchMeshes(psoIdx), 0, 1);
-	//}
-	//else
-	//{
-	//	FillCullingResult(context, inGlobals, psoIdx, CullingStage::kFreezeCulled);
-
-	//	// 使用冻结剔除结果直接渲染
- //       context.TransitionResource(bucketer.GetIndirectDispatchMeshes(psoIdx), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	//	context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
-	//	context.GetComputeContext().Dispatch1D(1, 1);
- //       context.TransitionResource(bucketer.GetIndirectDispatchMeshes(psoIdx), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-
-	//	ScopedTimer _prof(L"Dispatch Mesh Indirect", context);
-	//	context.SetPipelineState(s_PSOMap[psoIdx]);
-	//	context.SetConstants(kCommandConstants, 0,
-	//		0, psoIdx);
- //       context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, bucketer.GetIndirectDispatchMeshes(psoIdx), 0, 1);
-	//}
 }
 
 void MeshSorter::RenderMeshes(
