@@ -256,21 +256,15 @@ void ProcessClusterBatch(uint clusterBatchStartIndex, uint clusterBatchReadySize
         
         bClusterVisible = bClusterVisible && !bAlphaBlend;
 
-        if (bClusterVisible)
+        if (bClusterVisible && meshletHeader.RefineGroupIndex != INVALID_ID)
         {
-            if (meshletHeader.RefineGroupIndex != INVALID_ID)
+            GroupDataLocation refineGroupDataLocation = groupDataLocationSRV[meshletHeader.RefineGroupIndex];
+            if (refineGroupDataLocation.ChunkIndex != INVALID_ID)
             {
-                GroupDataLocation refineGroupDataLocation = groupDataLocationSRV[meshletHeader.RefineGroupIndex];
                 ByteAddressBuffer refineGometryChunksBuffer = GetGeometryChunksBufferSRV(refineGroupDataLocation.ChunkIndex);
                 GroupHeader refineGroupHeader = refineGometryChunksBuffer.Load < GroupHeader > (refineGroupDataLocation.ByteOffset);
                 bClusterVisible = TestForLod(meshInstance.WorldMatrix, ViewerPos, refineGroupHeader.ParrentError, refineGroupHeader.BoundSphere);
-                if (!bClusterVisible)
-                {
-                    GroupDataLocation refineGroupDataLocation = groupDataLocationSRV[meshletHeader.RefineGroupIndex];
-                    if (refineGroupDataLocation.ChunkIndex == INVALID_ID)
-                        bClusterVisible = true;
-                }
-            }  
+            }
         }
 
         uint level = meshletHeader.GetLODLevel();
