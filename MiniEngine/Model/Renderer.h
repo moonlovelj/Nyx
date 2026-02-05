@@ -1,4 +1,4 @@
-﻿//
+//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -38,11 +38,8 @@ struct Joint;
 
 namespace Renderer
 {
-    extern BoolVar SeparateZPass;
-
     using namespace Math;
 
-    extern std::vector<PSO> sm_PSOs;
     extern RootSignature m_RootSig;
     extern DescriptorHeap s_TextureHeap;
     extern DescriptorHeap s_SamplerHeap;
@@ -50,14 +47,6 @@ namespace Renderer
 
 	extern float s_SpecularIBLRange;
 	extern float s_SpecularIBLBias;
-
-    extern UploadBuffer m_IndirectArgsCounterBufferReset;
-
-	struct IndirectCommand
-	{
-		UINT InstanceIndex;
-		UINT RootNodeIndex;
-	};
 
 	struct DispatchMeshCommand
 	{
@@ -99,13 +88,6 @@ namespace Renderer
 		kFreezeCulled = 4
 	};
 
-	enum PsoIdx : uint8_t
-	{
-		kPsoShadow = 0,
-		kPsoMain = 1,
-		kPsoTransparent = 2,
-	};
-
 	inline UINT AlignForUavCounter(UINT bufferSize)
 	{
 		const UINT alignment = D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT;
@@ -115,26 +97,10 @@ namespace Renderer
     void Initialize(void);
     void Shutdown(void);
 
-    uint8_t GetPSO(uint16_t psoFlags);
     void SetIBLTextures();
     void SetIBLBias(float LODBias);
     void UpdateGlobalDescriptors(void);
     void DrawSkybox( GraphicsContext& gfxContext, const Camera& camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor );
-	void FrustrumCulling(GraphicsContext& gfxContext, 
-        const GlobalConstants& inGlobals, const BaseCamera* camera,
-        const D3D12_VIEWPORT& viewport, Renderer::PsoIdx psoIdx);
-
-	void OcclusionCulling(
-        GraphicsContext& gfxContext, 
-        const GlobalConstants& inGlobals,
-        Renderer::PsoIdx psoIdx,
-        uint32_t passIdx);
-
-	void FillCullingResult(
-        GraphicsContext& gfxContext, 
-        const GlobalConstants& inGlobals, 
-        Renderer::PsoIdx psoIdx, 
-        CullingStage cullingStage);
 
 	void InstanceCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, uint32_t cullPassIdx);
 	void DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, const BaseCamera* camera,
@@ -202,8 +168,7 @@ namespace Renderer
 
     private:
 		void RenderMeshedInternal(GraphicsContext& context,
-			const GlobalConstants& inGlobals,
-			Renderer::PsoIdx psoIdx);
+			const GlobalConstants& inGlobals);
 
         struct SortKey
         {

@@ -1,72 +1,25 @@
-﻿#include "CommandBucketer.h"
+#include "CommandBucketer.h"
 #include "Renderer.h"
 #include "../Core/GraphicsCommon.h"
 
 using namespace Renderer;
 
-CommandBucketer& CommandBucketer::Get()
+namespace DrawCommandManager
 {
-	static CommandBucketer s_Instance;
-	return s_Instance;
-}
+    std::vector<DrawItem> m_PotentialDrawItemsCPU;
 
-void CommandBucketer::AppendIndirectCommand(uint32_t psoIdx, const IndirectCommand& cmd)
+    StructuredBuffer m_PotentialDrawItemsGPU;
+    StructuredBuffer m_InstanceCulledDrawGPU;
+    StructuredBuffer m_TaskQueueStateGPU;
+    ByteAddressBuffer m_TaskQueueGPU;
+    ByteAddressBuffer m_MeshletBatchGPU;
+    ByteAddressBuffer m_CandidateMeshletGPU;
+    StructuredBuffer m_VisibleMeshletBufferGPU;
+    StructuredBuffer m_IndirectDispatchMeshGPU;
+} // namespace DrawCommandManager
+
+void  DrawCommandManager::FinalizeIndirectCommands()
 {
-	auto& vec = m_IndirectCommandsCPU[psoIdx];
-	vec.push_back(cmd);
-}
-
-void CommandBucketer::FinalizeIndirectCommands()
-{
-	for (const auto& kvp : m_IndirectCommandsCPU)
-	{
-		size_t cmdCount = kvp.second.size();
-		if (cmdCount == 0) 	continue;
-
-		ASSERT(cmdCount < 0x01FFFFFF, "Too many indirect commands for PSO %d: %zu", kvp.first, cmdCount);
-
-		m_IndirectCommandsGPU[kvp.first].Create(
-			L"Indirect Commands Buffer",
-			(uint32_t)cmdCount,
-			(uint32_t)sizeof(IndirectCommand),
-			kvp.second.data());
-
-		Renderer::SetBindlessResourceDescriptor(SRV_INDIRECT_COMMANDS_BASE + (uint32_t)kvp.first, 
-			m_IndirectCommandsGPU[kvp.first].GetSRV());
-
-		m_IndirectVisibleFlags[kvp.first].Create(
-			L"Indirect Visible Flags Buffer",
-			(uint32_t)cmdCount,
-			(uint32_t)sizeof(uint32_t),
-			nullptr);
-
-		Renderer::SetBindlessResourceDescriptor(SRV_INDIRECT_VISIBLE_FLAGS_BASE + (uint32_t)kvp.first,
-			m_IndirectVisibleFlags[kvp.first].GetSRV());
-		Renderer::SetBindlessResourceDescriptor(UAV_INDIRECT_VISIBLE_FLAGS_BASE + (uint32_t)kvp.first,
-			m_IndirectVisibleFlags[kvp.first].GetUAV());
-
-		m_IndirectCullingResults[kvp.first].Create(
-			L"Indirect Culling Results Buffer",
-			(uint32_t)cmdCount,
-			(uint32_t)sizeof(uint32_t),
-			nullptr);
-
-		Renderer::SetBindlessResourceDescriptor(SRV_INDIRECT_CULLING_RESULTS_BASE + (uint32_t)kvp.first,
-			m_IndirectCullingResults[kvp.first].GetSRV());
-		Renderer::SetBindlessResourceDescriptor(SRV_INDIRECT_CULLING_RESULTS_COUNTER_BASE + (uint32_t)kvp.first,
-			m_IndirectCullingResults[kvp.first].GetCounterBuffer().GetSRV());
-		Renderer::SetBindlessResourceDescriptor(UAV_INDIRECT_CULLING_RESULTS_BASE + (uint32_t)kvp.first,
-			m_IndirectCullingResults[kvp.first].GetUAV());
-
-		m_IndirectDispatchMeshes[kvp.first].Create(
-			L"Indirect Dispatch Mesh Commands Buffer",
-			1,
-			(uint32_t)sizeof(Renderer::DispatchMeshCommand),
-			nullptr);
-		//Renderer::SetBindlessResourceDescriptor(UAV_INDIRECT_DISPATCH_MESHES_BASE + (uint32_t)kvp.first,
-		//	m_IndirectDispatchMeshes[kvp.first].GetUAV());
-	}
-
 	m_PotentialDrawItemsGPU.Create(
 		L"Potential Draw Items Buffer",
 		std::max(1u, (uint32_t)m_PotentialDrawItemsCPU.size()),
@@ -74,8 +27,7 @@ void CommandBucketer::FinalizeIndirectCommands()
 		m_PotentialDrawItemsCPU.data());
 
 	Renderer::SetBindlessResourceDescriptor(SRV_POTENTIAL_DRAW_ITEM_BUFFER, m_PotentialDrawItemsGPU.GetSRV());
-	//static const uint32_t kMaxMeshletsPerPass = 1 << 24;
-	
+
 	m_InstanceCulledDrawGPU.Create(
 		L"Instance Culled Draw Items Buffer",
 		std::max(1u, (uint32_t)m_PotentialDrawItemsCPU.size()),
@@ -132,74 +84,13 @@ void CommandBucketer::FinalizeIndirectCommands()
 	Renderer::SetBindlessResourceDescriptor(UAV_INDIRECT_DISPATCH_MESHES_BASE, m_IndirectDispatchMeshGPU.GetUAV());
 }
 
-bool CommandBucketer::HasAnyCommands(uint32_t psoIdx) const
-{
-	auto it = m_IndirectCommandsCPU.find(psoIdx);
-	if (it != m_IndirectCommandsCPU.end() && !it->second.empty())
-		return true;
-	return false;
-}
-
-
-void CommandBucketer::AddDrawItem(const DrawItem& item)
+void DrawCommandManager::AddDrawItem(const DrawItem& item)
 {
 	m_PotentialDrawItemsCPU.push_back(item);
 }
 
-GpuBuffer& CommandBucketer::GetIndirectCommandsGPU(uint32_t psoIdx)
+void DrawCommandManager::Cleanup()
 {
-	return m_IndirectCommandsGPU.at(psoIdx);
-}
-GpuBuffer& CommandBucketer::GetIndirectVisibleFlags(uint32_t psoIdx)
-{
-	return m_IndirectVisibleFlags.at(psoIdx);
-}
-GpuBuffer& CommandBucketer::GetIndirectCullingResults(uint32_t psoIdx)
-{
-	return m_IndirectCullingResults.at(psoIdx);
-}
-//GpuBuffer& CommandBucketer::GetIndirectDispatchMeshes(uint32_t psoIdx)
-//{
-//	return m_IndirectDispatchMeshes.at(psoIdx);
-//}
-
-GpuBuffer& CommandBucketer::GetIndirectCullingResultsCounter(uint32_t psoIdx)
-{
-	return m_IndirectCullingResults.at(psoIdx).GetCounterBuffer();
-}
-
-uint32_t CommandBucketer::GetMaxCommands(uint32_t psoIdx) const
-{
-	return (uint32_t)m_IndirectCommandsCPU.at(psoIdx).size();
-}
-
-void CommandBucketer::ResetAll() 
-{
-	m_IndirectCommandsCPU.clear();
-	for (auto& kvp: m_IndirectCommandsGPU)
-	{
-		kvp.second.Destroy();
-	}
-	m_IndirectCommandsGPU.clear();
-
-	for (auto& kvp : m_IndirectVisibleFlags)
-	{
-		kvp.second.Destroy();
-	}
-	m_IndirectVisibleFlags.clear();
-
-	for (auto& kvp : m_IndirectCullingResults)
-	{
-		kvp.second.Destroy();
-	}
-	m_IndirectCullingResults.clear();
-
-	for (auto& kvp : m_IndirectDispatchMeshes)
-	{
-		kvp.second.Destroy();
-	}
-	m_IndirectDispatchMeshes.clear();
-
 	m_PotentialDrawItemsCPU.clear();
 	m_PotentialDrawItemsGPU.Destroy();
 
@@ -210,4 +101,42 @@ void CommandBucketer::ResetAll()
 	m_IndirectDispatchMeshGPU.Destroy();
 	m_CandidateMeshletGPU.Destroy();
 	m_VisibleMeshletBufferGPU.Destroy();
+}
+
+GpuBuffer& DrawCommandManager::GetPotentialDrawItemsGPU()
+{
+    return m_PotentialDrawItemsGPU;
+}
+GpuBuffer& DrawCommandManager::GetInstanceCulledDrawGPU()
+{
+    return m_InstanceCulledDrawGPU;
+}
+StructuredBuffer& DrawCommandManager::GetTaskQueueStateGPU()
+{
+    return m_TaskQueueStateGPU;
+}
+ByteAddressBuffer& DrawCommandManager::GetTaskQueueGPU()
+{
+    return m_TaskQueueGPU;
+}
+StructuredBuffer& DrawCommandManager::GetVisibleMeshletBufferGPU()
+{
+    return m_VisibleMeshletBufferGPU;
+}
+StructuredBuffer& DrawCommandManager::GetIndirectDispatchMeshGPU()
+{
+    return m_IndirectDispatchMeshGPU;
+}
+ByteAddressBuffer& DrawCommandManager::GetMeshletBatchGPU()
+{
+    return m_MeshletBatchGPU;
+}
+ByteAddressBuffer& DrawCommandManager::GetCandidateMeshletGPU()
+{
+    return m_CandidateMeshletGPU;
+}
+
+uint32_t DrawCommandManager::GetNumPotentialDrawItems()
+{
+    return static_cast<uint32_t>(m_PotentialDrawItemsCPU.size());
 }

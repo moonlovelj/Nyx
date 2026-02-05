@@ -5,13 +5,13 @@
 
 float3 ConvertCubePixelToDir(uint X, uint Y, uint Face, uint TextureSize)
 {
-    // 输入: x, y 像素坐标，width, height 每个面尺寸， d 面索引[0..5]
-    // 输出: 方向向量 dir (float3)
+    // Input: x,y pixel coordinates, width/height per face, face index [0..5]
+    // Output: direction vector dir (float3)
 
     float U = ((float)X + 0.5) / TextureSize; // 0~1
     float V = ((float)Y + 0.5) / TextureSize; // 0~1
 
-    // 转到 [-1,1] 坐标，中心对齐
+    // Map to [-1,1] coordinates, center-aligned
     float FX = 2.0 * U - 1.0;
     float FY = 2.0 * V - 1.0;
 

@@ -49,37 +49,37 @@ using namespace Graphics;
 #include "MeshletBuilder.h"
 #include "MeshletStructs.h"
 
-// 编译后的 Primitive 元数据 (不包含顶点数据，仅包含引用信息)
+// Compiled primitive metadata (no vertex data, references only)
 struct CompiledPrimitive
 {
-	uint32_t rootNodeIndex;         // BVH 在全局节点数组中的起始索引
-	uint32_t indexCount;            // 索引数量（用于统计或调试）
-	//Math::BoundingSphere boundsLS;  // 局部空间包围球（Local Space）
-    AxisAlignedBox bboxLS;          // 局部空间包围盒（Local Space）
+	uint32_t rootNodeIndex;         // Start index in the global BVH node array
+	uint32_t indexCount;            // Index count (for stats or debugging)
+	//Math::BoundingSphere boundsLS;  // Local-space bounding sphere (Local Space)
+    AxisAlignedBox bboxLS;          // Local-space bounding box (Local Space)
 	uint16_t materialIdx;
 	uint16_t psoFlags;
 	uint16_t vertexStride;
 };
 
-// 编译后的 Mesh 元数据
+// Compiled mesh metadata
 struct CompiledMeshData
 {
 	std::vector<CompiledPrimitive> primitives;
-	Math::BoundingSphere boundsLS;  // 整个Mesh的局部包围球
-	Math::AxisAlignedBox bboxLS;    // 整个Mesh的局部包围盒
+	Math::BoundingSphere boundsLS;  // Local-space bounding sphere for the whole mesh
+	Math::AxisAlignedBox bboxLS;    // Local-space bounding box for the whole mesh
 };
 
-// 中间构建结果 (用于并行 -> 串行传递)
+// Intermediate build results (for parallel -> serial transfer)
 struct MeshBuildResult
 {
 	const cgltf_mesh* sourceMesh;
 	CompiledMeshData meshData;
-	// 逻辑上的构建结果，尚未序列化到磁盘，索引为 Local 0 基准
+	// Logical build results not yet serialized to disk, using local zero-based indices
 	std::vector<MeshletBuildProducts> logicProducts;
 	std::wstring tempFilePath;
 };
 
-// 收集的请求
+// Collected requests
 struct MeshInstanceRequest
 {
 	const cgltf_mesh* mesh;
@@ -87,15 +87,15 @@ struct MeshInstanceRequest
 	Matrix4 worldXform;
 };
 
-// 几何缓存：避免同一个 glTF Mesh 被重复解析和构建
+// Geometry cache: avoid parsing/building the same glTF mesh repeatedly
 using MeshCache = std::unordered_map<const cgltf_mesh*, CompiledMeshData>;
-// 节点映射：用于动画和蒙皮关联
+// Node map: for animation and skinning association
 using NodeMap = std::unordered_map<const cgltf_node*, uint32_t>;
 
 /**
- * 并行编译网格几何体。
- * 在内存中并行构建 Meshlets。
- * 串行修正索引并写入磁盘。
+ * Compile mesh geometry in parallel.
+ * Build meshlets in parallel in memory.
+ * Serially patch indices and write to disk.
  */
 static void ParallelCompileMeshes(
 	ModelData& modelData,
@@ -105,7 +105,7 @@ static void ParallelCompileMeshes(
 	GlobalStreamingContext& streamCtx
 )
 {
-	// 提取唯一 Mesh 任务
+	// Collect unique mesh tasks
 	std::vector<const cgltf_mesh*> uniqueMeshes;
 	{
 		std::unordered_set<const cgltf_mesh*> seen;
@@ -118,17 +118,17 @@ static void ParallelCompileMeshes(
 
 	std::vector<MeshBuildResult> buildResults(uniqueMeshes.size());
 
-	// 辅助索引用于并行遍历
+	// Auxiliary indices for parallel traversal
 	std::vector<size_t> taskIndices(uniqueMeshes.size());
 	for (size_t i = 0; i < taskIndices.size(); ++i) taskIndices[i] = i;
 
 	Utility::Printf("Compiling %zu unique meshes in parallel...\n", uniqueMeshes.size());
 
-	// 用于并行进度的原子计数器
+	// Atomic counter for parallel progress
 	std::atomic<uint32_t> processedCount = 0;
 	const uint32_t totalMeshes = (uint32_t)uniqueMeshes.size();
 
-	// 并行执行 Meshlet 构建 (Compute Bound)
+	// Run meshlet build in parallel (compute bounds)
 	//int maxThreads = std::max(1, (int)omp_get_max_threads());
 	int workerCount = (int)omp_get_max_threads();//std::min((int)omp_get_max_threads(), 8);
 
@@ -139,19 +139,19 @@ static void ParallelCompileMeshes(
 		MeshBuildResult& result = buildResults[taskIndex];
 		result.sourceMesh = srcMesh;
 
-		// 为当前任务创建唯一的临时文件
+		// Create a unique temp file for this task
 		wchar_t tempPath[MAX_PATH];
 		GetTempPathW(MAX_PATH, tempPath);
 		wchar_t tempFileName[MAX_PATH];
-		// 使用 taskIndex 作为唯一标识的一部分
+		// Use taskIndex as part of the unique identifier
 		swprintf_s(tempFileName, L"%sNYX_TASK_%d.tmp", tempPath, taskIndex);
 		result.tempFilePath = tempFileName;
 
-		// 打开该任务的临时文件流 (二进制写)
+		// Open the task's temp file stream (binary write)
 		std::ofstream localTempFile(result.tempFilePath, std::ios::out | std::ios::binary | std::ios::trunc);
 		uint64_t localFileCursor = 0;
 
-		// 初始化
+		// Initialize
 		result.meshData.boundsLS = BoundingSphere(kZero);
 		result.meshData.bboxLS = AxisAlignedBox(kZero);
 
@@ -160,7 +160,7 @@ static void ParallelCompileMeshes(
 		BoundingSphere sphereAccum(kZero);
 		AxisAlignedBox bboxAccum(kZero);
 
-		// 优化与 Bounds 计算
+		// Optimization and bounds calculation
 		for (uint32_t p = 0; p < primitives.size(); ++p)
 		{
 			OptimizeMesh(primitives[p], data, srcMesh->primitives[p], identityXform);
@@ -170,12 +170,12 @@ static void ParallelCompileMeshes(
 		result.meshData.boundsLS = sphereAccum;
 		result.meshData.bboxLS = bboxAccum;
 
-		// 分组
+		// Grouping
 		std::map<uint32_t, std::vector<Primitive*>> renderGroups;
 		for (auto& prim : primitives)
 			renderGroups[prim.hash].push_back(&prim);
 
-		// Meshlet 构建
+		// Meshlet build
 		for (auto& iter : renderGroups)
 		{
 			const auto& groupPrims = iter.second;
@@ -185,7 +185,7 @@ static void ParallelCompileMeshes(
 			buildArgs.meshBufferIndex = 0;
 			buildArgs.materialBufferIndex = groupPrims[0]->materialIdx;
 			buildArgs.psoFlags = groupPrims[0]->psoFlags;
-			// 并行时不知道全局偏移，设为 0，稍后 Patch
+			// Global offsets are unknown in parallel; set to 0 and patch later
 			buildArgs.baseGroupIndex = 0;
 			buildArgs.baseNodeIndex = 0;
 
@@ -197,7 +197,7 @@ static void ParallelCompileMeshes(
 				buildArgs.IBData = draw->IB->data();
 				buildArgs.indexCount = draw->primCount;
 
-				// --- 构建meshlets ---
+				// --- Build meshlets ---
 				auto products = MeshletBuilder::Build(buildArgs);
 
 				for (auto& group : products.Groups)
@@ -207,13 +207,13 @@ static void ParallelCompileMeshes(
 						group.TempFileOffset = localFileCursor; 
 						localTempFile.write(reinterpret_cast<const char*>(group.Blob.data()), group.Blob.size());
 						localFileCursor += group.Blob.size();
-						// 释放内存
+						// Free memory
 						std::vector<uint8_t>().swap(group.Blob);
 					}
 				}
 
 				CompiledPrimitive finalPrim = {};
-				finalPrim.rootNodeIndex = 0; // 稍后修正
+				finalPrim.rootNodeIndex = 0; // Patch later
 				finalPrim.materialIdx = draw->materialIdx;
 				finalPrim.psoFlags = draw->psoFlags;
 				finalPrim.vertexStride = draw->vertexStride;
@@ -228,7 +228,7 @@ static void ParallelCompileMeshes(
 
 		localTempFile.close();
 
-		// 更新并打印进度
+		// Update and print progress
 		uint32_t current = ++processedCount;
 		uint32_t step = std::max(1u, totalMeshes / 20);
 		if (current % step == 0 || current == totalMeshes)
@@ -238,7 +238,7 @@ static void ParallelCompileMeshes(
 		}
 	};
 
-	// 串行提交与修正
+	// Serial commit and patch
 	for (auto& result : buildResults)
 	{
 		streamCtx.TempFilesToClean.push_back(result.tempFilePath);
@@ -248,13 +248,13 @@ static void ParallelCompileMeshes(
 		{
 			CompiledPrimitive& finalPrim = result.meshData.primitives[primIndex++];
 
-			// 获取当前全局基准偏移
+			// Get current global base offsets
 			const uint32_t baseGroupIndex = static_cast<uint32_t>(modelData.m_GroupInfos.size());
 			const uint32_t baseNodeIndex = static_cast<uint32_t>(modelData.m_Nodes.size());
 
 			finalPrim.rootNodeIndex = baseNodeIndex;
 
-			// 处理二进制 Blob (Geometry Groups)
+			// Process binary blob (geometry groups)
 			for (auto& group : products.Groups)
 			{
 				const uint32_t groupSize = group.Metadata.SizeBytes;
@@ -288,12 +288,12 @@ static void ParallelCompileMeshes(
 				metadata.OffsetInPage = streamCtx.CurrentOffsetInPage;
 				modelData.m_GroupInfos.push_back(metadata);
 
-				// 记录稍后需要的真实写入操作
+				// Record the actual write to perform later
 				PendingGroupWrite job;
-				job.TempSourcePath = result.tempFilePath; // 数据在哪个文件
-				job.SourceOffset = group.TempFileOffset;  // 在文件哪里
-				job.SizeBytes = groupSize;                // 多大
-				job.BaseGroupIndexPatchValue = baseGroupIndex; // 修正值是多少
+				job.TempSourcePath = result.tempFilePath; // Which file holds the data
+				job.SourceOffset = group.TempFileOffset;  // Offset within the file
+				job.SizeBytes = groupSize;                // Size
+				job.BaseGroupIndexPatchValue = baseGroupIndex; // Patch value
 				streamCtx.PendingWrites.push_back(job);
 
 
@@ -301,17 +301,17 @@ static void ParallelCompileMeshes(
 				streamCtx.TotalGeometrySize += groupSize;
 			}
 
-			// 处理并修正 BVH 节点
+			// Process and patch BVH nodes
 			for (auto& node : products.Hierarchy)
 			{
 				if (node.Internal.IsGroup == 0) // Internal Node
 				{
-					// 修正子节点在全局 Node 数组中的索引
+					// Patch child node indices in the global node array
 					node.Internal.ChildStartIndex += baseNodeIndex;
 				}
 				else // Leaf Node
 				{
-					// 修正 Cluster Group 在全局 Group 数组中的索引
+					// Patch cluster group indices in the global group array
 					node.Leaf.GroupIndex += baseGroupIndex;
 				}
 			}
@@ -319,7 +319,7 @@ static void ParallelCompileMeshes(
 			modelData.m_TriangleCount += finalPrim.indexCount / 3;
 		}
 
-		// 存入缓存
+		// Store in cache
 		meshCache[result.sourceMesh] = std::move(result.meshData);
 
 		//localTempFileIn.close();
@@ -328,8 +328,8 @@ static void ParallelCompileMeshes(
 }
 
 /**
- * 实例化 Mesh。
- * 创建一个 Renderer::Mesh 对象，关联到特定的 Scene Graph 节点 (matrixIdx)，并复用已编译的几何数据。
+ * Instantiate a mesh.
+ * Create a Renderer::Mesh tied to a specific scene graph node (matrixIdx) and reuse compiled geometry.
  */
 static void InstantiateMesh(
 	ModelData& modelData,
@@ -340,10 +340,10 @@ static void InstantiateMesh(
 	size_t numDraws = cachedData.primitives.size();
 	if (numDraws == 0) return;
 
-	// 分配紧凑的 Mesh 结构体内存
-	// 这里使用 malloc 是为了配合 modelData 存储指针的设计。在16亿级场景下，如果实例极多（如数百万），
-	// 这里的堆分配可能会造成碎片。但考虑到要兼容现有 Model 结构，这是必要的妥协。
-	// 在极限情况下，建议 ModelData 改用 LinearAllocator 或 std::deque<Mesh> 存储。
+	// Allocate compact Mesh struct memory
+	// Using malloc here matches modelData's pointer storage design. In very large scenes, if instances are numerous (millions),
+	// this heap allocation can cause fragmentation. But to stay compatible with the existing Model structure, this is a necessary compromise.
+	// In extreme cases, consider storing meshes in ModelData using a LinearAllocator or std::deque<Mesh>.
 	size_t meshStructSize = sizeof(Mesh) + sizeof(Mesh::Draw) * (numDraws - 1);
 	Mesh* mesh = (Mesh*)malloc(meshStructSize);
 
@@ -409,7 +409,7 @@ static uint32_t WalkGraph(
     const Matrix4 worldXform = xform * node.xform;
 	if (curNode->mesh) 
 	{
-		// 收集任务，稍后并行处理
+		// Collect tasks for later parallel processing
 		MeshInstanceRequest req;
 		req.mesh = curNode->mesh;
 		req.nodeIndex = curPos;
@@ -470,7 +470,7 @@ void BuildMaterials(ModelData& model, const glTF::GltfAsset& asset)
 		MaterialConstantData& matConst = model.m_MaterialConstants[i];
 		MaterialTextureData& matTex = model.m_MaterialTextures[i];
 
-		// 初始化默认值
+		// Initialize defaults
 		matConst.baseColorFactor[0] = 1.0f;
 		matConst.baseColorFactor[1] = 1.0f;
 		matConst.baseColorFactor[2] = 1.0f;
@@ -526,7 +526,7 @@ void BuildMaterials(ModelData& model, const glTF::GltfAsset& asset)
 				return finalValue;
 			};
 
-		// PBR 参数映射
+		// PBR parameter mapping
 		if (srcMat.has_pbr_metallic_roughness)
 		{
 			const auto& pbr = srcMat.pbr_metallic_roughness;
@@ -701,7 +701,7 @@ void BuildAnimations(ModelData& model, const glTF::GltfAsset& asset, const NodeM
 			default: continue;
 			}
 
-			// 插值方式映射
+			// Interpolation mapping
 			switch (sampler.interpolation) 
             {
 			case cgltf_interpolation_type_linear:       curve.interpolation = glTF::AnimSampler::kLinear; break;
@@ -710,16 +710,16 @@ void BuildAnimations(ModelData& model, const glTF::GltfAsset& asset, const NodeM
 			default: curve.interpolation = glTF::AnimSampler::kLinear; break;
 			}
 
-			// 关键帧数据偏移与格式
+			// Keyframe data offset and format
 			curve.keyFrameOffset = (uint32_t)model.m_AnimationKeyFrameData.size();
 			curve.keyFrameFormat = glTF::GltfAsset::MapComponentType(sampler.output->component_type);
 			curve.numSegments = (float)(sampler.input->count - 1);
 
-			// 计算 Stride (float 数量)
+			// Compute stride (float count)
 			uint32_t numComps = (uint32_t)cgltf_num_components(sampler.output->type);
-			curve.keyFrameStride = numComps; // 假设是 float，如果是短整型需调整
+			curve.keyFrameStride = numComps; // Assume float; adjust if short integers
 
-			// 提取时间戳计算 Duration
+			// Extract timestamps to compute duration
 			std::vector<float> times(sampler.input->count);
 			cgltf_accessor_unpack_floats(sampler.input, times.data(), times.size());
 			curve.startTime = times.front();
@@ -730,7 +730,7 @@ void BuildAnimations(ModelData& model, const glTF::GltfAsset& asset, const NodeM
 				curve.rangeScale = curve.numSegments / (endTime - curve.startTime);
 			animSet.duration = std::max(animSet.duration, endTime);
 
-			// 提取关键帧数据
+			// Extract keyframe data
 			size_t dataSize = sampler.output->count * cgltf_calc_size(sampler.output->type, sampler.output->component_type);
 			const uint8_t* srcData = (const uint8_t*)sampler.output->buffer_view->buffer->data + sampler.output->offset + sampler.output->buffer_view->offset;
 
@@ -833,9 +833,9 @@ bool Renderer::BuildModel(ModelData& model, const glTF::GltfAsset& asset, Global
     model.m_BoundingBox = AxisAlignedBox(kZero);
 
 	std::vector<MeshInstanceRequest> meshRequests;
-	meshRequests.reserve(data->nodes_count); // 预估容量
+	meshRequests.reserve(data->nodes_count); // Reserve capacity estimate
 
-	// 遍历 Scene 的根节点
+	// Traverse scene root nodes
 	uint32_t currentPos = 0;
 	if (scene->nodes_count > 0)
 	{
@@ -852,14 +852,14 @@ bool Renderer::BuildModel(ModelData& model, const glTF::GltfAsset& asset, Global
 
 	model.m_SceneGraph.resize(currentPos);
 
-	// 并行编译几何体 (Heavy Lifting)
+	// Compile geometry in parallel (heavy lifting)
 	if (!meshRequests.empty())
 	{
 		ParallelCompileMeshes(model, meshCache, data, meshRequests, streamCtx);
 	}
 	Utility::Printf("Total triangles built: %llu\n", model.m_TriangleCount);
 
-	// 实例化与计算 Bounds
+	// Instantiate and compute bounds
 	if (!meshRequests.empty())
 	{
 		BoundingSphere modelBSphere(kZero);
@@ -939,7 +939,7 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	if (!CheckedU32(data.m_MaterialConstants.size(), "Material", header.numMaterials)) { CleanupTempFiles(); return false; }
 	if (!CheckedU32(data.m_TextureNames.size(), "Texture", header.numTextures)) { CleanupTempFiles(); return false; }
 
-	// Cluster 数据
+	// Cluster data
 	if (!CheckedU32(data.m_GroupInfos.size(), "Group", header.groupCount)) { CleanupTempFiles(); return false; }
 	if (!CheckedU32(data.m_Nodes.size(), "Hierarchy node", header.hierarchyNodeCount)) { CleanupTempFiles(); return false; }
 	if (!CheckedU32(data.m_Pages.size(), "Page", header.pageCount)) { CleanupTempFiles(); return false; }
@@ -976,7 +976,7 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
     header.maxPos[2] = data.m_BoundingBox.GetMax().GetZ();
 
 	// -------------------------------------------------------------
-	// 计算 Header 及元数据总大小
+	// Compute total size of header and metadata
 	// -------------------------------------------------------------
 	uint64_t metadataSize = sizeof(FileHeader);
 	auto AddSize = [&](uint64_t add, const char* label) -> bool
@@ -1023,7 +1023,7 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	if (header.pageCount > 0 && !AddSize(static_cast<uint64_t>(header.pageCount) * sizeof(PageMetadata), "Page metadata")) { CleanupTempFiles(); return false; }
 	if (header.pageCount > 0 && !AddSize(static_cast<uint64_t>(header.pageCount) * sizeof(PageCompressionInfo), "Page compression info")) { CleanupTempFiles(); return false; }
 
-	// 计算 Geometry Blob 偏移
+	// Compute geometry blob offset
 	const uint32_t pageSize = Renderer::kPageSizeInBytes;
 	const uint64_t geometryBlobOffset = metadataSize;
 	if (streamCtx.TotalGeometrySize > std::numeric_limits<uint64_t>::max() - (pageSize - 1))
@@ -1050,7 +1050,7 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 		pageCompressionInfos.resize(header.pageCount);
 
 	// -------------------------------------------------------------
-	// 写入 Header + Metadata (预留压缩表)
+	// Write header + metadata (reserve compression table)
 	// -------------------------------------------------------------
 	uint64_t maxCompressedSize = 0;
 	if (header.pageCount > 0)
@@ -1082,7 +1082,7 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	hFile = CreateFileW(filePath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (hFile == INVALID_HANDLE_VALUE) { CleanupTempFiles(); return false; }
 
-	// 预扩展文件大小
+	// Pre-extend file size
 	if (geometryBlobOffset > std::numeric_limits<uint64_t>::max() - maxCompressedSize)
 	{
 		Utility::Printf("Error: Final file size overflow.\n");
@@ -1115,7 +1115,7 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 		return false;
 	}
 
-	// 写入 Header 和 Metadata
+	// Write header and metadata
 	// -------------------------------------------------------------
 	uint8_t* pCursor = pMappedData;
 	auto Write = [&](const void* src, size_t size) 
@@ -1183,7 +1183,7 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	}
 
 	// -------------------------------------------------------------
-	// 并行压缩 Geometry Pages (低内存占用，直接写盘)
+	// Compress geometry pages in parallel (low memory, write directly to disk)
 	// -------------------------------------------------------------
 	std::atomic<uint64_t> compressedWriteOffset{ 0 };
 	if (streamCtx.TotalGeometrySize > 0)
@@ -1333,7 +1333,7 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 
 	Utility::Printf("Total compressed geometry size: %llu MB\n", compressedWriteOffset.load() / (1024 * 1024));
 
-	// 回写 Header 和压缩表
+	// Write back header and compression table
 	pCursor = pMappedData;
 	Write(&header, sizeof(FileHeader));
 	if (header.pageCount > 0)
@@ -1365,7 +1365,7 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 
 	CleanupFileHandles();
 
-	// 清理临时文件
+	// Clean up temporary files
 	CleanupTempFiles();
 
 	Utility::Printf("Build geometry result:\n");

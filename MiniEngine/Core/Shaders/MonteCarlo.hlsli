@@ -3,14 +3,14 @@
 
 #include "Math.hlsli"
 
-// i是样本索引 (0, 1, 2, ...), N是总样本数
-// 返回一个在[0,1]^2空间中均匀分布的点
+// i is the sample index (0, 1, 2, ...), N is the total sample count
+// Returns a point uniformly distributed in [0,1]^2
 float2 Hammersley(uint i, uint N)
 {
-    // 第一维是均匀分布
+    // First dimension is uniform
     float dim1 = float(i) / float(N);
 
-    // 第二维是Radical Inverse, base 2
+    // Second dimension is radical inverse, base 2
     uint bits = i;
     bits = (bits << 16u) | (bits >> 16u);
     bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);

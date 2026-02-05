@@ -9,7 +9,7 @@ void main( uint3 DTid : SV_DispatchThreadID )
     RWStructuredBuffer<DispatchMeshCommand> MeshCommand = GetDispatchMeshBufferUAV();
     StructuredBuffer<QueueState> taskStateSRV = GetTaskQueueStateBufferSRV();
 
-    // MaxCommands在这里的语义是Pass Index
+    // MaxCommands here represents the pass index
     const uint meshletCount = taskStateSRV[0].PassState[MaxCommands].VisibleMeshletCount;
     MeshCommand[DTid.x].ThreadGroupCountX = meshletCount;
     MeshCommand[DTid.x].ThreadGroupCountY = 1;

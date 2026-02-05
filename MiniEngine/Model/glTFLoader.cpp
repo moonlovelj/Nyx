@@ -9,7 +9,7 @@
 
 namespace
 {
-	// 使用内存映射读取文件，避免堆内存分配
+	// Use memory-mapped file I/O to avoid heap allocation
 	cgltf_result CgltfReadFile(const struct cgltf_memory_options* memory_options, const struct cgltf_file_options* file_options, const char* path, cgltf_size* size, void** data)
 	{
 		memory_options;file_options;path;size;data;

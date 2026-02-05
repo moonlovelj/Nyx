@@ -75,7 +75,7 @@ void OptimizeMesh(Renderer::Primitive& outPrim,
     const cgltf_primitive& inPrim, 
     const Math::Matrix4& localToObject)
 {
-	// 获取 Position 属性查找
+	// Get Position attribute accessor
 	const cgltf_accessor* posAcc = nullptr;
 	for (size_t i = 0; i < inPrim.attributes_count; ++i)
 		if (inPrim.attributes[i].type == cgltf_attribute_type_position) posAcc = inPrim.attributes[i].data;
@@ -201,7 +201,7 @@ void OptimizeMesh(Renderer::Primitive& outPrim,
 		}
 	}
 
-	// 准备材质，处理材质为空的情况
+	// Prepare material, handle missing material
 	cgltf_material defaultIdentityMaterial = {};
 	defaultIdentityMaterial.alpha_mode = cgltf_alpha_mode_opaque;
 	defaultIdentityMaterial.alpha_cutoff = 0.5f;
@@ -425,14 +425,14 @@ void OptimizeMesh(Renderer::Primitive& outPrim,
   //  dvbw.Write( position.get(), "POSITION", 0, vertexCount );
   //  if (material.alpha_mode == cgltf_alpha_mode_mask)
   //  {
-		//// 获取 Base Color 的 UV 索引，默认为 0
+		//// Get Base Color UV index, default to 0
 		//int texCoordIndex = material.pbr_metallic_roughness.base_color_texture.texture ?
 		//	material.pbr_metallic_roughness.base_color_texture.texcoord : 0;
 
 		//const XMFLOAT2* texcoordData = (texCoordIndex == 1) ? texcoord1.get() : texcoord0.get();
   //      if (!texcoordData)
   //      {
-  //          //TODO 暂时特殊处理，按理说alphatest的材质一定会有UV的
+  //          // TODO: temporary special case; alpha-test materials should have UVs
 		//	std::vector<XMFLOAT2> tempUVs(vertexCount, XMFLOAT2(0.0f, 0.0f));
   //          dvbw.Write(tempUVs.data(), "TEXCOORD", 0, vertexCount);
   //      }

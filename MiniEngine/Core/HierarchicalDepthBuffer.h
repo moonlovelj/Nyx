@@ -21,13 +21,13 @@ public:
 	// Create a color buffer.  If an address is supplied, memory will not be allocated.
 	// The vmem address allows you to alias buffers (which can be especially useful for
 	// reusing ESRAM across a frame.)
-	// 注意这里的Width和Height是原始深度缓冲区的尺寸，而不是HZB的尺寸。HZB的尺寸和Mip数量在内部自动计算
+	// Note: Width/Height are the original depth buffer size, not the HZB size. HZB size and mip count are computed internally.
 	void Create(const std::wstring& Name, uint32_t Width, uint32_t Height,
 		DXGI_FORMAT Format, D3D12_GPU_VIRTUAL_ADDRESS VidMemPtr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN);
 
 	// Create a color buffer.  Memory will be allocated in ESRAM (on Xbox One).  On Windows,
 	// this functions the same as Create() without a video address.
-	// 注意这里的Width和Height是原始深度缓冲区的尺寸，而不是HZB的尺寸。HZB的尺寸和Mip数量在内部自动计算
+	// Note: Width/Height are the original depth buffer size, not the HZB size. HZB size and mip count are computed internally.
 	void Create(const std::wstring& Name, uint32_t Width, uint32_t Height,
 		DXGI_FORMAT Format, EsramAllocator& Allocator);
 
@@ -36,7 +36,7 @@ public:
 	const D3D12_CPU_DESCRIPTOR_HANDLE& GetUAV(void) const { return m_UAVHandle[0]; }
 	const D3D12_CPU_DESCRIPTOR_HANDLE& GetUAV(uint32_t MipLevel) const { return m_UAVHandle[MipLevel]; }
 
-	// 这里真正生成HZB的数据
+	// Generate HZB data here
 	void GenerateHZB(CommandContext& Context, const DepthBuffer& SrcDepthBuffer);
 
 protected:

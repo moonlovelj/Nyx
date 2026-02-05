@@ -236,20 +236,20 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
 
 	for (uint32_t i = 0; i < header.numMeshes; ++i)
 	{
-		// 先读固定头部，拿到 numDraws
+		// Read the fixed header first to get numDraws
 		Mesh tempHead{};
 		inFile.read(reinterpret_cast<char*>(&tempHead), sizeof(Mesh));
 		if (!inFile) return nullptr;
 
-		// 计算真实字节数并分配
+		// Compute actual byte size and allocate
 		const size_t meshSize = sizeof(Mesh) + sizeof(Mesh::Draw) * (tempHead.numDraws - 1);
 		Mesh* mesh = static_cast<Mesh*>(std::malloc(meshSize));
 		if (!mesh) return nullptr;
 
-		// 将已读头部复制到目标内存
+		// Copy the read header into destination memory
 		std::memcpy(mesh, &tempHead, sizeof(Mesh));
 
-		// 读取剩余的 Draw 数组数据（如果有）
+		// Read remaining Draw array data (if any)
 		const size_t remaining = meshSize - sizeof(Mesh);
 		if (remaining > 0)
 		{
@@ -337,8 +337,8 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
         inFile.read((char*)model->m_Cameras.get(), header.numCameras * sizeof(CameraData));
     }
 
-	// --- 读取 Cluster LOD Data ---
-	// Group Infos (目录表)
+	// --- Read Cluster LOD Data ---
+	// Group Infos (directory table)
 	if (header.groupCount > 0)
 	{
 		model->m_GroupMetadatas.resize(header.groupCount);

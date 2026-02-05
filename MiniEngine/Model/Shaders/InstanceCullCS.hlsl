@@ -56,16 +56,16 @@ void main(uint3 DTid : SV_DispatchThreadID)
         if (WaveIsFirstLane() && WaveVisibleCount > 0)
         {
             globallycoherent RWStructuredBuffer<QueueState> taskStateUAV = GetTaskQueueStateBufferUAV();
-            // 一次性为整个 Wave 申请空间
+            // Allocate space for the whole wave at once
             InterlockedAdd(taskStateUAV[0].PassState[passIndex].NodeWriteOffset, WaveVisibleCount, WaveBaseIndex);
             InterlockedAdd(taskStateUAV[0].PassState[passIndex].NodeCount, WaveVisibleCount);
         }
         
-        // 广播起始索引并计算波内偏移
+        // Broadcast base index and compute lane offset
         WaveBaseIndex = WaveReadLaneFirst(WaveBaseIndex);
         uint LaneOffset = WavePrefixCountBits(bVisible);
 
-        // 只有可见的线程才进行 Store
+        // Only visible lanes perform the store
         if (bVisible)
         {
             uint FinalIndex = WaveBaseIndex + LaneOffset;

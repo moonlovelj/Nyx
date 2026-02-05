@@ -75,7 +75,7 @@ cbuffer GlobalConstants : register(b2)
 cbuffer CommandConstants : register(b3)
 {
     uint MaxCommands;
-    float ScreenErrorConstant; // 计算meshlet屏幕误差时使用的提前计算的常量 (cotHalfFov * screenHeight) / 2.0
+    float ScreenErrorConstant; // Precomputed constant for project screen error
     uint PsoIdx;
     uint CullingStage;
 };
@@ -93,34 +93,7 @@ struct InstanceConstant
     uint JointBufferIdx;
 };
 
-struct MeshletConstant
-{
-    float4 BoundingSphere;
-    uint VertexBufferOffset;
-    uint VertexStride;
-    uint VertexBufferDepthOffset;
-    uint VertexDepthStride;
-
-    uint32_t MeshletVerticesOffset;   // 指向该 Meshlet 的顶点索引列表 (uint32)
-    uint32_t MeshletPrimitivesOffset; // 指向该 Meshlet 的三角形列表
-    uint32_t VertexCount;             // Meshlet 唯一顶点数 (Max 256)
-    uint32_t PrimitiveCount;          // Meshlet 三角形数 (Max 128)
-
-    uint IndexBufferOffset;
-    uint MeshConstantsIndexOffset;
-    uint MaterialConstantsIndex;
-    uint MeshJointsIndexOffset;
-
-    // Nanite LOD 数据
-    float4   parentBounds;     // 父层级包围球
-    float4   lodBounds;        // 当前层级包围球
-    float    parentError;      // 父层级简化误差（Infinity = 根节点）
-    float    lodError;	       // 当前层级简化误差
-    uint     lodLevel;         // 当前 LOD 层级（0 = 最精细）
-    uint     psoFlags;
-};
-
-// 实际是Instance级别
+// Actually per-instance
 struct MeshConstant
 {
     float4x4 WorldMatrix;
@@ -176,12 +149,6 @@ struct LightData
     float4x4 shadowTextureMatrix;
 };
 
-MeshletConstant GetMeshletConstantSRV(uint index)
-{
-	ByteAddressBuffer MeshletConstantBuffer = ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_MESHLET_BUFFER];
-	return MeshletConstantBuffer.Load<MeshletConstant>(index * sizeof(MeshletConstant));
-}
-
 MeshConstant GetMeshConstantSRV(uint index)
 {
     ByteAddressBuffer MeshConstantBuffer = ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_MESH_CONSTANTS_BUFFER];
@@ -208,11 +175,6 @@ ByteAddressBuffer GetVertexBufferSRV()
 ByteAddressBuffer GetIndexBufferSRV()
 {
     return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_INDEX_BUFFER];
-}
-
-ByteAddressBuffer GetGeometryBufferSRV()
-{
-    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_GEOMETRY_BUFFER];
 }
 
 Texture2D<uint2> GetVBufferSRV()
@@ -310,31 +272,6 @@ StructuredBuffer<LightData> GetLightBufferSRV()
     return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_LIGHT_BUFFER];
 }
 
-// bufferOffset = psoContinuousIdx
-IndirectCommand GetIndirectCommandsBufferSRV(uint bufferOffset, uint index)
-{
-    ByteAddressBuffer indirectCommandBuffer = ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_INDIRECT_COMMANDS_BASE + bufferOffset];
-    return indirectCommandBuffer.Load<IndirectCommand>(index * sizeof(IndirectCommand));
-}
-
-// bufferOffset = psoContinuousIdx
-ByteAddressBuffer GetIndirectVisibleFlagsBufferSRV(uint bufferOffset)
-{
-    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_INDIRECT_VISIBLE_FLAGS_BASE + bufferOffset];
-}
-
-// bufferOffset = psoContinuousIdx
-uint GetIndirectCullingResultsBufferSRV(uint bufferOffset, uint index)
-{
-    StructuredBuffer<uint> cullingResultBuffer = ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_INDIRECT_CULLING_RESULTS_BASE + bufferOffset];
-    return cullingResultBuffer[index];
-}
-
-ByteAddressBuffer GetIndirectCullingResultsCounterBufferSRV(uint bufferOffset)
-{
-    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_INDIRECT_CULLING_RESULTS_COUNTER_BASE + bufferOffset];
-}
-
 ByteAddressBuffer GetTaskQueueBufferSRV()
 {
     return ResourceDescriptorHeap[BindlessResourcesBaseIndex + SRV_TASK_QUEUE_BUFFER];
@@ -407,16 +344,6 @@ RWTexture2D<float4> GetGBufferCUAV()
 RWTexture2D<float4> GetGBufferDUAV()
 {
     return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_GBUFFER_D];
-}
-
-RWByteAddressBuffer GetIndirectVisibleFlagsBufferUAV(uint bufferOffset)
-{
-    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_INDIRECT_VISIBLE_FLAGS_BASE + bufferOffset];
-}
-
-AppendStructuredBuffer<uint> GetIndirectCullingResultsBufferUAV(uint bufferOffset)
-{
-    return ResourceDescriptorHeap[BindlessResourcesBaseIndex + UAV_INDIRECT_CULLING_RESULTS_BASE + bufferOffset];
 }
 
 RWByteAddressBuffer GetLightGridUAV()

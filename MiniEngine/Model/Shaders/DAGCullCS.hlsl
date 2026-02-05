@@ -24,7 +24,7 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
     globallycoherent RWStructuredBuffer<QueueState> taskStateUAV = GetTaskQueueStateBufferUAV();
     globallycoherent RWByteAddressBuffer taskQueueUAV = GetTaskQueueBufferUAV();
     
-    // 计算当前线程要处理的Node索引
+    // Compute the node index this thread handles
     const uint localNodeIndex = (groupIndex >> MAX_BVH_NODE_CHILDREN_BITS_NUM);
     const uint childIndex = groupIndex & (MAX_BVH_NODE_CHILDREN_NUM - 1);
     const uint fetchIndex = min(localNodeIndex, batchSize - 1);
@@ -46,7 +46,7 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
     {
         node = nodeBufferSRV[currentChildNodeIndex];
     }
-    // 裁剪判定
+    // Culling test
     bool bVisible = true;
     if (localNodeIndex >= batchSize)
     {
@@ -92,13 +92,13 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
     uint nodeWriteOffsetInGroup = 0;
     if (bPushNode)
     {
-        // 计算小组内需要推入多少个新 Node
+        // Compute how many new nodes to push in this group
         WaveInterlockedAddScalar(GroupNumCandidateNodes, bPushNode, 1u, nodeWriteOffsetInGroup);
     }
 
     GroupMemoryBarrierWithGroupSync();
 
-    // 由小组长去全局队列占座 (生产者写入)
+    // Group leader reserves space in the global queue (producer write)
     if (groupIndex == 0)
     {
         InterlockedAdd(taskStateUAV[0].PassState[passIndex].NodeWriteOffset, GroupNumCandidateNodes, GroupCandidateNodesOffset);
@@ -106,7 +106,7 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
     }
     AllMemoryBarrierWithGroupSync();
 
-    // 写入新任务到队列
+    // Write new tasks to the queue
     if (bPushNode)
     {
         uint globalIdx = (GroupCandidateNodesOffset + nodeWriteOffsetInGroup);
@@ -115,7 +115,7 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
 
     DeviceMemoryBarrierWithGroupSync();
     
-    // 处理叶子节点 (Cluster)
+    // Process leaf nodes (clusters)
     if (bVisible && bIsLeaf)
     {
         const uint groupID = node.GetGroupIndex();
@@ -129,35 +129,20 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
         StructuredBuffer<GroupDataLocation> groupDataLocationSRV = GetGroupDataLocationBufferSRV();
         GroupDataLocation groupDataLocation = groupDataLocationSRV[groupID];
 
-        if (groupDataLocation.ChunkIndex == INVALID_ID)
-        {
-            //globallycoherent RWByteAddressBuffer requestUAV = GetGeometryStreamingRequestBufferUAV();
-            //globallycoherent RWStructuredBuffer<GeometryStreamingState> streamingStateUAV = GetGeometryStreamingStateBufferUAV();
-            //uint requestWriteOffset = 0;
-            //WaveInterlockedAddScalar(streamingStateUAV[0].NumRequests, true, 1u, requestWriteOffset);
-            //if (requestWriteOffset < MAX_STREAMING_REQUESTS)
-            //{
-            //    GeometryStreamingRequest request;
-            //    request.PackedData = request.PackData(node.GetGroupIndex(), 0);
-            //    requestUAV.Store(requestWriteOffset * 4, request.PackedData);
-            //} 
-            
-            
-        }
-        else
+        if (groupDataLocation.ChunkIndex != INVALID_ID)
         {
         
             uint NumClusters = node.GetMeshletCount();
             uint ClusterIndex = 0;
             WaveInterlockedAdd(taskStateUAV[0].PassState[passIndex].TotalMeshlets, NumClusters, ClusterIndex);
 
-            // 溢出检查：如果当前分配的索引加上要添加的数量超过了 Buffer 最大容量
+            // Overflow check: if allocated index plus new count exceeds buffer capacity
             const uint ClusterIndexEnd = min(ClusterIndex + NumClusters, MAX_CANDIDATE_MESHLETS);
-            // 重新计算实际能存入的数量（防止把 Buffer 写爆导致 GPU 挂起）
+            // Recompute actual storable count (avoid buffer overflow causing GPU hang)
             NumClusters = (uint) max((int) ClusterIndexEnd - (int) ClusterIndex, 0);
         
             uint CandidateClustersOffset = 0;
-            // 在 CandidateClusters 队列中申请一段连续的空间
+            // Reserve a contiguous range in the CandidateClusters queue
             WaveInterlockedAdd(taskStateUAV[0].PassState[passIndex].CandidateMeshletWriteOffset, NumClusters, CandidateClustersOffset);
         
             const uint StartIndex = CandidateClustersOffset;
@@ -175,22 +160,22 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
         
             for (uint Index = StartIndex; Index < EndIndex;)
             {
-            // 计算当前索引属于哪一个 Batch (每 64 个一箱)
+            // Compute which batch this index belongs to (one bin per 64)
                 const uint BatchIndex = Index / DAG_CULL_GROUP_SIZE;
     
-            // 计算下一个对齐到 64 的位置 (即下一个箱子的开头)
+            // Compute the next 64-aligned index (start of next bin)
                 const uint NextIndex = (Index & ~(64 - 1u)) + 64;
     
-            // 计算在当前箱子里占了几个坑位
+            // Compute how many slots are used in the current bin
                 const uint MaxIndex = min(NextIndex, EndIndex);
                 const uint Num = MaxIndex - Index;
     
-            // 更新该 Batch 的就绪计数器
+            // Update the ready counter for this batch
                 globallycoherent RWByteAddressBuffer meshletBatchBufferUAV = GetMeshletBatchBufferUAV();
                 uint temp;
                 meshletBatchBufferUAV.InterlockedAdd(BatchIndex * 4, Num, temp);
     
-            // 步进到下一个箱子
+            // Advance to the next bin
                 Index = NextIndex;
             }
         }
@@ -222,8 +207,6 @@ void ProcessClusterBatch(uint clusterBatchStartIndex, uint clusterBatchReadySize
         const uint meshletIndexInGroup = meshletPayload.GetMeshletIndex();
         
         MeshletHeader meshletHeader = geometryChunksBuffer.Load<MeshletHeader>(meshletHeaderStart + meshletIndexInGroup * sizeof(MeshletHeader));
-        //float4 meshletSphere = asfloat(geometryChunksBuffer.Load4(meshletHeaderStart
-        //+ meshletIndexInGroup * sizeof(MeshletHeader)));
         InstanceConstant inst = GetInstanceConstantSRV(meshletPayload.InstanceIndex);
         MeshConstant meshInstance = GetMeshConstantSRV(inst.MeshBufferIdx);
         bool bAlphaBlend = (meshletHeader.GetPSOFlags() & PSO_ALPHA_BLEND);
@@ -275,7 +258,7 @@ void ProcessClusterBatch(uint clusterBatchStartIndex, uint clusterBatchReadySize
             WaveInterlockedAddScalar(taskStateUAV[0].PassState[passIndex].VisibleMeshletCount, true, 1, writeOffset);
             RWStructuredBuffer<VisibleMeshletPayload> payloadBufferUAV = GetVisibleMeshletBufferUAV();
 #ifdef DAG_CULL_PASS1
-            // 在Pass0后面开始写
+            // Write after pass0
             if (writeOffset + taskStateUAV[0].PassState[0].VisibleMeshletCount < MAX_VISIBLE_MESHLETS)
                 payloadBufferUAV[writeOffset + taskStateUAV[0].PassState[0].VisibleMeshletCount] = meshletPayload;
 #else
@@ -285,7 +268,7 @@ void ProcessClusterBatch(uint clusterBatchStartIndex, uint clusterBatchReadySize
         }
     }
 
-    // 直接清空为了下一个Pass使用
+    // Clear immediately for the next pass
     globallycoherent RWByteAddressBuffer meshletBatchBufferUAV = GetMeshletBatchBufferUAV();
     meshletBatchBufferUAV.Store(clusterBatchStartIndex * 4, 0);
 }
@@ -322,7 +305,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
         {
             if (NodeBatchReadyOffset == MAX_BVH_NODES_PER_GROUP)
             {
-				// 收集新一轮数据
+				// Collect a new batch of data
                 if (groupIndex == 0)
                 {
                     InterlockedAdd(taskStateUAV[0].PassState[passIndex].NodeReadOffset, MAX_BVH_NODES_PER_GROUP, GroupNodeBatchStartIndex);
@@ -330,19 +313,19 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
                 
                 GroupMemoryBarrierWithGroupSync();
 
-                // 重置Node状态
+                // Reset node state
                 NodeBatchReadyOffset = 0;
-                // 获取group在task队列中的起始位置
+                // Get the group's start index in the task queue
                 NodeBatchStartIndex = GroupNodeBatchStartIndex;
                 if (NodeBatchStartIndex >= MAX_NODES)
                 {
-                    // 超过了队列容量限制
+                    // Exceeded queue capacity limit
                     bProcessNodes = false;
                     continue;
                 }
             }
             
-            // 计算当前线程的Node索引
+            // Compute this thread's node index
             const uint NodeIndex = NodeBatchStartIndex + NodeBatchReadyOffset + groupIndex;
             bool bNodeReady = (NodeBatchReadyOffset + groupIndex < MAX_BVH_NODES_PER_GROUP);
             if (bNodeReady)
@@ -363,14 +346,14 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
             
             NodeReadyMask = GroupNodeMask;
 
-			// 判断第一个Node数据是否就绪
+			// Check whether the first node data is ready
             if (NodeReadyMask & 1u)
             {
                 uint batchSize = firstbitlow(~NodeReadyMask);
                 ProcessNodeBatch(batchSize, groupIndex, passIndex);
                 if (groupIndex < batchSize)
                 {
-                    // 直接清空为了下一个Pass使用
+                    // Clear immediately for the next pass
                     taskQueueUAV.Store2(NodeIndex * NODE_BYTE_STRIDE, uint2(INVALID_ID, INVALID_ID));
                 }
 
@@ -379,8 +362,8 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
             }
         }
         
-        // 没有node需要处理，去处理cluster        
-        // 收集一组新的Cluster批次
+        // No nodes to process; handle clusters
+        // Collect a new cluster batch
         if (ClusterBatchStartIndex == INVALID_ID)
         {
             if (groupIndex == 0)
@@ -403,7 +386,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
         GroupMemoryBarrierWithGroupSync();
 
         uint ClusterBatchReadySize = GroupClusterBatchReadySize;
-        if (!bProcessNodes && ClusterBatchReadySize == 0)	// 没有cluster需要处理
+        if (!bProcessNodes && ClusterBatchReadySize == 0)	// No clusters to process
             break;
 
         if ((bProcessNodes && ClusterBatchReadySize == DAG_CULL_GROUP_SIZE) || (!bProcessNodes && ClusterBatchReadySize > 0))

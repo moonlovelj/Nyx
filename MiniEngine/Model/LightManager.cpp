@@ -1,4 +1,4 @@
-﻿//
+//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -405,7 +405,7 @@ void Lighting::RenderLightShadows(GraphicsContext& gfxContext, const GlobalConst
             MeshSorter shadowSorter(MeshSorter::kShadows);
             shadowSorter.SetCamera(m_LightCamera[LightIndex]);
             shadowSorter.SetDepthStencilTarget(m_LightShadowTempBuffer);
-            ModelInstanceManager::Get().Render(shadowSorter);
+            ModelInstanceManager::Render(shadowSorter);
             shadowSorter.Sort();
             shadowSorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);
             

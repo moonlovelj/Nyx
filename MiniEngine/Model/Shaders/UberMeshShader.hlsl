@@ -139,7 +139,7 @@ void main(
     GroupMemoryBarrierWithGroupSync();
 
     // --------------------------------------------------------
-    // 图元剔除 + Wave 紧凑 (Primitive Culling + Wave Compaction)
+    // Primitive culling + wave compaction
     // --------------------------------------------------------
     [unroll]
     for (uint j = 0; j < MAX_PRIMS; j += MS_GROUP_SIZE)
@@ -153,7 +153,6 @@ void main(
         {
             triIndices = LoadAndUnpackTriangle(geometryChunksBuffer, indexByteOffset, primitiveID);
 
-            // 这里重新Load并且计算，要比使用group shared memory性能好
             float4 h0 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.x, meshInstance.WorldMatrix, ViewProjMatrix);
             float4 h1 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.y, meshInstance.WorldMatrix, ViewProjMatrix);
             float4 h2 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.z, meshInstance.WorldMatrix, ViewProjMatrix);
@@ -166,14 +165,14 @@ void main(
                 isVisible = !IsTriangleOutsideFrustum(h0, h1, h2);
             }
 
-            if (isVisible)
-            {
-                float minW = min(h0.w, min(h1.w, h2.w));
-                if (minW > 0.0f)
-                {
-                    isVisible = !IsTinyTriangle(h0, h1, h2);
-                }
-            }
+            //if (isVisible)
+            //{
+            //    float minW = min(h0.w, min(h1.w, h2.w));
+            //    if (minW > 0.0f)
+            //    {
+            //        isVisible = !IsTinyTriangle(h0, h1, h2);
+            //    }
+            //}
         }
 
         uint outIndex = 0;
@@ -192,7 +191,7 @@ void main(
     SetMeshOutputCounts(vertexCount, finalPrimCount);
 
     // --------------------------------------------------------
-    // 顶点处理 (Vertex Processing)
+    // Vertex processing
     // --------------------------------------------------------
 
     [unroll]
@@ -228,7 +227,7 @@ void main(
                 }
             }
 
-            // Skinning (动态分支)
+            // Skinning (dynamic branch)
             //if (mlet.psoFlags & PSO_HAS_SKIN)
             //{
             //    uint2 PackedJointIndices = geometryData.Load2(vertexOffset);
@@ -266,7 +265,7 @@ void main(
     }
 
     // --------------------------------------------------------
-    // 图元输出 (Primitive Emit)
+    // Primitive emit
     // --------------------------------------------------------
     [unroll]
     for (uint j = 0; j < MAX_PRIMS; j += MS_GROUP_SIZE)

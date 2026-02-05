@@ -14,7 +14,7 @@ using namespace Renderer;
 static constexpr float kInfinity = std::numeric_limits<float>::infinity();
 static constexpr float kValidateEpsilon = 1e-4f;
 
-// 解码 DXGI_FORMAT_R10G10B10A2_UNORM 到 float3 法线（[-1,1]）
+// Decode DXGI_FORMAT_R10G10B10A2_UNORM to float3 normals ([-1,1])
 inline Math::Vector3 DecodeNormal_R10G10B10A2(uint32_t packed)
 {
 	constexpr float inv10 = 1.0f / 1023.0f;
@@ -54,25 +54,25 @@ inline std::tuple<float, float> DecodeR16G16FLOATToFloat2(uint32_t packed)
 }
 
 struct LocalIndexCache {
-	short cache[1024]; // 2KB，完美放入 L1 Cache
+	short cache[1024]; // 2KB, fits perfectly in L1 cache
 	LocalIndexCache() { memset(cache, -1, sizeof(cache)); }
 
 	uint32_t Get(uint32_t globalIdx, const std::vector<uint32_t>& usedIndices) {
-		// 取模（由于是 1024，编译器会优化成位与 & 1023）
+		// Modulo (since 1024, the compiler optimizes to bitwise & 1023)
 		uint32_t h = globalIdx & 1023;
 		short slot = cache[h];
 
-		// 检查缓存命中：slot 记录的是 usedIndices 的下标
+		// Check cache hit: slot stores the index into usedIndices
 		if (slot >= 0 && usedIndices[slot] == globalIdx) {
 			return (uint32_t)slot;
 		}
 
-		// 缓存未命中（哈希冲突或首次访问）：执行线性查找
-		// 提示：一个 Group 里的顶点通常只有几百到几千个，
-		// 对于现代 CPU，这几百个元素的线性查找（顺序内存访问）往往比二分查找（随机内存跳跃）快得多。
+		// Cache miss (hash collision or first access): do a linear search
+		// Tip: a group's vertices are usually only a few hundred to a few thousand,
+		// and on modern CPUs, linear search (sequential access) is often much faster than binary search (random access).
 		for (size_t i = 0; i < usedIndices.size(); ++i) {
 			if (usedIndices[i] == globalIdx) {
-				cache[h] = (short)i; // 更新缓存
+				cache[h] = (short)i; // Update cache
 				return (uint32_t)i;
 			}
 		}
@@ -146,21 +146,21 @@ MeshletBuildProducts MeshletBuilder::Build(
 		Utility::Printf(L"[MeshletBuilder] Start building meshlets for meshBufferIndex=%u, materialBufferIndex=%u\n",
 			buildArgs.meshBufferIndex, buildArgs.materialBufferIndex);
 
-	// 生成 position-only remap（供后续锁边用）
+	// Generate position-only remap (for later boundary locking)
 	std::vector<uint32_t> posRemap(buildArgs.vertexCount);
 	GeneratePositionRemap(buildArgs, posRemap);
 
-	// LOD0：整网格 -> meshlet
+	// LOD0: full mesh -> meshlets
 	std::vector<Meshlet> current = BuildLOD0Meshlets(buildArgs);
 
-	// LOD0：初始化待简化队列
+	// LOD0: initialize simplification queue
 	std::vector<uint32_t> activeIds(current.size());
 	std::iota(activeIds.begin(), activeIds.end(), 0u);
 
 	uint32_t lastTriCount = 0;
 	for (const auto& m : current) lastTriCount += static_cast<uint32_t>(m.Triangles.size() / 3);
 
-	// 打印 LOD0 统计
+	// Print LOD0 stats
 	if (buildArgs.settings.bOutputDebugInfo)
 		Utility::Printf(L"[MeshletBuilder] LOD %u: meshlets=%u, triangles=%u\n",
 			0u, static_cast<uint32_t>(current.size()), lastTriCount);
@@ -169,11 +169,11 @@ MeshletBuildProducts MeshletBuilder::Build(
 	std::vector<unsigned char> baseVertexLocks(buildArgs.vertexCount, 0);
 	BuildAttributeProtectLocks(buildArgs, posRemap, baseVertexLocks);
 
-	// 迭代简化
+	// Iterative simplification
 	uint32_t lodLevel = 1;
 	while (true)
 	{
-		// 基于共享顶点 / 空间接近度分组
+		// Group by shared vertices / spatial proximity
 		auto groupIds= GroupMeshlets(buildArgs, current, activeIds, posRemap, lodLevel-1, currentGroups);
 		if (groupIds.empty())
 			break;
@@ -182,32 +182,32 @@ MeshletBuildProducts MeshletBuilder::Build(
 		{
 			for (auto mid : currentGroups[gid].MeshletIDs)
 			{
-				// 设置 meshlet 的 GroupID
+				// Set meshlet GroupID
 				current[mid].GroupID = gid;
 				current[mid].GroupChildIndex = mid;
 			}
 		}
 
-		// 构建顶点锁（跨组共享 position-only 顶点全部上锁）
+		// Build vertex locks (lock all position-only vertices shared across groups)
 		std::vector<unsigned char> vertexLock = baseVertexLocks;
 		BuildVertexLocksByGroups(currentGroups, groupIds, current, posRemap, buildArgs.vertexCount, vertexLock);
 
-		// 对每个组尝试简化 -> 生成下一层 meshlets
+		// Try simplifying each group -> generate next-level meshlets
 		struct GroupResult
 		{
 			bool simplified = false;
-			float err = 0.0f;                     // SimplifyGroup 返回的误差
+			float err = 0.0f;                     // Error returned by SimplifyGroup
 			float groupSphere[4]{};
-			std::vector<Meshlet> generated;   // 该组生成的新 meshlets
-			std::vector<uint32_t> originalIds;    // 该组原有 meshlet id（用于写回 ParentError/Bounds）
-			uint32_t groupID = 0;				  // 原有group id	
+			std::vector<Meshlet> generated;   // New meshlets generated for this group
+			std::vector<uint32_t> originalIds;    // Original meshlet IDs for this group (for ParentError/Bounds writeback)
+			uint32_t groupID = 0;				  // Original group id
 		};
 
 		std::vector<GroupResult> results(groupIds.size());
 		std::vector<size_t> gi(groupIds.size());
 		std::iota(gi.begin(), gi.end(), size_t(0));
 
-		// 并行执行每个分组的简化尝试（只产生局部结果，不改写 shared 状态）
+		// Run simplification attempts per group in parallel (local results only, no shared writes)
 		std::for_each(std::execution::seq, gi.begin(), gi.end(),
 			[&](size_t idx)
 			{
@@ -217,7 +217,7 @@ MeshletBuildProducts MeshletBuilder::Build(
 				std::copy(g.GroupSphere, g.GroupSphere + 4, r.groupSphere);
 				r.originalIds = g.MeshletIDs;
 
-				// 单个 meshlet 分组无需简化
+				// Single-meshlet group needs no simplification
 				if (g.MeshletIDs.size() <= 1)
 				{
 					r.simplified = false;
@@ -245,18 +245,18 @@ MeshletBuildProducts MeshletBuilder::Build(
 		std::vector<uint32_t> nextActive;
 		nextActive.reserve(activeIds.size());
 
-		// 串行：设置误差、包围球、LODLevel，更新父误差，构建 nextActive
+		// Serial: set error, bounds, LODLevel, update parent error, build nextActive
 		for (const auto& r : results)
 		{
 			if (!r.simplified)
 			{
-				// 未简化成功，保留原 meshlet
+				// Simplification failed, keep original meshlet
 				currentGroups[r.groupID].ParrentError = kInfinity;
 				continue;
 			}
 
 			const size_t baseOffset = newMeshlets.size();
-			// 写包围球
+			// Write bounding sphere
 			for (auto& nm : const_cast<std::vector<Meshlet>&>(r.generated))
 			{
 				Meshlet out = std::move(nm);
@@ -264,11 +264,11 @@ MeshletBuildProducts MeshletBuilder::Build(
 				newMeshlets.emplace_back(std::move(out));
 			}
 
-			// 新 meshlet 的全局索引：current.size() + baseOffset + j
+			// Global indices for new meshlets: current.size() + baseOffset + j
 			for (size_t j = 0; j < r.generated.size(); ++j)
 				nextActive.push_back(static_cast<uint32_t>(current.size() + baseOffset + j));
 
-			// 写回父误差/包围（仅在成功简化时）
+			// Write back parent error/bounds (only when simplification succeeds)
 			float parrentErr = r.err;
 			for (uint32_t id : r.originalIds)
 			{
@@ -284,7 +284,7 @@ MeshletBuildProducts MeshletBuilder::Build(
 		if (newMeshlets.empty())
 			break;
 
-		// 打印本层统计
+		// Print stats for this level
 		{
 			uint32_t triCount = 0;
 			for (const auto& m : newMeshlets) triCount += static_cast<uint32_t>(m.Triangles.size() / 3);
@@ -302,7 +302,7 @@ MeshletBuildProducts MeshletBuilder::Build(
 			}
 		}
 
-		// 追加到 current，记录 LOD 层与当层可见 meshlet
+		// Append to current, record LOD level and meshlets visible at this level
 		current.insert(current.end(),
 			std::make_move_iterator(newMeshlets.begin()),
 			std::make_move_iterator(newMeshlets.end()));
@@ -359,7 +359,7 @@ void MeshletBuilder::BuildMeshletsFromIndices(
 		pos, buildArgs.vertexCount, stride,
 		buildArgs.settings.MaxMeshletVertices, buildArgs.settings.MinMeshletTriangles, buildArgs.settings.MaxMeshletTriangles, 0.0f, buildArgs.settings.ClusterSplitFactor);
 
-	// 转为 TempMeshlet
+	// Convert to TempMeshlet
 	out.reserve(out.size() + mlCount);
 	for (size_t i = 0; i < mlCount; ++i)
 	{
@@ -373,7 +373,7 @@ void MeshletBuilder::BuildMeshletsFromIndices(
 		tm.Triangles.resize(ml.triangle_count * 3);
 		std::copy_n(mlTriangles.data() + ml.triangle_offset, ml.triangle_count * 3, tm.Triangles.begin());
 
-		//优化局部性
+		// Optimize locality
 		meshopt_optimizeMeshlet(
 			tm.Vertices.data(), tm.Triangles.data(),
 			ml.triangle_count, ml.vertex_count);
@@ -491,9 +491,9 @@ std::vector<uint32_t> MeshletBuilder::GroupMeshlets(
 	const size_t clusterCount = subsetIds.size();
 	if (clusterCount == 0) return {};
 
-	// 准备给 partitionClusters 的输入
-	// 把每个 meshlet 的唯一顶点表串接起来
-	// 统计展开后总索引数
+	// Prepare input for partitionClusters
+	// Concatenate unique vertex lists of each meshlet
+	// Count total indices after expansion
 	size_t totalIndexCount = 0;
 	for (uint32_t id : subsetIds)
 		totalIndexCount += current[id].Triangles.size();
@@ -502,7 +502,7 @@ std::vector<uint32_t> MeshletBuilder::GroupMeshlets(
 	clusterIndices.reserve(totalIndexCount);
 	std::vector<unsigned int> clusterCounts(clusterCount);
 
-	// 将每个 meshlet 的 micro-triangles 展开为原始顶点索引
+	// Expand each meshlet's micro-triangles into original vertex indices
 	for (size_t i = 0; i < clusterCount; ++i)
 	{
 		const auto& m = current[subsetIds[i]];
@@ -511,8 +511,8 @@ std::vector<uint32_t> MeshletBuilder::GroupMeshlets(
 
 		for (size_t t = 0; t < triIdxCount; ++t)
 		{
-			uint8_t local = m.Triangles[t];           // 局部 0..N-1
-			uint32_t original = m.Vertices[local];    // 原始顶点索引
+			uint8_t local = m.Triangles[t];           // Local 0..N-1
+			uint32_t original = m.Vertices[local];    // Original vertex index
 			clusterIndices.push_back(posRemap[original]);
 		}
 	}
@@ -527,13 +527,13 @@ std::vector<uint32_t> MeshletBuilder::GroupMeshlets(
 		pos, buildArgs.vertexCount, buildArgs.vertexStride,
 		buildArgs.settings.TargetMeshletsPerGroup);
 
-	// 聚合为组
+	// Aggregate into groups
 	std::vector<Group> newGroups(partCount);
 	for (size_t i = 0; i < clusterCount; ++i)
 		newGroups[partition[i]].MeshletIDs.push_back(subsetIds[i]);
 
 	std::vector<uint32_t> groupIds(partCount);
-	// 计算组球（合并各 meshlet 球）
+	// Compute group sphere (merge meshlet spheres)
 	for (size_t groupIndex = 0; groupIndex < newGroups.size(); groupIndex++)
 	{
 		auto& g = newGroups[groupIndex];
@@ -580,9 +580,9 @@ void MeshletBuilder::BuildVertexLocksByGroups(
 	size_t vertexCount,
 	std::vector<unsigned char>& outVertexLock)
 {
-	// 标记每个 position-only 顶点首次被哪个组占用
-	// 若同一 position 顶点被不同组占用 -> 锁定该 position
-	// 最后把对应的所有原始顶点（拥有该 position id）设为 lock=1
+	// Mark which group first owns each position-only vertex
+	// If the same position vertex is owned by different groups, lock that position
+	// Finally set all original vertices with that position id to lock=1
 	uint32_t maxPosId = 0;
 	for (size_t v = 0; v < vertexCount; ++v) maxPosId = std::max(maxPosId, posRemap[v]);
 	std::vector<int32_t> owner(maxPosId + 1, -1);
@@ -603,7 +603,7 @@ void MeshletBuilder::BuildVertexLocksByGroups(
 		}
 	}
 
-	// 写回到原始顶点锁
+	// Write back to original vertex locks
 	for (size_t v = 0; v < vertexCount; ++v)
 	{
 		if (lockedPos[posRemap[v]])
@@ -619,9 +619,9 @@ bool MeshletBuilder::SimplifyGroup(
 	std::vector<Meshlet>& outNewMeshlets,
 	float& outError)
 {
-	// 收集组内用到的所有唯一顶点索引，构建 Global->Local 映射
-	// 预估最大顶点数 = Meshlet数 * MaxVerts
-	// 这里使用 Vector + Sort + Unique 比 unordered_map 快且省内存
+	// Collect all unique vertex indices used by the group and build a Global->Local mapping
+	// Estimated max vertex count = meshlet count * MaxVerts
+	// Using vector + sort + unique is faster and more memory-efficient than unordered_map
 	std::vector<uint32_t> usedGlobalIndices;
 	usedGlobalIndices.reserve(g.MeshletIDs.size() * buildArgs.settings.MaxMeshletVertices);
 
@@ -637,8 +637,8 @@ bool MeshletBuilder::SimplifyGroup(
 	if (usedGlobalIndices.empty())
 		return false;
 
-	// 构建局部顶点/索引数据
-	// 拼接组三角（使用 Local 索引）
+	// Build local vertex/index data
+	// Concatenate group triangles (using local indices)
 	std::vector<uint32_t> localIndices;
 	localIndices.reserve(g.MeshletIDs.size() * buildArgs.settings.MaxMeshletTriangles * 3);
 
@@ -664,7 +664,7 @@ bool MeshletBuilder::SimplifyGroup(
 	std::vector<float> localPositions;
 	std::vector<float> localAttrs;
 
-	// 准备局部属性缓冲 (Position + Attributes)
+	// Prepare local attribute buffers (position + attributes)
 	size_t localVertexCount = usedGlobalIndices.size();
 	localPositions.resize(localVertexCount * 3);
 
@@ -729,7 +729,7 @@ bool MeshletBuilder::SimplifyGroup(
         attributeWeights[attributeOffset++] = 0.1f;
     }
 
-	// 处理 Lock 数组 (局部化)
+	// Process lock array (localize)
 	std::vector<unsigned char> localLocks;
 	if (!vertexLock.empty())
 	{
@@ -740,7 +740,7 @@ bool MeshletBuilder::SimplifyGroup(
 		}
 	}
 
-	// 执行简化 (使用局部数据)
+	// Run simplification (using local data)
 	const size_t targetIndexCount = size_t(localIndices.size() * buildArgs.settings.TargetSimplifyRatio);
 	std::vector<uint32_t> simplifiedLocal(localIndices.size());
 	float resultError = 0.0f;
@@ -798,21 +798,21 @@ bool MeshletBuilder::SimplifyGroup(
 
 	outError = resultError;
 
-	// 将简化后的 Local 索引 remap 回 Global 索引
-	// BuildMeshletsFromIndices 需要原始顶点数据流，所以我们要给它 global indices
-	// 这里通过 usedGlobalIndices[localIdx] 转换
+	// Remap simplified local indices back to global indices
+	// BuildMeshletsFromIndices needs the original vertex stream, so we must provide global indices
+	// Converted via usedGlobalIndices[localIdx]
 	std::vector<uint32_t> simplifiedGlobal(newCount);
 	for (size_t i = 0; i < newCount; ++i)
 	{
 		uint32_t localIdx = simplifiedLocal[i];
-		// 确保安全访问
+		// Ensure safe access
 		if (localIdx < usedGlobalIndices.size())
 			simplifiedGlobal[i] = usedGlobalIndices[localIdx];
 		else
 			ASSERT(false, "Local index out of bounds in SimplifyGroup");
 	}
 
-	// 用全局索引重建 meshlet
+	// Rebuild meshlets using global indices
 	BuildMeshletsFromIndices(buildArgs, simplifiedGlobal.data(), simplifiedGlobal.size(), outNewMeshlets);
 	for (auto& ml : outNewMeshlets)
 	{
@@ -822,7 +822,7 @@ bool MeshletBuilder::SimplifyGroup(
 	return !outNewMeshlets.empty();
 }
 
-// 构建层次结构内部节点，返回的是扁平化的节点数组，0为根节点
+// Build hierarchy internal nodes, returning a flattened node array with 0 as root
 // [group header] -- [meshlet headers] -- [index buffers] -- [vertex buffers]
 GroupPackage MeshletBuilder::SerializeGroup(
 	const MeshletBuildArgs& buildArgs,
@@ -872,7 +872,7 @@ GroupPackage MeshletBuilder::SerializeGroup(
 		const Meshlet& m = meshlets[group.MeshletIDs[i]];
 
 		MeshletHeader& mh = pHeaders[i];
-		// 填充 meshlet 头
+		// Fill meshlet header
 		mh.TriangleCountMinusOne = static_cast<uint8_t>(m.Triangles.size() / 3 - 1);
 		mh.VertexCountMinusOne = static_cast<uint8_t>(m.Vertices.size() - 1);
 		mh.LODLevel = static_cast<uint8_t>(group.LODLevel);
@@ -888,12 +888,12 @@ GroupPackage MeshletBuilder::SerializeGroup(
 		std::memcpy(mh.BBoxMin, m.BBoxMin, sizeof(float) * 3);
 		std::memcpy(mh.BBoxMax, m.BBoxMax, sizeof(float) * 3);
 
-		// 拷贝索引数据
+		// Copy index data
 		const size_t triBytes = m.Triangles.size();
 		std::memcpy(pIndicesCursor, m.Triangles.data(), triBytes);
 		pIndicesCursor += Math::AlignUp(static_cast<uint32_t>(triBytes), 4u);
 
-		// 拷贝顶点数据
+		// Copy vertex data
 		for (size_t mvIdx = 0; mvIdx < m.Vertices.size(); mvIdx++)
 		{
 			const unsigned char* srcV = &(buildArgs.VBData[(size_t)m.Vertices[mvIdx] * buildArgs.vertexStride]);
@@ -905,7 +905,7 @@ GroupPackage MeshletBuilder::SerializeGroup(
 
 	//package.Metadata.OffsetInGlobalBuffer = 0;
 	package.Metadata.SizeBytes = static_cast<uint32_t>(package.Blob.size());
-	package.Metadata.UncompressedSize = package.Metadata.SizeBytes; // 暂时未压缩
+    package.Metadata.UncompressedSize = package.Metadata.SizeBytes; // Not compressed yet
 
 	ASSERT((package.Metadata.UncompressedSize % 4u) == 0u, "Group package size must be 4-byte aligned");
 
@@ -933,7 +933,7 @@ MeshletBuildProducts MeshletBuilder::BuildStreamingData(
 		});
 
 	uint32_t maxLodLevel = 0;
-	std::unordered_map<uint32_t, uint32_t> groupIdToOrder; // 存储Build group id -> 序列化 group index
+    std::unordered_map<uint32_t, uint32_t> groupIdToOrder; // Map build group id -> serialized group index
 	std::unordered_map<uint32_t, std::vector<uint32_t>> lodGroups; // LODLevel -> build group id
 	for (size_t i = 0; i < groupOrder.size(); ++i)
 	{
@@ -944,30 +944,30 @@ MeshletBuildProducts MeshletBuilder::BuildStreamingData(
 			maxLodLevel = groups[buildGroupId].LODLevel;
 	}
 
-	// 序列化 Groups
+    // Serialize groups
 	for (auto idx : groupOrder)
 	{
 		products.Groups.push_back(SerializeGroup(
 			buildArgs, groups[idx], meshlets, groupIdToOrder));
 	}
 
-	// ========== 分层构建 BVH ==========
-	// 使用带元数据的节点，延迟计算偏移
+    // ========== Build BVH by levels ==========
+    // Use nodes with metadata and compute offsets later
 	struct PendingNode
 	{
 		Renderer::HierarchyNode node;
-		int32_t lodLevel;           // 所属 LOD 层（-1 表示连接所有LOD层级BVH的层级）
-		uint32_t localChildStart;   // 在本层内的子节点起始
-		uint32_t childCount;        // 子节点数量
+		int32_t lodLevel;           // LOD level (-1 means the level connecting all LOD BVHs)
+		uint32_t localChildStart;   // Child start within this level
+		uint32_t childCount;        // Child count
 	};
 
-	// 按 LOD 层存储节点：lodBVHs[lod] = { 节点数组 }
+    // Store nodes by LOD level: lodBVHs[lod] = { node array }
 	std::vector<std::vector<PendingNode>> lodBVHs(maxLodLevel + 1);
 	std::vector<Renderer::HierarchyNode> lodRoots;
 
 	for (int32_t lod = static_cast<int32_t>(maxLodLevel); lod >= 0; --lod)
 	{
-		// 构建叶子节点
+		// Build leaf nodes
 		std::vector<Renderer::HierarchyNode> leafNodes;
 		for (uint32_t gid : lodGroups[lod])
 		{
@@ -983,19 +983,19 @@ MeshletBuildProducts MeshletBuilder::BuildStreamingData(
 			leafNodes.push_back(node);
 		}
 
-		// 构建本层 BVH（使用局部偏移 baseNodeIndex=0）
+		// Build BVH for this level (local offsets baseNodeIndex=0)
 		std::vector<uint32_t> reorderedLeafNodesIndices(leafNodes.size());
 		auto bvhNodes = BuildHierarchy(leafNodes, buildArgs.settings.MaxBVHNodeChildren, reorderedLeafNodesIndices);
 		ASSERT(bvhNodes.size() > 0);
 
-		// 转换为 PendingNode
+		// Convert to PendingNode
 		lodBVHs[lod].reserve(bvhNodes.size());
 		for (size_t i = 0; i < bvhNodes.size(); ++i)
 		{
 			PendingNode pn;
 			pn.node = bvhNodes[i];
 			pn.lodLevel = lod;
-			// 提取局部 childStart（仅内部节点有效）
+			// Extract local childStart (internal nodes only)
 			if (pn.node.Internal.IsGroup == 0)
 			{
 				pn.localChildStart = pn.node.Internal.ChildStartIndex;
@@ -1009,13 +1009,13 @@ MeshletBuildProducts MeshletBuilder::BuildStreamingData(
 			lodBVHs[lod].push_back(pn);
 		}
 
-		// 保存根节点用于构建顶层
+		// Save root node for top-level build
 		if (!bvhNodes.empty())
 			lodRoots.push_back(bvhNodes[0]);
 	}
 
 
-	// 构建顶层 BVH（连接各 LOD 根节点）
+    // Build top-level BVH (connect LOD roots)
 	std::vector<uint32_t> reorderedRootNodesIndices(lodRoots.size());
 	auto topBVH = BuildHierarchy(lodRoots, buildArgs.settings.MaxBVHNodeChildren, reorderedRootNodesIndices);
 
@@ -1024,7 +1024,7 @@ MeshletBuildProducts MeshletBuilder::BuildStreamingData(
 	{
 		PendingNode pn;
 		pn.node = topBVH[i];
-		pn.lodLevel = -1; // 顶层标记
+		pn.lodLevel = -1; // Top-level marker
 		if (pn.node.Internal.IsGroup == 0)
 		{
 			pn.localChildStart = pn.node.Internal.ChildStartIndex;
@@ -1038,8 +1038,8 @@ MeshletBuildProducts MeshletBuilder::BuildStreamingData(
 		topPending.push_back(pn);
 	}
 
-	// ========== 计算全局偏移 ==========
-	// 布局：[顶层BVH] [LOD_max (跳过根)] [LOD_max-1 (跳过根)] ... [LOD_0 (跳过根)]
+    // ========== Compute global offsets ==========
+    // Layout: [top-level BVH] [LOD_max (skip root)] [LOD_max-1 (skip root)] ... [LOD_0 (skip root)]
 
 	const uint32_t topSize = static_cast<uint32_t>(topPending.size());
 	std::vector<uint32_t> lodOffsets(maxLodLevel + 1);
@@ -1048,27 +1048,27 @@ MeshletBuildProducts MeshletBuilder::BuildStreamingData(
 	for (int32_t lod = static_cast<int32_t>(maxLodLevel); lod >= 0; --lod)
 	{
 		lodOffsets[lod] = cursor;
-		// 跳过根节点（已在顶层）
+		// Skip root node (already in top level)
 		cursor += static_cast<uint32_t>(lodBVHs[lod].size() - 1);
 	}
 
 	products.Hierarchy.resize(cursor);
 
-	// ========== 写入顶层 BVH ==========
-	// 顶层叶子节点（原各 LOD 根）需要修正 ChildStart
+    // ========== Write top-level BVH ==========
+    // Top-level leaf nodes (original LOD roots) need ChildStart patched
 	for (uint32_t i = 0; i < topSize; ++i)
 	{
 		auto& pn = topPending[i];
 		Renderer::HierarchyNode node = pn.node;
 
-		// 顶层叶子节点是原 LOD 根，需要变成指向该 LOD 子节点的内部节点
+		// Top-level leaf nodes are original LOD roots and must become internal nodes pointing to that LOD's children
 		if (i >= topSize - lodRoots.size())
 		{
 			int32_t lod = static_cast<int32_t>(maxLodLevel) -
 				static_cast<int32_t>(reorderedRootNodesIndices[i - (topSize - lodRoots.size())]);
 			if (lod >= 0 && lodBVHs[lod].size() > 1)
 			{
-				// 该 LOD 根的子节点信息
+				// Child info for that LOD root
 				const auto& lodRoot = lodBVHs[lod][0];
 				node.Internal.IsGroup = 0;
 				node.Internal.ChildCount = lodRoot.childCount;
@@ -1081,14 +1081,14 @@ MeshletBuildProducts MeshletBuilder::BuildStreamingData(
 		}
 		else if (pn.childCount > 0)
 		{
-			// 顶层内部节点，修正偏移
+			// Top-level internal node, patch offset
 			node.Internal.ChildStartIndex = pn.localChildStart + buildArgs.baseNodeIndex;
 		}
 
 		products.Hierarchy[i] = node;
 	}
 
-	// ========== 写入各 LOD 层（跳过根节点）==========
+    // ========== Write each LOD level (skip root) ==========
 	for (int32_t lod = static_cast<int32_t>(maxLodLevel); lod >= 0; --lod)
 	{
 		const auto& bvh = lodBVHs[lod];
@@ -1097,13 +1097,13 @@ MeshletBuildProducts MeshletBuilder::BuildStreamingData(
 
 		const uint32_t baseOffset = lodOffsets[lod];
 
-		for (size_t i = 1; i < bvh.size(); ++i) // 从 1 开始，跳过根
+		for (size_t i = 1; i < bvh.size(); ++i) // Start from 1, skip root
 		{
 			const auto& pn = bvh[i];
 			Renderer::HierarchyNode node = pn.node;
 			if (pn.childCount > 0 && node.Internal.IsGroup == 0)
 			{
-				// 修正内部节点偏移：局部偏移 - 1（跳过根）+ 层基址
+				// Patch internal node offset: local offset - 1 (skip root) + level base
 				node.Internal.ChildStartIndex = baseOffset + (pn.localChildStart - 1) + buildArgs.baseNodeIndex;
 			}
 			products.Hierarchy[baseOffset + (i - 1)] = node;
@@ -1112,7 +1112,7 @@ MeshletBuildProducts MeshletBuilder::BuildStreamingData(
 
 	if (buildArgs.settings.bOutputDebugInfo)
 	{
-		// ========== 打印统计信息 ==========
+		// ========== Print stats ==========
 		Utility::Printf(L"[BuildStreamingData] Summary:\n");
 		Utility::Printf(L"Total Groups: %u\n", static_cast<uint32_t>(products.Groups.size()));
 		Utility::Printf(L"Total BVH Nodes: %u\n", static_cast<uint32_t>(products.Hierarchy.size()));
@@ -1122,7 +1122,7 @@ MeshletBuildProducts MeshletBuilder::BuildStreamingData(
 
 	if (buildArgs.settings.bOutputDebugInfo)
 	{
-		// 按 LOD 层统计
+		// Stats by LOD level
 		for (uint32_t lod = 0; lod <= maxLodLevel; ++lod)
 		{
 			uint32_t groupCount = static_cast<uint32_t>(lodGroups[lod].size());
@@ -1134,18 +1134,18 @@ MeshletBuildProducts MeshletBuilder::BuildStreamingData(
 	if (buildArgs.settings.bOutputDebugInfo)
 	{
 		// -------------------------------------------------------
-		// 打印 BVH 节点内容
+		// Dump BVH node contents
 		// -------------------------------------------------------
 		Utility::Printf(L"--- BVH Nodes Dump (%u nodes) ---\n", static_cast<uint32_t>(products.Hierarchy.size()));
 		for (size_t i = 0; i < products.Hierarchy.size(); ++i)
 		{
 			const auto& node = products.Hierarchy[i];
 
-			// 检查 IsGroup 标志 (位域在 union 中共享，访问 Internal.IsGroup 即可)
+			// Check IsGroup flag (bitfield shared in union; access Internal.IsGroup)
 			if (node.Internal.IsGroup)
 			{
-				// 是 Group 节点 (Leaf)
-				// 此时 ChildStartIndex/ChildCount 字段无效，应打印 GroupIndex 等信息
+				// Is Group node (Leaf)
+				// ChildStartIndex/ChildCount are invalid here; print GroupIndex, etc.
 				Utility::Printf(L"Node[%u]: IsGroup=YES (Leaf), GroupIndex=%u, MeshletCount=%u, Bounds=(%.3f, %.3f, %.3f, %.3f), Error=%.5f\n",
 					static_cast<uint32_t>(i),
 					node.Leaf.GroupIndex,
@@ -1155,7 +1155,7 @@ MeshletBuildProducts MeshletBuilder::BuildStreamingData(
 			}
 			else
 			{
-				// 是内部节点 (Internal)
+				// Is internal node
 				Utility::Printf(L"Node[%u]: IsGroup=NO,  ChildCount=%u, ChildStartIndex=%u, Bounds=(%.3f, %.3f, %.3f, %.3f), Error=%.5f\n",
 					static_cast<uint32_t>(i),
 					node.Internal.ChildCount,
@@ -1307,23 +1307,23 @@ std::vector<Renderer::HierarchyNode> MeshletBuilder::BuildHierarchy(
 	if (initNodes.empty())
 		return {};
 
-	// 检查单节点情况：如果是 group 节点，需要创建父节点
+    // Handle single-node case: if it's a group node, create a parent
 	if (initNodes.size() == 1)
 	{
 		outInitNodesReorderMap[0] = 0;
 		if (initNodes[0].Internal.IsGroup == 1)
 		{
-			// 为单个 group 节点创建父节点
+			// Create a parent for a single group node
 			HierarchyNode parent{};
 			parent.Internal.IsGroup = 0;
 			parent.Internal.ChildCount = 1;
-			parent.Internal.ChildStartIndex = 1; // 子节点在索引1
+			parent.Internal.ChildStartIndex = 1; // Child node at index 1
 			std::copy(initNodes[0].BoundSphere, initNodes[0].BoundSphere + 4, parent.BoundSphere);
 			std::copy(initNodes[0].BBoxMin, initNodes[0].BBoxMin + 3, parent.BBoxMin);
 			std::copy(initNodes[0].BBoxMax, initNodes[0].BBoxMax + 3, parent.BBoxMax);
 			parent.MaxParrentError = initNodes[0].MaxParrentError;
 
-			// 返回 [父节点, 子节点]
+			// Return [parent, child]
 			std::vector<HierarchyNode> result(2);
 			result[0] = parent;
 			result[1] = initNodes[0];
@@ -1334,19 +1334,19 @@ std::vector<Renderer::HierarchyNode> MeshletBuilder::BuildHierarchy(
 
 	const uint32_t maxChildren = maxBVHNodeChildren;
 
-	// levels[0] = 叶子层, levels[N] = 根层
+    // levels[0] = leaf level, levels[N] = root level
 	std::vector<std::vector<HierarchyNode>> levels(1);
 
-	// 初始化叶子层
+    // Initialize leaf level
 	levels[0] = initNodes;//std::move(initNodes);
 
-	// 自底向上构建
+    // Build bottom-up
 	while (levels.back().size() > 1)
 	{
 		const auto& currentLevel = levels.back();
 		const size_t nodeCount = currentLevel.size();
 
-		// 提取球心用于空间聚类
+		// Extract sphere centers for spatial clustering
 		std::vector<float> centers(nodeCount * 3);
 		for (size_t i = 0; i < nodeCount; ++i)
 		{
@@ -1355,7 +1355,7 @@ std::vector<Renderer::HierarchyNode> MeshletBuilder::BuildHierarchy(
 			centers[i * 3 + 2] = currentLevel[i].BoundSphere[2];
 		}
 
-		// 空间聚类
+		// Spatial clustering
 		std::vector<unsigned int> clusterIndices(nodeCount);
 		meshopt_spatialClusterPoints(
 			clusterIndices.data(),
@@ -1366,7 +1366,7 @@ std::vector<Renderer::HierarchyNode> MeshletBuilder::BuildHierarchy(
 
 		if (levels.size() == 1)
 		{
-			// 输出叶子层重排映射
+			// Output leaf-level reorder mapping
 			for (size_t i = 0; i < nodeCount; ++i)
 			{
 				outInitNodesReorderMap[i] = clusterIndices[i];
@@ -1376,27 +1376,27 @@ std::vector<Renderer::HierarchyNode> MeshletBuilder::BuildHierarchy(
 		uint32_t clusterCount = (static_cast<uint32_t>(nodeCount) + maxChildren - 1) / maxChildren;
 
 
-		// 统计每个簇的节点数
+		// Count nodes per cluster
 		std::vector<uint32_t> clusterSizes(clusterCount, maxChildren);
 		if (nodeCount % maxChildren != 0)
 			clusterSizes.back() = nodeCount % maxChildren;
 
-		// 计算每个簇在重排数组中的起始位置
+		// Compute start offset of each cluster in reorder array
 		std::vector<uint32_t> clusterStarts(clusterCount + 1, 0);
 		for (size_t i = 0; i < clusterCount; ++i)
 			clusterStarts[i + 1] = clusterStarts[i] + clusterSizes[i];
 
-		// 按簇重排当前层节点（原地重排到临时数组）
+		// Reorder current level nodes by cluster (in-place to temp array)
 		std::vector<HierarchyNode> sortedLevel(nodeCount);
 		for (size_t i = 0; i < nodeCount; ++i)
 		{
 			sortedLevel[i] = currentLevel[clusterIndices[i]];
 		}
 
-		// 替换当前层为已排序版本
+		// Replace current level with sorted version
 		levels.back() = std::move(sortedLevel);
 
-		// 构建父节点层
+		// Build parent level
 		std::vector<HierarchyNode> parentLevel;
 		parentLevel.reserve(clusterCount);
 
@@ -1410,7 +1410,7 @@ std::vector<Renderer::HierarchyNode> MeshletBuilder::BuildHierarchy(
 			parent.Internal.ChildCount = clusterSizes[c];
 			parent.Internal.ChildStartIndex = clusterStarts[c];
 
-			// 合并包围球和误差
+			// Merge bounding spheres and error
 			const auto& sortedCurrent = levels.back();
 			float mergedSphere[4];
 			std::copy(sortedCurrent[clusterStarts[c]].BoundSphere,
@@ -1445,7 +1445,7 @@ std::vector<Renderer::HierarchyNode> MeshletBuilder::BuildHierarchy(
 		levels.push_back(std::move(parentLevel));
 	}
 
-	// 扁平化：从根到叶排列
+    // Flatten: order from root to leaf
 	std::vector<size_t> levelOffsets(levels.size());
 	size_t totalNodes = 0;
 	for (int32_t lvl = static_cast<int32_t>(levels.size()) - 1; lvl >= 0; --lvl)
@@ -1465,7 +1465,7 @@ std::vector<Renderer::HierarchyNode> MeshletBuilder::BuildHierarchy(
 		{
 			auto& nwc = levels[lvl][i];
 			Renderer::HierarchyNode node = nwc;
-			// 设置 ChildStartIndex（仅对内部节点）
+			// Set ChildStartIndex (internal nodes only)
 			if (nwc.Internal.ChildCount > 0 && node.Internal.IsGroup == 0)
 			{
 				node.Internal.ChildStartIndex = static_cast<uint32_t>(

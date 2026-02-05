@@ -4,28 +4,28 @@
 #include "CommonResources.hlsli"
 #include "DataCodec.hlsli"
 
-// 返回三角形的meshlet局部索引
+// Return the triangle's meshlet-local indices
 uint3 LoadAndUnpackTriangle(ByteAddressBuffer geometryChunksBuffer, uint indexByteOffset, uint localTriID)
 {
     uint byteOffset = indexByteOffset + localTriID * 3;
 
-    // 向下对齐到 4 字节边界
+    // Align down to a 4-byte boundary
     uint alignedOffset = byteOffset & ~3u;
 
-    // 计算位偏移 (Bit Shift)
-    // 这是需要的数据距离 alignedOffset 的位距离
+    // Compute bit shift
+    // This is the bit distance from alignedOffset to the desired data
     uint bitShift = (byteOffset & 3u) * 8;
 
-    // 一次性读取 2 个 uint (8 字节)
-    // 这样能保证即使 3 个字节跨越了 uint 的边界，也被包含在这 64 位里
+    // Read two uints at once (8 bytes)
+    // This ensures that even if 3 bytes cross a uint boundary, they are in these 64 bits
     uint2 raw = geometryChunksBuffer.Load2(alignedOffset);
 
     uint64_t data64 = (uint64_t(raw.y) << 32) | uint64_t(raw.x);
 
-    // 把需要的数据“滑”到最低位
+    // Shift the desired data down to the lowest bits
     data64 >>= bitShift;
 
-    // 解包 (3 x 8 bits)
+    // Unpack (3 x 8 bits)
     uint i0 = uint(data64 & 0xFF);
     uint i1 = uint((data64 >> 8) & 0xFF);
     uint i2 = uint((data64 >> 16) & 0xFF);

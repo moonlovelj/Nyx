@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import sys
 
 # --------------------------------------------------------------------------
-# 导入 Bridson_sampling 函数
+# Import Bridson_sampling function
 # --------------------------------------------------------------------------
 try:
     from poisson_disc import Bridson_sampling
@@ -72,11 +72,11 @@ if __name__ == "__main__":
         print("采样点数量必须大于0。")
         sys.exit()
 
-    dims = np.array([2.0, 2.0])  # 正方形区域，后面裁剪到单位圆
+    dims = np.array([2.0, 2.0])  # Square region, later clipped to unit circle
     area = dims[0] * dims[1]
 
-    # 初始半径估算
-    radius = np.sqrt(area / (NUM_SAMPLES_TARGET * 1.2))  # 调大以抵消裁剪损失
+    # Initial radius estimate
+    radius = np.sqrt(area / (NUM_SAMPLES_TARGET * 1.2))  # Scale up to offset clipping loss
     best_samples = np.empty((0,2))
     best_diff = float('inf')
     max_iterations = 15
@@ -84,11 +84,11 @@ if __name__ == "__main__":
     print(f"目标采样点数量: {NUM_SAMPLES_TARGET}，正在自动调整半径...")
 
     for i in range(max_iterations):
-        # 生成点
+        # Generate points
         raw_samples = Bridson_sampling(dims=dims, radius=radius)
-        # 平移到中心 (0,0)
+        # Translate to center (0,0)
         transformed_samples = raw_samples - 1.0
-        # 裁剪到单位圆
+        # Clip to unit circle
         final_samples = transformed_samples[np.sum(transformed_samples**2, axis=1) <= 1.0]
         num_found = final_samples.shape[0]
         diff = abs(num_found - NUM_SAMPLES_TARGET)
@@ -101,7 +101,7 @@ if __name__ == "__main__":
                 print("  完全匹配目标数量，提前结束调整。")
                 break
 
-        # 根据结果调整半径
+        # Adjust radius based on result
         if num_found < NUM_SAMPLES_TARGET:
             radius *= 0.95
         else:
@@ -112,12 +112,12 @@ if __name__ == "__main__":
     print(f"最终生成采样点数量: {final_samples.shape[0]}")
     print("-" * 40)
 
-    # 输出着色器数组
+    # Output shader array
     shader_code = format_for_shader(final_samples, SHADER_LANGUAGE)
     print(f"用于 {SHADER_LANGUAGE.upper()} 的预计算数组：")
     print(shader_code)
     print("-" * 40)
 
-    # 可视化
+    # Visualization
     print("正在生成可视化图表...")
     visualize_samples(final_samples, NUM_SAMPLES_TARGET)

@@ -29,37 +29,12 @@
 
 #include "Shaders/SharedHeader.hlsli"
 
-#include "CompiledShaders/DefaultVS.h"
-#include "CompiledShaders/DefaultSkinVS.h"
-#include "CompiledShaders/DefaultPS.h"
-#include "CompiledShaders/DefaultNoUV1VS.h"
-#include "CompiledShaders/DefaultNoUV1SkinVS.h"
-#include "CompiledShaders/DefaultNoUV1PS.h"
-#include "CompiledShaders/DefaultNoTangentVS.h"
-#include "CompiledShaders/DefaultNoTangentSkinVS.h"
-#include "CompiledShaders/DefaultNoTangentPS.h"
-#include "CompiledShaders/DefaultNoTangentNoUV1VS.h"
-#include "CompiledShaders/DefaultNoTangentNoUV1SkinVS.h"
-#include "CompiledShaders/DefaultNoTangentNoUV1PS.h"
-#include "CompiledShaders/DepthOnlyVS.h"
-#include "CompiledShaders/DepthOnlySkinVS.h"
-#include "CompiledShaders/CutoutDepthVS.h"
-#include "CompiledShaders/CutoutDepthSkinVS.h"
-#include "CompiledShaders/CutoutDepthPS.h"
+
 #include "CompiledShaders/SkyboxVS.h"
 #include "CompiledShaders/SkyboxPS.h"
-#include "CompiledShaders/GBufferPS.h"
-#include "CompiledShaders/GBufferNoUV1PS.h"
-#include "CompiledShaders/GBufferNoTangentPS.h"
-#include "CompiledShaders/GBufferNoTangentNoUV1PS.h"
-#include "CompiledShaders/FrustumCullCS.h"
-#include "CompiledShaders/FillCullingResultCS.h"
-#include "CompiledShaders/OcclusionCullPass1CS.h"
-#include "CompiledShaders/OcclusionCullPass2CS.h"
 #include "CompiledShaders/UberMeshShader.h"
 #include "CompiledShaders/UberMeshShaderPass0.h"
 #include "CompiledShaders/UberMeshShaderPass1.h"
-#include "CompiledShaders/UberGBufferPS.h"
 #include "CompiledShaders/MeshBufferGenCS.h"
 #include "CompiledShaders/VBufferPS.h"
 #include "CompiledShaders/ResolveVBufferToGBufferCS.h"
@@ -67,7 +42,6 @@
 #include "CompiledShaders/InstanceCullPass1CS.h"
 #include "CompiledShaders/DAGCullPass0CS.h"
 #include "CompiledShaders/DAGCullPass1CS.h"
-#include "CompiledShaders/FreezeCullCS.h"
 #include "CompiledShaders/ExportDepthVS.h"
 #include "CompiledShaders/ExportDepthPS.h"
 
@@ -79,12 +53,7 @@ using namespace Renderer;
 
 namespace Renderer
 {
-    BoolVar SeparateZPass("Renderer/Separate Z Pass", false);
-    BoolVar DeferredRendering("Renderer/Deferred Rendering", true);
-	BoolVar UseOcclusionCull("Renderer/Occlusion Cull", true);
 	NumVar PixelErrorThreshold("Renderer/Pixel Error Threshold", 1.0f, 0.5f, 10.0f, 0.25f);
-
-    // 注意这个可视化仅在开启冻结前启用遮挡剔除，才能正确显示
 	BoolVar FreezeCull("Renderer/Freeze Cull", false);
     
 	const char* ViewModeLabels[] = { "Lit", "MeshletLOD", "MeshletID", "MeshletTriangle", "MeshID", "InstanceID", "MaterialID"};
@@ -94,8 +63,6 @@ namespace Renderer
 
     DescriptorHeap s_TextureHeap;
     DescriptorHeap s_SamplerHeap;
-    std::vector<PSO> sm_PSOs;
-	std::unordered_map<Renderer::PsoIdx, PSO> s_PSOMap;
 
 	CommandSignature GPUDrivenDrawIndirectCommandSignature;
 
@@ -111,13 +78,6 @@ namespace Renderer
     GraphicsPSO m_DefaultPSO(L"Renderer: Default PSO"); // Not finalized.  Used as a template.
 
     DescriptorHandle m_BindlessResources;
-
-    UploadBuffer m_IndirectArgsCounterBufferReset;
-	ComputePSO m_FrustrumCullPSO(L"Renderer: Frustum Cull PSO");
-	ComputePSO m_FillCullingResultPSO(L"Renderer: Fill Culling Result PSO");
-
-	ComputePSO m_OcclusionCullingPass1PSO(L"Renderer: Occlusion Culling Pass 1 PSO");
-	ComputePSO m_OcclusionCullingPass2PSO(L"Renderer: Occlusion Culling Pass 2 PSO");
 
 	ComputePSO m_MeshBufferGenPSO(L"Renderer: Mesh Buffer Gen PSO");
 
@@ -137,8 +97,6 @@ namespace Renderer
         ComputePSO(L"Renderer: DAG Cull Pass 0 PSO"),
         ComputePSO(L"Renderer: DAG Cull Pass 1 PSO")
 	};
-
-	ComputePSO m_FreezeCullPSO(L"Renderer: Freeze Cull PSO");
 
     GraphicsPSO m_ExportDepthPSO(L"Renderer: Export Depth PSO");
 }
@@ -181,34 +139,6 @@ void Renderer::Initialize(void)
     DXGI_FORMAT ColorFormat = g_SceneColorBuffer.GetFormat();
     DXGI_FORMAT DepthFormat = g_SceneDepthBuffer.GetFormat();
 
-    //D3D12_INPUT_ELEMENT_DESC posOnly[] =
-    //{
-    //    { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-    //};
-
-    //D3D12_INPUT_ELEMENT_DESC posAndUV[] =
-    //{
-    //    { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-    //    { "TEXCOORD", 0, DXGI_FORMAT_R16G16_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-    //};
-
-    //D3D12_INPUT_ELEMENT_DESC skinPos[] =
-    //{
-    //    { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-    //    { "BLENDINDICES", 0, DXGI_FORMAT_R16G16B16A16_UINT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-    //    { "BLENDWEIGHT", 0, DXGI_FORMAT_R16G16B16A16_UNORM, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-    //};
-
-    //D3D12_INPUT_ELEMENT_DESC skinPosAndUV[] =
-    //{
-    //    { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-    //    { "TEXCOORD", 0, DXGI_FORMAT_R16G16_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-    //    { "BLENDINDICES", 0, DXGI_FORMAT_R16G16B16A16_UINT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-    //    { "BLENDWEIGHT", 0, DXGI_FORMAT_R16G16B16A16_UNORM, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-    //};
-
-    ASSERT(sm_PSOs.size() == 0);
-
     // Mesh shader PSO
     m_UberMeshPSO[0].SetRootSignature(m_RootSig);
 	m_UberMeshPSO[0].SetRasterizerState(RasterizerTwoSided);
@@ -238,74 +168,7 @@ void Renderer::Initialize(void)
     m_ResolveVBufferToGBufferPSO.SetComputeShader(g_pResolveVBufferToGBufferCS, sizeof(g_pResolveVBufferToGBufferCS));
     m_ResolveVBufferToGBufferPSO.Finalize();
 
-    // Depth Only PSOs
-
-    GraphicsPSO DepthOnlyPSO(L"Renderer: Depth Only PSO");
-    DepthOnlyPSO.SetRootSignature(m_RootSig);
-    DepthOnlyPSO.SetRasterizerState(RasterizerDefault);
-    DepthOnlyPSO.SetBlendState(BlendDisable);
-    DepthOnlyPSO.SetDepthStencilState(DepthStateReadWrite);
-	//DepthOnlyPSO.SetInputLayout(_countof(posOnly), posOnly);
-	DepthOnlyPSO.SetInputLayout(0, nullptr);
-    DepthOnlyPSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
-    DepthOnlyPSO.SetRenderTargetFormats(0, nullptr, DepthFormat);
-    DepthOnlyPSO.SetVertexShader(g_pDepthOnlyVS, sizeof(g_pDepthOnlyVS));
-    DepthOnlyPSO.Finalize();
-    sm_PSOs.push_back(DepthOnlyPSO);
-
-    GraphicsPSO CutoutDepthPSO(L"Renderer: Cutout Depth PSO");
-    CutoutDepthPSO = DepthOnlyPSO;
-    CutoutDepthPSO.SetInputLayout(0, nullptr);
-    CutoutDepthPSO.SetRasterizerState(RasterizerTwoSided);
-    CutoutDepthPSO.SetVertexShader(g_pCutoutDepthVS, sizeof(g_pCutoutDepthVS));
-    CutoutDepthPSO.SetPixelShader(g_pCutoutDepthPS, sizeof(g_pCutoutDepthPS));
-    CutoutDepthPSO.Finalize();
-    sm_PSOs.push_back(CutoutDepthPSO);
-
-    GraphicsPSO SkinDepthOnlyPSO = DepthOnlyPSO;
-    SkinDepthOnlyPSO.SetInputLayout(0, nullptr);
-    SkinDepthOnlyPSO.SetVertexShader(g_pDepthOnlySkinVS, sizeof(g_pDepthOnlySkinVS));
-    SkinDepthOnlyPSO.Finalize();
-    sm_PSOs.push_back(SkinDepthOnlyPSO);
-
-    GraphicsPSO SkinCutoutDepthPSO = CutoutDepthPSO;
-    SkinCutoutDepthPSO.SetInputLayout(0, nullptr);
-    SkinCutoutDepthPSO.SetVertexShader(g_pCutoutDepthSkinVS, sizeof(g_pCutoutDepthSkinVS));
-    SkinCutoutDepthPSO.Finalize();
-    sm_PSOs.push_back(SkinCutoutDepthPSO);
-
-    ASSERT(sm_PSOs.size() == 4);
-
-    // Shadow PSOs
-
-    DepthOnlyPSO.SetRasterizerState(RasterizerShadow);
-    DepthOnlyPSO.SetRenderTargetFormats(0, nullptr, g_ShadowBuffer.GetFormat());
-    DepthOnlyPSO.Finalize();
-    sm_PSOs.push_back(DepthOnlyPSO);
-
-    CutoutDepthPSO.SetRasterizerState(RasterizerShadowTwoSided);
-    CutoutDepthPSO.SetRenderTargetFormats(0, nullptr, g_ShadowBuffer.GetFormat());
-    CutoutDepthPSO.Finalize();
-    sm_PSOs.push_back(CutoutDepthPSO);
-
-    SkinDepthOnlyPSO.SetRasterizerState(RasterizerShadow);
-    SkinDepthOnlyPSO.SetRenderTargetFormats(0, nullptr, g_ShadowBuffer.GetFormat());
-    SkinDepthOnlyPSO.Finalize();
-    sm_PSOs.push_back(SkinDepthOnlyPSO);
-
-    SkinCutoutDepthPSO.SetRasterizerState(RasterizerShadowTwoSided);
-    SkinCutoutDepthPSO.SetRenderTargetFormats(0, nullptr, g_ShadowBuffer.GetFormat());
-    SkinCutoutDepthPSO.Finalize();
-    sm_PSOs.push_back(SkinCutoutDepthPSO);
-
-    ASSERT(sm_PSOs.size() == 8);
-
-    //sm_PSOs.push_back(m_UberMeshPSO);
-	//s_PSOMap[PsoIdx::kPsoMain] = m_UberMeshPSO;
-    //ASSERT(sm_PSOs.size() == 9);
-
     // Default PSO
-
     m_DefaultPSO.SetRootSignature(m_RootSig);
     m_DefaultPSO.SetRasterizerState(RasterizerDefault);
     m_DefaultPSO.SetBlendState(BlendDisable);
@@ -313,8 +176,8 @@ void Renderer::Initialize(void)
     m_DefaultPSO.SetInputLayout(0, nullptr);
     m_DefaultPSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
     m_DefaultPSO.SetRenderTargetFormats(1, &ColorFormat, DepthFormat);
-    m_DefaultPSO.SetVertexShader(g_pDefaultVS, sizeof(g_pDefaultVS));
-    m_DefaultPSO.SetPixelShader(g_pDefaultPS, sizeof(g_pDefaultPS));
+    //m_DefaultPSO.SetVertexShader(g_pDefaultVS, sizeof(g_pDefaultVS));
+    //m_DefaultPSO.SetPixelShader(g_pDefaultPS, sizeof(g_pDefaultPS));
 
     // Skybox PSO
 
@@ -342,27 +205,6 @@ void Renderer::Initialize(void)
 	GPUDrivenDrawIndirectCommandSignature[0].DispatchMesh();
 	GPUDrivenDrawIndirectCommandSignature.Finalize(&m_RootSig, sizeof(DispatchMeshCommand));
 
-    m_IndirectArgsCounterBufferReset.Create(L"IndirectArgsCounterBufferReset", sizeof(uint32_t));
-    uint32_t* pCounterBufferReset = (uint32_t*)m_IndirectArgsCounterBufferReset.Map();
-    pCounterBufferReset[0] = 0;
-    m_IndirectArgsCounterBufferReset.Unmap();
-
-    m_FrustrumCullPSO.SetRootSignature(m_RootSig);
-    m_FrustrumCullPSO.SetComputeShader(g_pFrustumCullCS, sizeof(g_pFrustumCullCS));
-    m_FrustrumCullPSO.Finalize();
-
-	m_FillCullingResultPSO.SetRootSignature(m_RootSig);
-    m_FillCullingResultPSO.SetComputeShader(g_pFillCullingResultCS, sizeof(g_pFillCullingResultCS));
-    m_FillCullingResultPSO.Finalize();
-
-	m_OcclusionCullingPass1PSO.SetRootSignature(m_RootSig);
-	m_OcclusionCullingPass1PSO.SetComputeShader(g_pOcclusionCullPass1CS, sizeof(g_pOcclusionCullPass1CS));
-	m_OcclusionCullingPass1PSO.Finalize();
-
-	m_OcclusionCullingPass2PSO.SetRootSignature(m_RootSig);
-	m_OcclusionCullingPass2PSO.SetComputeShader(g_pOcclusionCullPass2CS, sizeof(g_pOcclusionCullPass2CS));
-	m_OcclusionCullingPass2PSO.Finalize();
-
     m_InstanceCullPSO[0].SetRootSignature(m_RootSig);
 	m_InstanceCullPSO[0].SetComputeShader(g_pInstanceCullPass0CS, sizeof(g_pInstanceCullPass0CS));
 	m_InstanceCullPSO[0].Finalize();
@@ -379,11 +221,6 @@ void Renderer::Initialize(void)
 	m_DAGCullPSO[1].SetComputeShader(g_pDAGCullPass1CS, sizeof(g_pDAGCullPass1CS));
 	m_DAGCullPSO[1].Finalize();
 
-    m_FreezeCullPSO.SetRootSignature(m_RootSig);
-	m_FreezeCullPSO.SetComputeShader(g_pFreezeCullCS, sizeof(g_pFreezeCullCS));
-	m_FreezeCullPSO.Finalize();
-
-
 	m_ExportDepthPSO = m_DefaultPSO;
 	m_ExportDepthPSO.SetRasterizerState(RasterizerTwoSided);
 	m_ExportDepthPSO.SetDepthStencilState(DepthStateReadWrite);
@@ -393,7 +230,7 @@ void Renderer::Initialize(void)
 	m_ExportDepthPSO.Finalize();
 
 
-    // 初始化bindless资源描述符绑定
+    // Initialize bindless resource descriptor bindings
     {
         // srv
         SetBindlessResourceDescriptor(SRV_SCENE_COLOR, g_SceneColorBuffer.GetSRV());
@@ -470,174 +307,8 @@ void Renderer::Shutdown(void)
     TextureManager::Shutdown();
     s_TextureHeap.Destroy();
     s_SamplerHeap.Destroy();
-    m_IndirectArgsCounterBufferReset.Destroy();
 
 	GPUDrivenDrawIndirectCommandSignature.Destroy();
-}
-
-uint8_t Renderer::GetPSO(uint16_t psoFlags)
-{
-    using namespace PSOFlags;
-
-    GraphicsPSO ColorPSO = m_DefaultPSO;
-
-    uint16_t Requirements = kHasPosition | kHasNormal;
-    ASSERT((psoFlags & Requirements) == Requirements);
-
-    //std::vector<D3D12_INPUT_ELEMENT_DESC> vertexLayout;
-    //if (psoFlags & kHasPosition)
-    //    vertexLayout.push_back({"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT});
-    //if (psoFlags & kHasNormal)
-    //    vertexLayout.push_back({"NORMAL",   0, DXGI_FORMAT_R10G10B10A2_UNORM,  0, D3D12_APPEND_ALIGNED_ELEMENT});
-    //if (psoFlags & kHasTangent)
-    //    vertexLayout.push_back({"TANGENT",  0, DXGI_FORMAT_R10G10B10A2_UNORM,  0, D3D12_APPEND_ALIGNED_ELEMENT});
-    //if (psoFlags & kHasUV0)
-    //    vertexLayout.push_back({"TEXCOORD", 0, DXGI_FORMAT_R16G16_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT});
-    //else
-    //    vertexLayout.push_back({"TEXCOORD", 0, DXGI_FORMAT_R16G16_FLOAT,       1, D3D12_APPEND_ALIGNED_ELEMENT});
-    //if (psoFlags & kHasUV1)
-    //    vertexLayout.push_back({"TEXCOORD", 1, DXGI_FORMAT_R16G16_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT});
-    //if (psoFlags & kHasSkin)
-    //{
-    //    vertexLayout.push_back({ "BLENDINDICES", 0, DXGI_FORMAT_R16G16B16A16_UINT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
-    //    vertexLayout.push_back({ "BLENDWEIGHT", 0, DXGI_FORMAT_R16G16B16A16_UNORM, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 });
-    //}
-
-	//ColorPSO.SetInputLayout((uint32_t)vertexLayout.size(), vertexLayout.data());
-	ColorPSO.SetInputLayout(0, nullptr);
-
-    if (psoFlags & kHasSkin)
-    {
-        if (psoFlags & kHasTangent)
-        {
-            if (psoFlags & kHasUV1)
-            {
-                ColorPSO.SetVertexShader(g_pDefaultSkinVS, sizeof(g_pDefaultSkinVS));
-                ColorPSO.SetPixelShader(g_pDefaultPS, sizeof(g_pDefaultPS));
-            }
-            else
-            {
-                ColorPSO.SetVertexShader(g_pDefaultNoUV1SkinVS, sizeof(g_pDefaultNoUV1SkinVS));
-                ColorPSO.SetPixelShader(g_pDefaultNoUV1PS, sizeof(g_pDefaultNoUV1PS));
-            }
-        }
-        else
-        {
-            if (psoFlags & kHasUV1)
-            {
-                ColorPSO.SetVertexShader(g_pDefaultNoTangentSkinVS, sizeof(g_pDefaultNoTangentSkinVS));
-                ColorPSO.SetPixelShader(g_pDefaultNoTangentPS, sizeof(g_pDefaultNoTangentPS));
-            }
-            else
-            {
-                ColorPSO.SetVertexShader(g_pDefaultNoTangentNoUV1SkinVS, sizeof(g_pDefaultNoTangentNoUV1SkinVS));
-                ColorPSO.SetPixelShader(g_pDefaultNoTangentNoUV1PS, sizeof(g_pDefaultNoTangentNoUV1PS));
-            }
-        }
-    }
-    else
-    {
-        if (psoFlags & kHasTangent)
-        {
-            if (psoFlags & kHasUV1)
-            {
-                ColorPSO.SetVertexShader(g_pDefaultVS, sizeof(g_pDefaultVS));
-                ColorPSO.SetPixelShader(g_pDefaultPS, sizeof(g_pDefaultPS));
-            }
-            else
-            {
-                ColorPSO.SetVertexShader(g_pDefaultNoUV1VS, sizeof(g_pDefaultNoUV1VS));
-                ColorPSO.SetPixelShader(g_pDefaultNoUV1PS, sizeof(g_pDefaultNoUV1PS));
-            }
-        }
-        else
-        {
-            if (psoFlags & kHasUV1)
-            {
-                ColorPSO.SetVertexShader(g_pDefaultNoTangentVS, sizeof(g_pDefaultNoTangentVS));
-                ColorPSO.SetPixelShader(g_pDefaultNoTangentPS, sizeof(g_pDefaultNoTangentPS));
-            }
-            else
-            {
-                ColorPSO.SetVertexShader(g_pDefaultNoTangentNoUV1VS, sizeof(g_pDefaultNoTangentNoUV1VS));
-                ColorPSO.SetPixelShader(g_pDefaultNoTangentNoUV1PS, sizeof(g_pDefaultNoTangentNoUV1PS));
-            }
-        }
-    }
-
-    if (DeferredRendering)
-    {
-        if (!(psoFlags & kAlphaBlend))
-        {
-            if (psoFlags & kHasTangent)
-            {
-                if (psoFlags & kHasUV1)
-                {
-                    ColorPSO.SetPixelShader(g_pGBufferPS, sizeof(g_pGBufferPS));
-                }
-                else
-                {
-                    ColorPSO.SetPixelShader(g_pGBufferNoUV1PS, sizeof(g_pGBufferNoUV1PS));
-                }
-            }
-            else
-            {
-                if (psoFlags & kHasUV1)
-                {
-                    ColorPSO.SetPixelShader(g_pGBufferNoTangentPS, sizeof(g_pGBufferNoTangentPS));
-                }
-                else
-                {
-                    ColorPSO.SetPixelShader(g_pGBufferNoTangentNoUV1PS, sizeof(g_pGBufferNoTangentNoUV1PS));
-                }
-            }
-
-            DXGI_FORMAT RTVFormats[] = {
-				g_SceneColorBuffer.GetFormat(),
-                g_GBufferA.GetFormat(),
-                g_GBufferB.GetFormat(),
-                g_GBufferC.GetFormat(),
-                g_GBufferD.GetFormat()
-            };
-            ColorPSO.SetRenderTargetFormats(5, RTVFormats, g_SceneDepthBuffer.GetFormat());
-        }
-    }
-
-    if (psoFlags & kAlphaBlend)
-    {
-        ColorPSO.SetBlendState(BlendTraditional);
-        ColorPSO.SetDepthStencilState(DepthStateReadOnly);
-    }
-    if (psoFlags & kTwoSided)
-    {
-        ColorPSO.SetRasterizerState(RasterizerTwoSided);
-    }
-    ColorPSO.Finalize();
-
-    // Look for an existing PSO
-    for (uint32_t i = 0; i < sm_PSOs.size(); ++i)
-    {
-        if (ColorPSO.GetPipelineStateObject() == sm_PSOs[i].GetPipelineStateObject())
-        {
-            return (uint8_t)i;
-        }
-    }
-
-    // If not found, keep the new one, and return its index
-    sm_PSOs.push_back(ColorPSO);
-
-    // The returned PSO index has read-write depth.  The index+1 tests for equal depth.
-    ColorPSO.SetDepthStencilState(DepthStateTestEqual);
-    ColorPSO.Finalize();
-#ifdef DEBUG
-    for (uint32_t i = 0; i < sm_PSOs.size(); ++i)
-        ASSERT(ColorPSO.GetPipelineStateObject() != sm_PSOs[i].GetPipelineStateObject());
-#endif
-    sm_PSOs.push_back(ColorPSO);
-
-    ASSERT(sm_PSOs.size() <= 32, "Ran out of room for unique PSOs");
-
-    return (uint8_t)sm_PSOs.size() - 2;
 }
 
 void Renderer::DrawSkybox( GraphicsContext& gfxContext, const Camera& Camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor )
@@ -676,118 +347,13 @@ void Renderer::DrawSkybox( GraphicsContext& gfxContext, const Camera& Camera, co
     gfxContext.Draw(3);
 }
 
-void Renderer::FrustrumCulling(GraphicsContext& gfxContext, 
-    const GlobalConstants& inGlobals, const BaseCamera* camera,
-    const D3D12_VIEWPORT& viewport, Renderer::PsoIdx psoIdx)
-{
-    ScopedTimer _prof(L"Renderer::FrustrumCulling", gfxContext);
-
-    ComputeContext& context = gfxContext.GetComputeContext();
-	auto& bucketer = Renderer::CommandBucketer::Get();
-
-    context.TransitionResource(bucketer.GetIndirectVisibleFlags(psoIdx), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    context.TransitionResource(bucketer.GetIndirectCommandsGPU(psoIdx), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-
-    context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
-    context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
-	context.SetRootSignature(m_RootSig);
-	
-	context.SetPipelineState(m_FrustrumCullPSO);
-
-	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-
-    float screenErrorConstant = 1.f;
-	auto* cameraProj = static_cast<const Camera*>(camera);
-    if (cameraProj)
-    {
-        screenErrorConstant = std::tanf(0.5f * cameraProj->GetFOV()) * 2.f / viewport.Height;
-    }
-	uint32_t maxCommands = bucketer.GetMaxCommands(psoIdx);
-	context.SetConstants(kCommandConstants, maxCommands, 
-        screenErrorConstant, psoIdx);
-	context.Dispatch1D(maxCommands, CULLING_THREAD_GROUP_SIZE);
-}
-
-void Renderer::OcclusionCulling(
-	GraphicsContext& gfxContext,
-	const GlobalConstants& inGlobals,
-	Renderer::PsoIdx psoIdx,
-	uint32_t passIdx)
-{
-	ScopedTimer _prof(L"Renderer::OcclusionCulling", gfxContext);
-
-	ComputeContext& context = gfxContext.GetComputeContext();
-	auto& bucketer = Renderer::CommandBucketer::Get();
-
-	context.TransitionResource(bucketer.GetIndirectVisibleFlags(psoIdx), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    context.TransitionResource(bucketer.GetIndirectCommandsGPU(psoIdx), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-
-	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
-	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
-	context.SetRootSignature(m_RootSig);
-
-    if (passIdx == 0)
-    {
-        context.TransitionResource(GetPrevHZB(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        context.SetPipelineState(m_OcclusionCullingPass1PSO);
-    }
-    else
-    {
-        context.TransitionResource(GetCurrentHZB(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        context.SetPipelineState(m_OcclusionCullingPass2PSO);
-    }
-
-	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-
-	uint32_t maxCommands = bucketer.GetMaxCommands(psoIdx);
-	context.SetConstants(kCommandConstants, maxCommands,
-		0.f, (uint32_t)psoIdx);
-	context.Dispatch1D(maxCommands, CULLING_THREAD_GROUP_SIZE);
-}
-
-void Renderer::FillCullingResult(GraphicsContext& gfxContext,
-	const GlobalConstants& inGlobals,
-	Renderer::PsoIdx psoIdx,
-	CullingStage cullingStage)
-{
-	ScopedTimer _prof(L"Renderer::FillCullingResult", gfxContext);
-	ComputeContext& context = gfxContext.GetComputeContext();
-	auto& bucketer = Renderer::CommandBucketer::Get();
-
-    context.CopyBufferRegion(bucketer.GetIndirectCullingResultsCounter(psoIdx), 0, m_IndirectArgsCounterBufferReset, 0, sizeof(UINT));
-	context.TransitionResource(bucketer.GetIndirectVisibleFlags(psoIdx), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-	context.TransitionResource(bucketer.GetIndirectCullingResults(psoIdx), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	context.TransitionResource(bucketer.GetIndirectCullingResultsCounter(psoIdx), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-
-    context.TransitionResource(bucketer.GetIndirectCommandsGPU(psoIdx), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-
-    //context.FlushResourceBarriers();
-
-    context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
-    context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
-	context.SetRootSignature(m_RootSig);
-	
-	context.SetPipelineState(m_FillCullingResultPSO);
-
-	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-
-	uint32_t maxCommands = bucketer.GetMaxCommands(psoIdx);
-	context.SetConstants(kCommandConstants, maxCommands,
-		0.f, psoIdx, (uint32_t)cullingStage);
-
-    context.Dispatch1D(maxCommands, CULLING_THREAD_GROUP_SIZE);
-
-    gfxContext.TransitionResource(bucketer.GetIndirectCullingResults(psoIdx), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, true);
-    gfxContext.TransitionResource(bucketer.GetIndirectCullingResultsCounter(psoIdx), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, true);
-}
-
 void Renderer::InstanceCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, uint32_t cullPassIdx)
 {
     ScopedTimer _prof(L"Renderer::InstanceCull", gfxContext);
     ComputeContext& context = gfxContext.GetComputeContext();
 
-	context.TransitionResource(CommandBucketer::Get().GetPotentialDrawItemsGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-	context.TransitionResource(CommandBucketer::Get().GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	context.TransitionResource( DrawCommandManager::GetPotentialDrawItemsGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+	context.TransitionResource( DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
@@ -795,9 +361,9 @@ void Renderer::InstanceCull(GraphicsContext& gfxContext, const GlobalConstants& 
 
 	context.SetPipelineState(m_InstanceCullPSO[cullPassIdx]);
 	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-	context.SetConstants(kCommandConstants, CommandBucketer::Get().GetNumPotentialDrawItems());
+	context.SetConstants(kCommandConstants,  DrawCommandManager::GetNumPotentialDrawItems());
 
-    context.Dispatch1D(CommandBucketer::Get().GetNumPotentialDrawItems());
+    context.Dispatch1D( DrawCommandManager::GetNumPotentialDrawItems());
 }
 
 void Renderer::DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, const BaseCamera* camera, 
@@ -805,10 +371,10 @@ void Renderer::DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlo
 {
 	ScopedTimer _prof(L"Renderer::DAGCull", gfxContext);
 	ComputeContext& context = gfxContext.GetComputeContext();
-	context.TransitionResource(CommandBucketer::Get().GetTaskQueueGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	context.TransitionResource(CommandBucketer::Get().GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    context.TransitionResource(CommandBucketer::Get().GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    context.TransitionResource(CommandBucketer::Get().GetMeshletBatchGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	context.TransitionResource( DrawCommandManager::GetTaskQueueGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	context.TransitionResource( DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    context.TransitionResource( DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    context.TransitionResource( DrawCommandManager::GetMeshletBatchGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 	context.TransitionResource(GeometryStreaming::m_GeometryStreamingStateGPU, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 	context.TransitionResource(GeometryStreaming::m_GPURequestBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 	context.ClearBufferUAV(GeometryStreaming::m_GeometryStreamingStateGPU, 4, 0);
@@ -857,7 +423,7 @@ void Renderer::ResolveVBufferToGBuffer(GraphicsContext& gfxContext, const Global
 	ComputeContext& context = gfxContext.GetComputeContext();
 
 	context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    context.TransitionResource(Renderer::CommandBucketer::Get().GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 	context.TransitionResource(g_GBufferA, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 	context.TransitionResource(g_GBufferB, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 	context.TransitionResource(g_GBufferC, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -902,93 +468,6 @@ HierarchicalDepthBuffer& Renderer::GetCurrentHZB()
     return g_FurthestHZB[TemporalEffects::GetFrameIndexMod2()];
 }
 
-//void MeshSorter::AddMesh( const Mesh& mesh, float distance,
-//    D3D12_GPU_VIRTUAL_ADDRESS meshCBV,
-//    D3D12_GPU_VIRTUAL_ADDRESS materialCBV,
-//    D3D12_GPU_VIRTUAL_ADDRESS bufferPtr,
-//    D3D12_GPU_VIRTUAL_ADDRESS meshJoints,
-//	const IndirectArgsBuffer& indirectArgsBuffer,
-//    uint32_t indirectArgsOffset)
-//{
-//    SortKey key;
-//    key.value = m_SortObjects.size();
-//
-//	bool alphaBlend = (mesh.psoFlags & PSOFlags::kAlphaBlend) == PSOFlags::kAlphaBlend;
-//    bool alphaTest = (mesh.psoFlags & PSOFlags::kAlphaTest) == PSOFlags::kAlphaTest;
-//    bool skinned = (mesh.psoFlags & PSOFlags::kHasSkin) == PSOFlags::kHasSkin;
-//    uint64_t depthPSO = (skinned ? 2 : 0) + (alphaTest ? 1 : 0);
-//
-//    union float_or_int { float f; uint32_t u; } dist;
-//    dist.f = Max(distance, 0.0f);
-//
-//	if (m_BatchType == kShadows)
-//	{
-//		if (alphaBlend)
-//			return;
-//
-//		key.passID = kZPass;
-//		key.psoIdx = depthPSO + 4;
-//        key.key = dist.u;
-//		m_SortKeys.push_back(key.value);
-//		m_PassCounts[kZPass]++;
-//	}
-//    else if (mesh.psoFlags & PSOFlags::kAlphaBlend)
-//    {
-//        key.passID = kTransparent;
-//        key.psoIdx = mesh.pso;
-//        key.key = ~dist.u;
-//        m_SortKeys.push_back(key.value);
-//        m_PassCounts[kTransparent]++;
-//    }
-//    else if (SeparateZPass || alphaTest)
-//    {
-//        key.passID = kZPass;
-//        key.psoIdx = depthPSO;
-//        key.key = dist.u;
-//        m_SortKeys.push_back(key.value);
-//        m_PassCounts[kZPass]++;
-//
-//        if (DeferredRendering)
-//        {
-//            key.passID = kGBuffer;
-//            key.psoIdx = mesh.pso + 1;
-//            key.key = dist.u;
-//            m_SortKeys.push_back(key.value);
-//            m_PassCounts[kGBuffer]++;
-//        }
-//        else
-//        {
-//            key.passID = kOpaque;
-//            key.psoIdx = mesh.pso + 1;
-//            key.key = dist.u;
-//            m_SortKeys.push_back(key.value);
-//            m_PassCounts[kOpaque]++;
-//        }
-//    }
-//    else
-//    {
-//        if (DeferredRendering)
-//        {
-//            key.passID = kGBuffer;
-//            key.psoIdx = mesh.pso;
-//            key.key = dist.u;
-//            m_SortKeys.push_back(key.value);
-//            m_PassCounts[kGBuffer]++;
-//        }
-//        else
-//        {
-//            key.passID = kOpaque;
-//            key.psoIdx = mesh.pso;
-//            key.key = dist.u;
-//            m_SortKeys.push_back(key.value);
-//            m_PassCounts[kOpaque]++;
-//        }
-//    }
-//
-//    SortObject object = { &mesh, meshJoints, meshCBV, materialCBV, bufferPtr, indirectArgsBuffer, indirectArgsOffset};
-//    m_SortObjects.push_back(object);
-//}
-
 void MeshSorter::Sort()
 {
     struct { bool operator()(uint64_t a, uint64_t b) const { return a < b; } } Cmp;
@@ -997,8 +476,7 @@ void MeshSorter::Sort()
 
 void MeshSorter::RenderMeshedInternal(
     GraphicsContext& context,
-    const GlobalConstants& inGlobals,
-    Renderer::PsoIdx psoIdx)
+    const GlobalConstants& inGlobals)
 {
     for (auto& chunksGPU : GeometryStreaming::m_GeometryChunksGPU)
     {
@@ -1009,12 +487,12 @@ void MeshSorter::RenderMeshedInternal(
 
     if (!FreezeCull)
     {
-        context.GetComputeContext().ClearBufferUAV(CommandBucketer::Get().GetTaskQueueStateGPU(),
-            CommandBucketer::Get().GetTaskQueueStateGPU().GetBufferSize(), 0);
-        context.TransitionResource(CommandBucketer::Get().GetTaskQueueGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        context.ClearUAV(CommandBucketer::Get().GetTaskQueueGPU(), 0xFFFFFFFF);
-        context.TransitionResource(CommandBucketer::Get().GetMeshletBatchGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        context.ClearUAV(CommandBucketer::Get().GetMeshletBatchGPU(), 0);
+        context.GetComputeContext().ClearBufferUAV( DrawCommandManager::GetTaskQueueStateGPU(),
+             DrawCommandManager::GetTaskQueueStateGPU().GetBufferSize(), 0);
+        context.TransitionResource( DrawCommandManager::GetTaskQueueGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        context.ClearUAV( DrawCommandManager::GetTaskQueueGPU(), 0xFFFFFFFF);
+        context.TransitionResource( DrawCommandManager::GetMeshletBatchGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        context.ClearUAV( DrawCommandManager::GetMeshletBatchGPU(), 0);
         context.TransitionResource(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         context.ClearUAV(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, 0);
 
@@ -1023,8 +501,8 @@ void MeshSorter::RenderMeshedInternal(
         Renderer::DAGCull(context, inGlobals, m_Camera, m_Viewport, passIndex);
         {
             // mesh buffer gen
-            context.TransitionResource(CommandBucketer::Get().GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.TransitionResource(Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            context.TransitionResource(DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
             context.GetComputeContext().SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
             context.GetComputeContext().SetConstants(kCommandConstants, passIndex); // pass index
@@ -1033,13 +511,13 @@ void MeshSorter::RenderMeshedInternal(
 
         {
             ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 0", context);
-            context.TransitionResource(Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-            context.TransitionResource(Renderer::CommandBucketer::Get().GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+            context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.SetPipelineState(m_UberMeshPSO[passIndex]);
             context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-            context.SetConstants(kCommandConstants, 0, 0, psoIdx);
+            context.SetConstants(kCommandConstants, 0, 0, 0);
             context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-            context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), 0, 1);
+            context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
         }
 
         {
@@ -1056,8 +534,8 @@ void MeshSorter::RenderMeshedInternal(
         Renderer::DAGCull(context, inGlobals, m_Camera, m_Viewport, passIndex);
         {
             // mesh buffer gen
-            context.TransitionResource(CommandBucketer::Get().GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.TransitionResource(Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            context.TransitionResource( DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
             context.GetComputeContext().SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
             context.GetComputeContext().SetConstants(kCommandConstants, passIndex); // pass index
@@ -1066,13 +544,13 @@ void MeshSorter::RenderMeshedInternal(
 
         {
             ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 1", context);
-            context.TransitionResource(Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-            context.TransitionResource(Renderer::CommandBucketer::Get().GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+            context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.SetPipelineState(m_UberMeshPSO[passIndex]);
             context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-            context.SetConstants(kCommandConstants, 0, 0, psoIdx);
+            context.SetConstants(kCommandConstants, 0, 0, 0);
             context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-            context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), 0, 1);
+            context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
         }
 
 		{
@@ -1089,8 +567,8 @@ void MeshSorter::RenderMeshedInternal(
         uint32_t passIndex = 0;
         {
             // mesh buffer gen
-            context.TransitionResource(CommandBucketer::Get().GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.TransitionResource(Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            context.TransitionResource( DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
             context.GetComputeContext().SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
             context.GetComputeContext().SetConstants(kCommandConstants, passIndex); // pass index
@@ -1099,20 +577,20 @@ void MeshSorter::RenderMeshedInternal(
 
         {
             ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 0", context);
-            context.TransitionResource(Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-            context.TransitionResource(Renderer::CommandBucketer::Get().GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+            context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.SetPipelineState(m_UberMeshPSO[passIndex]);
             context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-            context.SetConstants(kCommandConstants, 0, 0, psoIdx);
+            context.SetConstants(kCommandConstants, 0, 0, 0);
             context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-            context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), 0, 1);
+            context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
         }
 
         passIndex = 1;
         {
             // mesh buffer gen
-            context.TransitionResource(CommandBucketer::Get().GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.TransitionResource(Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            context.TransitionResource( DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
             context.GetComputeContext().SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
             context.GetComputeContext().SetConstants(kCommandConstants, passIndex); // pass index
@@ -1121,13 +599,13 @@ void MeshSorter::RenderMeshedInternal(
 
         {
             ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 1", context);
-            context.TransitionResource(Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-            context.TransitionResource(Renderer::CommandBucketer::Get().GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+            context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.SetPipelineState(m_UberMeshPSO[passIndex]);
             context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-            context.SetConstants(kCommandConstants, 0, 0, psoIdx);
+            context.SetConstants(kCommandConstants, 0, 0, 0);
             context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-            context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, Renderer::CommandBucketer::Get().GetIndirectDispatchMeshGPU(), 0, 1);
+            context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
         }
 
 		{
@@ -1236,18 +714,9 @@ void MeshSorter::RenderMeshes(
 				context.SetDepthStencilTarget(m_DSV->GetDSV());
 				break;
 			case kOpaque:
-				if (SeparateZPass)
-				{
-					context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_READ);
-					context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-					context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), m_DSV->GetDSV_DepthReadOnly());
-				}
-				else
-				{
-					context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-					context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-					context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), m_DSV->GetDSV());
-				}
+                context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+                context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
+                context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), m_DSV->GetDSV());
 				break;
             case kVBuffer:
 				context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_WRITE);
@@ -1255,25 +724,6 @@ void MeshSorter::RenderMeshes(
 				context.SetRenderTarget(g_VisibilityBuffer.GetRTV(), m_DSV->GetDSV());
                 break;
 			case kGBuffer:
-			    if (SeparateZPass)
-			    {
-			        context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_READ);
-			        context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-			        context.TransitionResource(g_GBufferA, D3D12_RESOURCE_STATE_RENDER_TARGET);
-			        context.TransitionResource(g_GBufferB, D3D12_RESOURCE_STATE_RENDER_TARGET);
-			        context.TransitionResource(g_GBufferC, D3D12_RESOURCE_STATE_RENDER_TARGET);
-			        context.TransitionResource(g_GBufferD, D3D12_RESOURCE_STATE_RENDER_TARGET);
-
-			        D3D12_CPU_DESCRIPTOR_HANDLE RTVs[] = {
-			            g_SceneColorBuffer.GetRTV(),
-			            g_GBufferA.GetRTV(),
-			            g_GBufferB.GetRTV(),
-			            g_GBufferC.GetRTV(),
-			            g_GBufferD.GetRTV(),
-			        };
-			        context.SetRenderTargets(5, RTVs, m_DSV->GetDSV_DepthReadOnly());
-			    }
-			    else
 			    {
 			        context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_WRITE);
 			        context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
@@ -1311,18 +761,10 @@ void MeshSorter::RenderMeshes(
 		}
 		else
 		{
-			auto& bucketer = Renderer::CommandBucketer::Get();
-			if (pass == kZPass)
+			if (kVBuffer == pass)
 			{
-				if (m_BatchType == MeshSorter::kShadows && bucketer.HasAnyCommands(Renderer::PsoIdx::kPsoShadow))
-				{
-                    RenderMeshedInternal(context, globals, Renderer::PsoIdx::kPsoShadow);
-				}
-			}
-			else if (kVBuffer == pass)
-			{
-                if (bucketer.GetNumPotentialDrawItems() > 0)
-                    RenderMeshedInternal(context, globals, Renderer::PsoIdx::kPsoMain);
+                if (DrawCommandManager::GetNumPotentialDrawItems() > 0)
+                    RenderMeshedInternal(context, globals);
 			}
         }
     }

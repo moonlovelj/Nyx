@@ -79,7 +79,7 @@ float3 EvaluateIBLDiffuse(SurfaceProperties Surface)
 
     // Lambertian diffuse
     //float3 diffuseLighting = IBLDiffuseLDMap.SampleLevel(cubeMapSampler, Surface.N, 0);
-    //return Surface.c_diff * diffuseLighting; // PI和cos重要性采样抵消了
+    //return Surface.c_diff * diffuseLighting; // PI and cos importance sampling cancel out
     //return Surface.c_diff * INV_PI * diffuseLighting;
 }
 

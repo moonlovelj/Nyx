@@ -1,4 +1,4 @@
-﻿//
+//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -20,7 +20,7 @@
 using namespace Math;
 using namespace GameCore;
 
-ExpVar g_CameraSpeed("Camera/CameraSpeed", 1.0f, -15.0f, 20.0f, 0.5f);
+ExpVar g_CameraSpeed("Camera/CameraSpeed", 3.0f, -15.0f, 20.0f, 0.5f);
 
 FlyingFPSCamera::FlyingFPSCamera( Camera& camera, Vector3 worldUp ) : CameraController( camera )
 {

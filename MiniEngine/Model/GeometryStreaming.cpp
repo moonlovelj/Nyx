@@ -1,4 +1,4 @@
-﻿#include "GeometryStreaming.h"
+#include "GeometryStreaming.h"
 #include "../Core/GpuBuffer.h"
 #include "../Core/ReadbackBuffer.h"
 #include "../Core/GraphicsCore.h"
@@ -27,7 +27,7 @@ namespace GeometryStreaming
 
 	struct PageResidency {
 		uint32_t ChunkIndex = INVALID_CHUNK_INDEX;
-		uint32_t SlotIndex = 0; // 在 Chunk 内的槽位索引
+		uint32_t SlotIndex = 0; // Slot index within the chunk
 		uint64_t LastUsedFrame = 0;
 		bool IsPinned = false;
 		bool IsLoading = false;
@@ -36,7 +36,7 @@ namespace GeometryStreaming
 
 	struct PhysicalSlot {
 		uint32_t ChunkIndex;
-		uint32_t SlotIndex; // 在该 Chunk 内的索引
+		uint32_t SlotIndex; // Index within the chunk
 	};
 	std::vector<PhysicalSlot> m_FreePool;
 
@@ -404,9 +404,9 @@ void GeometryStreaming::Shutdown()
 
 void GeometryStreaming::Update(uint32_t frameIndex)
 {
-	if (frameIndex < 1) return; // 避免读到未初始化的数据
+	if (frameIndex < 1) return; // Avoid reading uninitialized data
 
-	Model* sourceModel = ModelInstanceManager::Get().GetSourceModel();
+	Model* sourceModel = ModelInstanceManager::GetSourceModel();
 	if (nullptr == sourceModel) return;
 
 	const uint32_t readbackBufferIndex = frameIndex % kNumReadbackBuffers;
@@ -454,7 +454,7 @@ void GeometryStreaming::Update(uint32_t frameIndex)
 	
 	if (m_FenceValues[readbackBufferIndex] == 0)
 	{
-		// 读取请求
+		// Read requests
 		GraphicsContext& gfxContext = GraphicsContext::Begin(L"GeometryStreaming Update");
 
 		gfxContext.TransitionResource(m_GeometryStreamingRequestMaskGPU, D3D12_RESOURCE_STATE_COPY_SOURCE);
@@ -479,7 +479,7 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 		readyPages.swap(m_CompletedPagesQueue);
 	}
 
-	Model* sourceModel = ModelInstanceManager::Get().GetSourceModel();
+	Model* sourceModel = ModelInstanceManager::GetSourceModel();
 	Renderer::GroupDataLocation* locations = m_GroupDataLocations.data();
 	GraphicsContext& gfx = GraphicsContext::Begin(L"Streaming Upload");
 
@@ -498,7 +498,7 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 		uint32_t byteOffset = slot.SlotIndex * Renderer::kPageSizeInBytes;
 		gfx.WriteBuffer(m_GeometryChunksGPU[slot.ChunkIndex], byteOffset, item.Data.data(), item.Data.size());
 
-		// 更新 Page 下所有组的映射
+		// Update mappings for all groups in the page
 		const auto& pageMeta = sourceModel->m_PageMetadatas[item.PageIndex];
 		for (uint32_t i = 0; i < pageMeta.GroupCount; ++i)
 		{
@@ -517,7 +517,7 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 	if (it != readyPages.end())
 	{
 		std::lock_guard<std::mutex> lock(m_CompletedPagesMutex);
-		// 将未处理的插回队列头部
+		// Push unprocessed ones back to the front of the queue
 		m_CompletedPagesQueue.insert(
 			m_CompletedPagesQueue.begin(),
 			std::make_move_iterator(it),
@@ -541,7 +541,7 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 
 void GeometryStreaming::EnqueueAsyncLoad(uint32_t pageIdx)
 {
-	Model* sourceModel = ModelInstanceManager::Get().GetSourceModel();
+	Model* sourceModel = ModelInstanceManager::GetSourceModel();
 	{
 		std::lock_guard<std::mutex> lock(m_IOQueueMutex);
 		IORequest req = {};
@@ -584,7 +584,7 @@ void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDat
 	std::vector<Candidate> candidates;
 	candidates.reserve(m_PageTableCPU.size());
 
-	const uint32_t kEvictionGraceFrames = 30;
+	const uint32_t kEvictionGraceFrames = 512;
 	for (uint32_t i = 0; i < (uint32_t)m_PageTableCPU.size(); ++i)
 	{
 		const auto& info = m_PageTableCPU[i];
@@ -603,7 +603,7 @@ void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDat
 
 	uint32_t evictedCount = 0;
 
-	Model* sourceModel = ModelInstanceManager::Get().GetSourceModel();
+	Model* sourceModel = ModelInstanceManager::GetSourceModel();
 
 	for (const auto& cand : candidates)
 	{

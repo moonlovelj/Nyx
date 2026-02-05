@@ -15,16 +15,16 @@ float3 Uint32ToColorR16G16B16(uint id)
 {
     uint hash_id = HashUint(id);
 
-    // 为红色通道分配10位 (高位)
+    // Allocate 10 bits for red (high bits)
     uint r_bits = (hash_id >> 22) & 0x3FF;
 
-    // 为绿色通道分配11位 (中位)
+    // Allocate 11 bits for green (middle bits)
     uint g_bits = (hash_id >> 11) & 0x7FF;
 
-    // 为蓝色通道分配11位 (低位)
+    // Allocate 11 bits for blue (low bits)
     uint b_bits = hash_id & 0x7FF;
 
-    // 将提取出的整数值归一化到 [0.0, 1.0] 范围
+    // Normalize extracted integers to [0.0, 1.0]
     float r = float(r_bits) / 1023.0f;
     float g = float(g_bits) / 2047.0f;
     float b = float(b_bits) / 2047.0f;

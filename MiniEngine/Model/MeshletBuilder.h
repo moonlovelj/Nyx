@@ -20,13 +20,13 @@ struct MeshletBuildSettings
 
 	float ClusterSplitFactor = 2.0f;
 
-	// 简化目标与失败阈值
+	// Simplification targets and failure thresholds
 	float TargetSimplifyRatio = 0.5f;
 	float SimplificationFailurePercentage = 0.51f;
 	float SimplificationSloppyFailurePercentage = 0.85f;
-	float minReductionRatio = 0.01f; // 低于这个值则停止简化
+	float minReductionRatio = 0.01f; // Stop simplifying below this ratio
 
-	float LODErrorMergePrevious = 1.5f; // 用来保证单调
+	float LODErrorMergePrevious = 1.5f; // Used to ensure monotonicity
 
 	bool bUseSimplifyPermissive = true;
 
@@ -68,14 +68,14 @@ struct MeshletBuildArgs
 class MeshletBuilder
 {
 public:
-	// 完整构建流程：LOD0 -> 分组 -> 锁边 -> 组级简化 -> 新 LOD -> 迭代
+	// Full build pipeline: LOD0 -> grouping -> boundary locking -> group-level simplification -> new LOD -> iterate
 	static MeshletBuildProducts Build(
 		const MeshletBuildArgs& buildArgs);
 private:
 
 	struct Group
 	{
-		std::vector<uint32_t> MeshletIDs; // 本组包含的 meshlet（指向 current 数组）
+		std::vector<uint32_t> MeshletIDs; // Meshlets in this group (indices into current array)
 		float GroupSphere[4]{};
 		float GroupBBoxMin[3]{};
 		float GroupBBoxMax[3]{};
@@ -86,27 +86,27 @@ private:
 
 	struct Meshlet
 	{
-		std::vector<uint32_t> Vertices; // 原始顶点索引
-		std::vector<uint8_t>  Triangles;// 局部索引
+		std::vector<uint32_t> Vertices; // Original vertex indices
+		std::vector<uint8_t>  Triangles;// Local indices
 		float BoundSphere[4]{};
 		float BBoxMin[3]{};
 		float BBoxMax[3]{};
-		uint32_t GroupChildIndex = 0xFFFFFFFF; // 组内子索引
+		uint32_t GroupChildIndex = 0xFFFFFFFF; // Group-local child index
 		uint32_t GroupID = 0;
-		uint32_t RefineGroupID = 0xFFFFFFFF;// LOD0没有精细组
+		uint32_t RefineGroupID = 0xFFFFFFFF;// No refinement group for LOD0
 	};
 
-	// LOD0：直接对整模型索引构建 meshlet
+	// LOD0: build meshlets directly from full model indices
 	static std::vector<Meshlet> BuildLOD0Meshlets(
 		const MeshletBuildArgs& buildArgs);
 
-	// 从索引流构建一批 meshlet（简化后重建）
+	// Build meshlets from an index stream (rebuild after simplification)
 	static void BuildMeshletsFromIndices(
 		const MeshletBuildArgs& buildArgs,
 		const uint32_t* indices, size_t indexCount,
 		std::vector<Meshlet>& out);
 
-	// 计算 meshlet 包围球（调用 meshopt 以保证准确）
+	// Compute meshlet bounding sphere (use meshopt for accuracy)
 	static void ComputeMeshletSphere(
 		const MeshletBuildArgs& buildArgs,
 		const Meshlet& m,
@@ -118,7 +118,7 @@ private:
         float outMin[3],
         float outMax[3]);
 
-	// 合并两个球（Ritter 合并）
+	// Merge two spheres (Ritter merge)
 	static void MergeSphere(const float a[4], const float b[4], float out[4]);
 
 	// position-only remap
@@ -126,7 +126,7 @@ private:
 		const MeshletBuildArgs& buildArgs,
 		std::vector<uint32_t>& outPosRemap);
 
-	// 用 partitionClusters 按共享顶点/空间接近分组
+	// Group by shared vertices/spatial proximity using partitionClusters
 	static std::vector<uint32_t> GroupMeshlets(
 		const MeshletBuildArgs& buildArgs,
 		const std::vector<Meshlet>& current,
@@ -135,7 +135,7 @@ private:
 		uint32_t LODLevel,
 		std::vector<Group>& groups);
 
-	// 锁边：跨组共享“position-only 顶点”的所有原始顶点上锁
+	// Boundary locking: lock all original vertices that share position-only vertices across groups
 	static void BuildVertexLocksByGroups(
 		const std::vector<Group>& groups,
 		const std::vector<uint32_t>& groupIds,
@@ -144,16 +144,16 @@ private:
 		size_t vertexCount,
 		std::vector<unsigned char>& outVertexLock);
 
-	// 组级简化：拼接组索引 -> simplifyWithAttributes(法线+锁) -> 重建 meshlet
+	// Group-level simplification: concat group indices -> simplifyWithAttributes (normals + locks) -> rebuild meshlets
 	static bool SimplifyGroup(
 		const MeshletBuildArgs& buildArgs,
 		const Group& g,
 		const std::vector<Meshlet>& current,
-		const std::vector<unsigned char>& vertexLock, // 全局锁数组
+		const std::vector<unsigned char>& vertexLock, // Global lock array
 		std::vector<Meshlet>& outNewMeshlets,
 		float& outError);
 
-	// 用已有 meshlet 数据序列化成 group blob（可单独复用）
+	// Serialize existing meshlet data into a group blob (reusable)
 	static GroupPackage SerializeGroup(
 		const MeshletBuildArgs& buildArgs,
 		const Group& group,
@@ -174,5 +174,5 @@ private:
 	static std::vector<Renderer::HierarchyNode> BuildHierarchy(
 		const std::vector<Renderer::HierarchyNode>& initNodes,
 		uint32_t maxBVHNodeChildren,
-		std::vector<uint32_t>& outInitNodesReorderMap); // outInitNodesReorderMap返回初始子节点重排映射
+		std::vector<uint32_t>& outInitNodesReorderMap); // outInitNodesReorderMap returns the initial child reorder mapping
 };

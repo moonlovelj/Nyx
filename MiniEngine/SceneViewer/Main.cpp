@@ -1,4 +1,4 @@
-﻿#include "GameCore.h"
+#include "GameCore.h"
 #include "CameraController.h"
 #include "BufferManager.h"
 #include "Camera.h"
@@ -28,7 +28,7 @@
 #include <chrono>
 
 extern "C" {
-	__declspec(dllexport) extern const UINT D3D12SDKVersion = 616; // 对应Agility SDK版本
+	__declspec(dllexport) extern const UINT D3D12SDKVersion = 616; // Matches the Agility SDK version
 	__declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\";
 }
 
@@ -203,13 +203,13 @@ void SceneViewer::Startup( void )
     if (CommandLineArgs::GetString(L"model", gltfFileName) == false)
     {
         auto startTime = std::chrono::steady_clock::now();
-        //auto model = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
-		//m_ModelInst = Renderer::LoadModel(L"Assets/old_federal_building/scene.gltf", forceRebuild);
-        //auto model = Renderer::LoadModel(L"Assets/EnvironmentTest/glTF/EnvironmentTest.gltf", forceRebuild);
+        auto model = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
+        //auto model = Renderer::LoadModel(L"Assets/Cube/scene.gltf", forceRebuild);
+        //auto model = Renderer::LoadModel(L"Assets/lumber_mill_wood_factory_gltf/scene.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/DamagedHelmet/glTF/DamagedHelmet.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/Jinx/scene.gltf", forceRebuild);
-        //auto model = Renderer::LoadModel(L"Assets/lumber_mill_wood_factory_gltf/scene.gltf", forceRebuild);
-		auto model = Renderer::LoadModel(L"Assets/zorah_main_public.gltf/zorah_main_public.gltf", forceRebuild);
+        //auto model = Renderer::LoadModel(L"Assets/xyzrgb_statuette.ply/scene.gltf", forceRebuild);
+		//auto model = Renderer::LoadModel(L"Assets/zorah_main_public.gltf/zorah_main_public.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/San_Miguel/scene.gltf", forceRebuild);
         //auto model = Renderer::LoadModel(L"Assets/Dragon/Dragon.gltf", forceRebuild);
 		//auto model = Renderer::LoadModel(L"Assets/japanese_metal_lantern_vfvjccaqx_gltf_raw/Japanese_Metal_Lantern_vfvjccaqx_Raw.gltf", forceRebuild);
@@ -220,10 +220,10 @@ void SceneViewer::Startup( void )
 		auto durationTime = duration_cast<std::chrono::milliseconds>(endTime - startTime);
 		Utility::Printf("Model loading time: %lld ms\n", durationTime.count());
 
-		//ModelInstanceManager::Get().Initialize(model, 1);
-		ModelInstanceManager::Get().Initialize(model, 1);
-		OrientedBox obb = ModelInstanceManager::Get().GetModelInstance(0).GetBoundingBox();
-		//OrientedBox obb = ModelInstanceManager::Get().GetModelInstance(0).GetBoundingBox();
+		//ModelInstanceManager::Initialize(model, 1);
+		ModelInstanceManager::Initialize(model, 1);
+		OrientedBox obb = ModelInstanceManager::GetModelInstance(0).GetBoundingBox();
+		//OrientedBox obb = ModelInstanceManager::GetModelInstance(0).GetBoundingBox();
         modelRadius = Length(obb.GetDimensions()) * 0.5f;
 
 		const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 0.5f, 0.0f, 0.0f);
@@ -235,8 +235,8 @@ void SceneViewer::Startup( void )
     else
     {
         auto model = Renderer::LoadModel(gltfFileName, forceRebuild);
-        ModelInstanceManager::Get().Initialize(model);
-		OrientedBox obb = ModelInstanceManager::Get().GetModelInstance(0).GetBoundingBox();
+        ModelInstanceManager::Initialize(model);
+		OrientedBox obb = ModelInstanceManager::GetModelInstance(0).GetBoundingBox();
 		modelRadius = Length(obb.GetDimensions()) * 0.5f;
 		const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 0.5f, 0.0f, 0.0f);
 		m_Camera.SetEyeAtUp(eye, obb.GetCenter(), Vector3(kYUnitVector));
@@ -251,7 +251,7 @@ void SceneViewer::Startup( void )
         m_CameraController.reset(flyingCamera);
     }
 	else
-        m_CameraController.reset(new OrbitCamera(m_Camera, ModelInstanceManager::Get().GetModelInstance(0).GetBoundingSphere(), Vector3(kYUnitVector)));
+        m_CameraController.reset(new OrbitCamera(m_Camera, ModelInstanceManager::GetModelInstance(0).GetBoundingSphere(), Vector3(kYUnitVector)));
 
     //const Vector3 BoxCenter = m_ModelInst.GetBoundingBox().GetCenter();
     //const Vector3 BoxDimensions = m_ModelInst.GetBoundingBox().GetDimensions();
@@ -261,7 +261,7 @@ void SceneViewer::Startup( void )
 void SceneViewer::Cleanup( void )
 {
     // Free up resources in an orderly fashion
-	ModelInstanceManager::Get().Cleanup();
+	ModelInstanceManager::Cleanup();
 
     g_IBLTextures.clear();
 
@@ -286,7 +286,7 @@ void SceneViewer::Update( float deltaT )
     else if (GameInput::IsFirstPressed(GameInput::kRShoulder))
         DebugZoom.Increment();
 
-    const size_t NumCameras = ModelInstanceManager::Get().GetModelInstance(0).GetNumCameras();
+    const size_t NumCameras = ModelInstanceManager::GetModelInstance(0).GetNumCameras();
     const bool bUseglTFCamera = NumCameras > 0 && g_UseglTFCamera;
 
     if (!bUseglTFCamera)
@@ -294,14 +294,14 @@ void SceneViewer::Update( float deltaT )
 
     GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Update");
 
-    ModelInstanceManager::Get().Update(gfxContext, deltaT);
+    ModelInstanceManager::Update(gfxContext, deltaT);
 
     gfxContext.Finish();
     
     //m_Camera.SetAspectRatio((float)g_DisplayHeight / g_DisplayWidth);
 	if (bUseglTFCamera)
 	{
-		std::shared_ptr<Math::Camera> Camera = ModelInstanceManager::Get().GetModelInstance(0).GetCameras()[0];
+		std::shared_ptr<Math::Camera> Camera = ModelInstanceManager::GetModelInstance(0).GetCameras()[0];
 		m_Camera.SetFOV(Camera->GetFOV());
 		m_Camera.SetZRange(Camera->GetNearClip(), Camera->GetFarClip());
 		m_Camera.SetPosition(Camera->GetPosition());
@@ -348,7 +348,7 @@ void SceneViewer::RenderScene( void )
     // gfxContext.SetViewportAndScissor(0, 0, g_SceneColorBuffer.GetWidth(), g_SceneColorBuffer.GetHeight());
 
     // Rendering something
-    if (ModelInstanceManager::Get().GetNumModelInstances() > 0)
+    if (ModelInstanceManager::GetNumModelInstances() > 0)
     {
         IBL::Precompute(gfxContext);
         
@@ -359,7 +359,7 @@ void SceneViewer::RenderScene( void )
         float sinphi = sinf(g_SunInclination * 3.14159f * 0.5f);
 
         Vector3 SunDirection = Normalize(Vector3( costheta * cosphi, sinphi, sintheta * cosphi ));
-        Vector3 ShadowBounds = Vector3(ModelInstanceManager::Get().GetModelInstance(0).GetRadius());
+        Vector3 ShadowBounds = Vector3(ModelInstanceManager::GetModelInstance(0).GetRadius());
         //m_SunShadowCamera.UpdateMatrix(-SunDirection, m_ModelInst.GetCenter(), ShadowBounds,
         m_SunShadowCamera.UpdateMatrix(-SunDirection, Vector3(0, -5.0f, 0), Vector3(50, 30, 30),
             (uint32_t)g_ShadowBuffer.GetWidth(), (uint32_t)g_ShadowBuffer.GetHeight(), 16);
@@ -418,7 +418,7 @@ void SceneViewer::RenderScene( void )
 		sorter.SetDepthStencilTarget(g_SceneDepthBuffer);
 		sorter.AddRenderTarget(g_SceneColorBuffer);
 
-        ModelInstanceManager::Get().Render(sorter);
+        ModelInstanceManager::Render(sorter);
 
         sorter.Sort();
 
@@ -443,7 +443,7 @@ void SceneViewer::RenderScene( void )
 				shadowSorter.SetCamera(m_SunShadowCamera);
 				shadowSorter.SetDepthStencilTarget(g_ShadowBuffer);
 
-                ModelInstanceManager::Get().Render(shadowSorter);
+                ModelInstanceManager::Render(shadowSorter);
 
                 shadowSorter.Sort();
                 shadowSorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);

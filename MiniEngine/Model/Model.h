@@ -75,15 +75,15 @@ struct Mesh
 	uint16_t padding;
 	struct Draw
 	{
-        // 存到Group里
+        // Stored in Group data
 		//uint16_t meshCBV;       // Index of mesh constant buffer
 		//uint16_t materialCBV;   // Index of material constant buffer
 		//uint16_t psoFlags;      // Flags needed to request a PSO
 		float boundingBoxMin[3];  // Local space AABB min
 		float boundingBoxMax[3];  // Local space AABB max
-		uint32_t rootNodeIndex; // 指向 m_Nodes 数组的根节点
-		//uint32_t groupMetadataStartIndex; // 指向 m_GroupMetadatas 数组
-		//uint32_t groupCount; // 有多少个 group
+		uint32_t rootNodeIndex; // Root node index into m_Nodes array
+		//uint32_t groupMetadataStartIndex; // Index into m_GroupMetadatas array
+		//uint32_t groupCount; // Number of groups
 	};
 	Draw draw[1]; 
 };
@@ -101,7 +101,7 @@ struct GraphNode // 96 bytes
     uint32_t skeletonRoot : 1;
 };
 
-// instance 粒度
+// Per-instance
 struct Joint
 {
     Math::Matrix4 posXform;
@@ -160,7 +160,7 @@ public:
 	std::unique_ptr<Math::Matrix4[]> m_JointIBMs;
 	std::unique_ptr<CameraData[]> m_Cameras;
 
-	// 逻辑 Mesh 对象
+	// Logical mesh objects
 	std::vector<Mesh*> m_Meshes;
 
 	std::vector<Renderer::GroupMetadata> m_GroupMetadatas;
@@ -168,10 +168,10 @@ public:
 	std::vector<Renderer::PageMetadata> m_PageMetadatas;
 	std::vector<Renderer::PageCompressionInfo> m_PageCompressionInfos;
 
-	// BVH 树 (需要上传到 GPU，这里暂存 CPU 端)
+	// BVH tree (needs to be uploaded to GPU, stored on CPU here)
 	std::vector<Renderer::HierarchyNode> m_Nodes;
 
-	// 用于记录流式加载
+	// Used for streaming
 	std::wstring m_StreamingFilePath;
 	uint64_t m_GeometryBlobOffsetInFile = 0;
 	uint64_t m_GeometryUncompressedSize = 0;

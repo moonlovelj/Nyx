@@ -16,3 +16,5 @@ ReferenceAlignment: Left
 DerivePointerAlignment: false
 ColumnLimit: 0
 SortIncludes: false
+NamespaceIndentation: All
+

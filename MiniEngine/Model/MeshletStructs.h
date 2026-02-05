@@ -10,7 +10,7 @@ namespace Renderer
 #define INVALID_NODE_INDEX 0xFFFFFFFF
 #define INVALID_CHUNK_INDEX 0xFFFFFFFF
 	// -------------------------------------------------------
-	// BVH 节点 (用于 GPU 剔除和遍历)，常驻显存
+	// BVH nodes (for GPU culling and traversal), resident in VRAM
 	// -------------------------------------------------------
 	struct HierarchyNode
 	{
@@ -22,14 +22,14 @@ namespace Renderer
 		union {
 			struct {
 				uint32_t IsGroup : 1;			// is false for internal node
-				uint32_t ChildStartIndex : 27;	// 相对于节点数组起始位置的偏移
-				uint32_t ChildCount : 4;		// 最大 8 个子节点
+				uint32_t ChildStartIndex : 27;	// Offset relative to node array start
+				uint32_t ChildCount : 4;		// Up to 8 child nodes
 			} Internal;
 
 			struct {
 				uint32_t IsGroup : 1;			// is false for Leaf node
-				uint32_t GroupIndex : 24;		// 指向 ModelData::m_GroupInfos
-				uint32_t MeshletCountMinusOne : 7;		// 128 个 meshlet 上限
+				uint32_t GroupIndex : 24;		// Index into ModelData::m_GroupInfos
+				uint32_t MeshletCountMinusOne : 7;		// Up to 128 meshlets
 			} Leaf;
 		};
 #else
@@ -76,7 +76,7 @@ namespace Renderer
 	};
 
 	// -------------------------------------------------------
-	// MeshletGroup 头信息 (流式加载)
+	// MeshletGroup header (streaming)
 	// -------------------------------------------------------
 #ifdef __cplusplus
 	struct GroupHeader
@@ -84,9 +84,9 @@ namespace Renderer
 		float    BoundSphere[4];				// Center(3) + Radius(1)
 		float    BBoxMin[3];					// Tight AABB Min (xyz)
 		float    BBoxMax[3];					// Tight AABB Max (xyz)
-		float    ParrentError;					// 父误差（更粗糙一层的误差）
+		float    ParrentError;					// Parent error (error at a coarser level)
 		uint32_t MeshletCount;
-		//uint32_t ResidentID;					// 运行时数据 (磁盘上为 0，加载到 GPU 后由流式系统填充)
+		//uint32_t ResidentID;					// Runtime data (0 on disk, filled by streaming system after GPU load)
 	};
 
 	static_assert(alignof(GroupHeader) == 4, "GroupHeader should be 4-byte aligned");
@@ -96,35 +96,35 @@ namespace Renderer
 		float4    BoundSphere;				// Center(3) + Radius(1)
 		float3    BBoxMin;					// Tight AABB Min (xyz)
 		float3    BBoxMax;					// Tight AABB Max (xyz)
-		float     ParrentError;					// 父误差（更粗糙一层的误差）
+		float     ParrentError;					// Parent error (error at a coarser level)
 		uint	  MeshletCount;
 	};
 #endif
 
 #ifdef __cplusplus
 	// -------------------------------------------------------
-	// Meshlet 头信息 (存储在 Group Blob 中， 流式加载)
+	// Meshlet header (stored in group blob, streaming)
 	// -------------------------------------------------------
 	struct MeshletHeader
 	{
-		uint8_t  VertexCountMinusOne;			// 顶点数量-1 (0-255)
-		uint8_t  TriangleCountMinusOne;			// 三角形数量-1 (0-255)
-		uint8_t  LODLevel;						// 所属 LOD 层级
-		uint8_t  GroupChildIndex;				// 所属组内子节点索引
+		uint8_t  VertexCountMinusOne;			// Vertex count - 1 (0-255)
+		uint8_t  TriangleCountMinusOne;			// Triangle count - 1 (0-255)
+		uint8_t  LODLevel;						// LOD level
+		uint8_t  GroupChildIndex;				// Group child index
 
-		uint16_t MeshBufferIndex;				// 指向全局 Mesh CBV 表
-		uint16_t MaterialBufferIndex;			// 指向全局 Material CBV 表
+		uint16_t MeshBufferIndex;				// Index into global Mesh CBV table
+		uint16_t MaterialBufferIndex;			// Index into global Material CBV table
 		uint16_t PSOFlags;           
-		uint16_t VertexStride;					// 单个顶点数据大小 (字节)
+		uint16_t VertexStride;					// Vertex size in bytes
 
-		uint32_t RefineGroupIndex;				// 精细化组Index (0xFFFFFFFF 表示无精细化组)
+		uint32_t RefineGroupIndex;				// Refinement group index (0xFFFFFFFF means none)
 
 		float   BBoxMin[3];						// Tight AABB Min (xyz)
 		float   BBoxMax[3];						// Tight AABB Max (xyz)
 
-		// 相对偏移量：相对于 Group 数据块起始位置的字节偏移
-		uint32_t VertexOffset;					// 顶点索引数组 (uint32_t 或压缩格式)
-		uint32_t TriangleOffset;				// 三角形索引数组 (uint8_t)
+		// Relative offset: byte offset from start of Group data block
+		uint32_t VertexOffset;					// Vertex index array (uint32_t or compressed)
+		uint32_t TriangleOffset;				// Triangle index array (uint8_t)
 	};
 
 	static_assert(alignof(MeshletHeader) == 4, "MeshletHeader should be 4-byte aligned");
@@ -134,11 +134,11 @@ namespace Renderer
 		uint PackedCounts;						// VertexCountMinusOne(8) + TriangleCountMinusOne(8) + LODLevel(8) + GroupChildIndex(8)
 		uint PackedIndices;						// MeshBufferIndex(16) + MaterialBufferIndex(16)
 		uint PackedFlags;						// PSOFlags(16) + VertexStride(16)
-		uint RefineGroupIndex;					// 精细化组Index (0xFFFFFFFF 表示无精细化组)
+		uint RefineGroupIndex;					// Refinement group index (0xFFFFFFFF means none)
 		float3   BBoxMin;
 		float3   BBoxMax;
-		uint VertexOffset;						// 顶点索引数组偏移
-		uint TriangleOffset;				    // 三角形索引数组 (uint8_t)
+		uint VertexOffset;						// Vertex index array offset
+		uint TriangleOffset;				    // Triangle index array (uint8_t)
 
 		uint GetVertexCount()
 		{
@@ -188,33 +188,33 @@ namespace Renderer
 
 #ifdef __cplusplus
 	// -------------------------------------------------------
-	// GPU 查找表：GroupIndex -> 显存物理地址 (CPU 更新，GPU 读取)
+	// GPU lookup table: GroupIndex -> GPU address (CPU updates, GPU reads)
 	// -------------------------------------------------------
 	struct GroupDataLocation
 	{
-		uint32_t ChunkIndex;    // 对应 ResourceDescriptorHeap 中的索引 (SRV Index)
-		uint32_t ByteOffset;    // 在该 Chunk 中的字节偏移量
+		uint32_t ChunkIndex;    // Index into ResourceDescriptorHeap (SRV index)
+		uint32_t ByteOffset;    // Byte offset within the chunk
 	};
 #else
 	struct GroupDataLocation
 	{
-		uint ChunkIndex;        // 对应 ResourceDescriptorHeap 中的索引
-		uint ByteOffset;        // 在该 Chunk 中的字节偏移量
+		uint ChunkIndex;        // Index into ResourceDescriptorHeap
+		uint ByteOffset;        // Byte offset within the chunk
 	};
 #endif
 
 #ifdef __cplusplus
 	// -------------------------------------------------------
-	// 磁盘/内存元数据 (CPU 端管理，不传给 Shader)
+	// Disk/memory metadata (managed on CPU, not sent to shader)
 	// -------------------------------------------------------
 	struct GroupMetadata
 	{
-		uint32_t SizeBytes;						// 压缩后的 Blob 大小
-		uint32_t UncompressedSize;				// 解压后 GPU 显存占用
+		uint32_t SizeBytes;						// Compressed blob size
+		uint32_t UncompressedSize;				// Uncompressed GPU memory footprint
 
-		// --- 流送逻辑信息 (用于加载到显存) ---
-		uint32_t PageIndex;						// 该 Group 属于哪个逻辑 Page (IO单位)
-		uint32_t OffsetInPage;					// 在该 Page 内的相对偏移量
+		// --- Streaming logic info (for loading to GPU memory) ---
+		uint32_t PageIndex;						// Which logical page this group belongs to (IO unit)
+		uint32_t OffsetInPage;					// Relative offset within the page
 	};
 
 	struct PageMetadata

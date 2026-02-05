@@ -51,7 +51,7 @@ namespace glTF
 		cgltf_data* m_Data = nullptr;
 		std::wstring m_BasePath;
 
-		// 辅助工具：将 cgltf 枚举转为兼容旧代码的枚举
+		// Helper: convert cgltf enums to legacy-compatible enums
 		static uint16_t MapComponentType(cgltf_component_type type);
 		static uint16_t MapType(cgltf_type type);
 		static Accessor MakeAccessor(const cgltf_accessor* src);

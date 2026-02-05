@@ -58,14 +58,14 @@ void main(
 
                 float4 shadowCoord = mul(SunShadowMatrix, float4(posW, 1.0));
                 shadowCoord.xyz *= rcp(shadowCoord.w);
-            // TODO 阴影有瑕疵
+            // TODO: shadows have artifacts
                 float sunShadow = GetDirectionalShadow(ScreenUV, shadowCoord.xyz);
-            // TODO 高光有锯齿，尤其是粗糙度接近0时
+            // TODO: specular aliasing, especially when roughness is near 0
                 colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunIntensity);
 
                 ShadeLights(colorAccum.rgb, Surface, DTid, posW);
 
-            //TODO ssao在球面有严重条纹瑕疵，待修复
+            // TODO: SSAO has severe banding artifacts on spheres; needs fix
             //float ssao = texSSAO[DTid];
             
             // Add IBL

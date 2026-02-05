@@ -1,90 +1,129 @@
-﻿#include "InstanceResourceManager.h"
+#include "InstanceResourceManager.h"
 #include "ConstantBuffers.h"
 
-void InstanceResourceManager::Initialize(uint32_t maxMeshConstants,
-	uint32_t maxJoints,
-	uint32_t meshConstantStride,
-	uint32_t jointStride)
+namespace InstanceResourceManager
 {
-	m_MaxMeshConstants = maxMeshConstants;
-	m_MaxJoints = maxJoints;
-	m_MeshConstantStride = meshConstantStride;
-	m_JointStride = jointStride;
+    uint32_t s_MaxMeshConstants = 0;
+    uint32_t s_MaxJoints = 0;
 
-	m_MeshConstantsCPU.Create(L"MeshConstantsAllCPU",
-		maxMeshConstants * meshConstantStride);
+    uint32_t s_MeshConstantStride = 0;
+    uint32_t s_JointStride = 0;
 
-	m_JointsCPU.Create(L"JointsAllCPU",
-		maxJoints * jointStride);
+    uint32_t s_NextMeshConstant = 0;
+    uint32_t s_NextJoint = 0;
 
-	m_MeshConstantsGPU.Create(L"MeshConstantsAll",
-		maxMeshConstants, meshConstantStride);
-	m_JointsGPU.Create(L"JointsAll",
-		maxJoints, jointStride);
+    uint32_t s_InstanceCount = 0;
 
-	m_NextMeshConstant = 0;
-	m_NextJoint = 0;
+    UploadBuffer s_MeshConstantsCPU;
+    UploadBuffer s_JointsCPU;
 
-	m_InstanceCount = 0;
-}
+    ByteAddressBuffer s_MeshConstantsGPU;
+    ByteAddressBuffer s_JointsGPU;
 
-InstanceAllocation InstanceResourceManager::Allocate(uint32_t meshConstCount,
-	uint32_t jointCount)
-{
-	InstanceAllocation alloc{};
-	alloc.instanceID = m_InstanceCount++;
-	alloc.meshConstantBase = m_NextMeshConstant;
-	alloc.meshConstantCount = meshConstCount;
-	alloc.jointBase = m_NextJoint;
-	alloc.jointCount = jointCount;
+	void Initialize(uint32_t maxMeshConstants,
+		uint32_t maxJoints,
+		uint32_t meshConstantStride,
+		uint32_t jointStride)
+	{
+		s_MaxMeshConstants = maxMeshConstants;
+		s_MaxJoints = maxJoints;
+		s_MeshConstantStride = meshConstantStride;
+		s_JointStride = jointStride;
 
-	m_NextMeshConstant += meshConstCount;
-	m_NextJoint += jointCount;
+		s_MeshConstantsCPU.Create(L"MeshConstantsAllCPU",
+			maxMeshConstants * meshConstantStride);
 
-	return alloc;
-}
+		s_JointsCPU.Create(L"JointsAllCPU",
+			maxJoints * jointStride);
 
-void InstanceResourceManager::Cleanup()
-{
-	m_MeshConstantsCPU.Destroy();
-	m_JointsCPU.Destroy();
-	m_MeshConstantsGPU.Destroy();
-	m_JointsGPU.Destroy();
+		s_MeshConstantsGPU.Create(L"MeshConstantsAll",
+			maxMeshConstants, meshConstantStride);
+		s_JointsGPU.Create(L"JointsAll",
+			maxJoints, jointStride);
 
-	m_MaxMeshConstants = 0;
-	m_MaxJoints = 0;
+		s_NextMeshConstant = 0;
+		s_NextJoint = 0;
 
-	m_MeshConstantStride = 0;
-	m_JointStride = 0;
+		s_InstanceCount = 0;
+	}
 
-	m_NextMeshConstant = 0;
-	m_NextJoint = 0;
+	InstanceAllocation Allocate(uint32_t meshConstCount,
+		uint32_t jointCount)
+	{
+		InstanceAllocation alloc{};
+		alloc.instanceID = s_InstanceCount++;
+		alloc.meshConstantBase = s_NextMeshConstant;
+		alloc.meshConstantCount = meshConstCount;
+		alloc.jointBase = s_NextJoint;
+		alloc.jointCount = jointCount;
 
-	m_InstanceCount = 0;
-}
+		s_NextMeshConstant += meshConstCount;
+		s_NextJoint += jointCount;
 
+		return alloc;
+	}
 
-void InstanceResourceManager::FlushBufferUpdate(GraphicsContext& ctx)
-{
-	ctx.TransitionResource(m_MeshConstantsGPU, D3D12_RESOURCE_STATE_COPY_DEST, true);
-	ctx.GetCommandList()->CopyBufferRegion(m_MeshConstantsGPU.GetResource(), 0,
-		m_MeshConstantsCPU.GetResource(), 0, m_MaxMeshConstants * m_MeshConstantStride);
-	ctx.TransitionResource(m_MeshConstantsGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
+	void Cleanup()
+	{
+		s_MeshConstantsCPU.Destroy();
+		s_JointsCPU.Destroy();
+		s_MeshConstantsGPU.Destroy();
+		s_JointsGPU.Destroy();
 
-	ctx.TransitionResource(m_JointsGPU, D3D12_RESOURCE_STATE_COPY_DEST, true);
-	ctx.GetCommandList()->CopyBufferRegion(m_JointsGPU.GetResource(), 0,
-		m_JointsCPU.GetResource(), 0, m_MaxJoints * m_JointStride);
-	ctx.TransitionResource(m_JointsGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
+		s_MaxMeshConstants = 0;
+		s_MaxJoints = 0;
 
-	ctx.FlushResourceBarriers();
-}
+		s_MeshConstantStride = 0;
+		s_JointStride = 0;
 
-D3D12_GPU_VIRTUAL_ADDRESS InstanceResourceManager::GetMeshConstantsBuffer(const InstanceAllocation& a) const
-{
-	return m_MeshConstantsGPU.GetGpuVirtualAddress() + m_MeshConstantStride * a.meshConstantBase;
-}
+		s_NextMeshConstant = 0;
+		s_NextJoint = 0;
 
-D3D12_GPU_VIRTUAL_ADDRESS InstanceResourceManager::GetJointsBuffer(const InstanceAllocation& a) const
-{
-	return m_JointsGPU.GetGpuVirtualAddress() + m_JointStride * a.jointBase;
+		s_InstanceCount = 0;
+	}
+
+	void FlushBufferUpdate(GraphicsContext& ctx)
+	{
+		ctx.TransitionResource(s_MeshConstantsGPU, D3D12_RESOURCE_STATE_COPY_DEST, true);
+		ctx.GetCommandList()->CopyBufferRegion(s_MeshConstantsGPU.GetResource(), 0,
+			s_MeshConstantsCPU.GetResource(), 0, s_MaxMeshConstants * s_MeshConstantStride);
+		ctx.TransitionResource(s_MeshConstantsGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
+
+		ctx.TransitionResource(s_JointsGPU, D3D12_RESOURCE_STATE_COPY_DEST, true);
+		ctx.GetCommandList()->CopyBufferRegion(s_JointsGPU.GetResource(), 0,
+			s_JointsCPU.GetResource(), 0, s_MaxJoints * s_JointStride);
+		ctx.TransitionResource(s_JointsGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
+
+		ctx.FlushResourceBarriers();
+	}
+
+	const ByteAddressBuffer& GetMeshConstantsBuffer()
+	{
+		return s_MeshConstantsGPU;
+	}
+
+	const ByteAddressBuffer& GetJointsBuffer()
+	{
+		return s_JointsGPU;
+	}
+
+	D3D12_GPU_VIRTUAL_ADDRESS GetMeshConstantsBuffer(const InstanceAllocation& a)
+	{
+		return s_MeshConstantsGPU.GetGpuVirtualAddress() + s_MeshConstantStride * a.meshConstantBase;
+	}
+
+	D3D12_GPU_VIRTUAL_ADDRESS GetJointsBuffer(const InstanceAllocation& a)
+	{
+		return s_JointsGPU.GetGpuVirtualAddress() + s_JointStride * a.jointBase;
+	}
+
+	UploadBuffer& GetMeshConstantsCPU()
+	{
+		return s_MeshConstantsCPU;
+	}
+
+	UploadBuffer& GetJointsCPU()
+	{
+		return s_JointsCPU;
+	}
 }

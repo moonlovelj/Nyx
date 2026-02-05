@@ -131,7 +131,7 @@ public:
 
 	void SetMeshShader(const void* Binary, size_t Size);
 	void SetPixelShader(const void* Binary, size_t Size);
-	void SetAmplificationShader(const void* Binary, size_t Size); // 可选 (AS)
+	void SetAmplificationShader(const void* Binary, size_t Size); // Optional (AS)
 
 	void Finalize();
 

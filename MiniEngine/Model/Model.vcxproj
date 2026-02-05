@@ -172,7 +172,6 @@
     <None Include="Shaders\BindlessIndices.hlsli" />
     <None Include="Shaders\Common.hlsli" />
     <None Include="Shaders\CullCommon.hlsli" />
-    <None Include="Shaders\CullingCommon.hlsli" />
     <None Include="Shaders\DataCodec.hlsli" />
     <None Include="Shaders\FillLightGridCS.hlsli" />
     <None Include="Shaders\CommonResources.hlsli" />
@@ -188,59 +187,10 @@
     <None Include="Shaders\WaveUtil.hlsli" />
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="Shaders\CullPass1CS.hlsl" />
-    <FxCompile Include="Shaders\CutoutDepthPS.hlsl">
-      <ShaderType>Pixel</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\CutoutDepthSkinVS.hlsl">
-      <ShaderType>Vertex</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\CutoutDepthVS.hlsl">
-      <ShaderType>Vertex</ShaderType>
-    </FxCompile>
     <FxCompile Include="Shaders\DAGCullCS.hlsl" />
     <FxCompile Include="Shaders\DAGCullPass0CS.hlsl" />
     <FxCompile Include="Shaders\DAGCullPass1CS.hlsl" />
-    <FxCompile Include="Shaders\DefaultNoTangentNoUV1PS.hlsl">
-      <ShaderType>Pixel</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\DefaultNoTangentNoUV1SkinVS.hlsl">
-      <ShaderType>Vertex</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\DefaultNoTangentNoUV1VS.hlsl">
-      <ShaderType>Vertex</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\DefaultNoTangentPS.hlsl">
-      <ShaderType>Pixel</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\DefaultNoTangentSkinVS.hlsl">
-      <ShaderType>Vertex</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\DefaultNoTangentVS.hlsl">
-      <ShaderType>Vertex</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\DefaultNoUV1PS.hlsl">
-      <ShaderType>Pixel</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\DefaultNoUV1SkinVS.hlsl">
-      <ShaderType>Vertex</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\DefaultNoUV1VS.hlsl">
-      <ShaderType>Vertex</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\DefaultSkinVS.hlsl">
-      <ShaderType>Vertex</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\DefaultVS.hlsl">
-      <ShaderType>Vertex</ShaderType>
-    </FxCompile>
     <FxCompile Include="Shaders\DeferredLightingCS.hlsl" />
-    <FxCompile Include="Shaders\DepthOnlySkinVS.hlsl">
-      <ShaderType>Vertex</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\DepthOnlyVS.hlsl">
-      <ShaderType>Vertex</ShaderType>
-    </FxCompile>
     <FxCompile Include="Shaders\DepthViewerPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
@@ -253,28 +203,10 @@
     <FxCompile Include="Shaders\ExportDepthVS.hlsl">
       <ShaderType>Vertex</ShaderType>
     </FxCompile>
-    <FxCompile Include="Shaders\FillCullingResultCS.hlsl" />
     <FxCompile Include="Shaders\FillLightGridCS_16.hlsl" />
     <FxCompile Include="Shaders\FillLightGridCS_24.hlsl" />
     <FxCompile Include="Shaders\FillLightGridCS_32.hlsl" />
     <FxCompile Include="Shaders\FillLightGridCS_8.hlsl" />
-    <FxCompile Include="Shaders\DefaultPS.hlsl">
-      <ShaderType>Pixel</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\FreezeCullCS.hlsl" />
-    <FxCompile Include="Shaders\FrustumCullCS.hlsl" />
-    <FxCompile Include="Shaders\GBufferNoTangentNoUV1PS.hlsl">
-      <ShaderType>Pixel</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\GBufferNoTangentPS.hlsl">
-      <ShaderType>Pixel</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\GBufferNoUV1PS.hlsl">
-      <ShaderType>Pixel</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\GBufferPS.hlsl">
-      <ShaderType>Pixel</ShaderType>
-    </FxCompile>
     <FxCompile Include="Shaders\InstanceCullCS.hlsl" />
     <FxCompile Include="Shaders\InstanceCullPass0CS.hlsl" />
     <FxCompile Include="Shaders\InstanceCullPass1CS.hlsl" />
@@ -285,18 +217,12 @@
     <FxCompile Include="Shaders\ModelViewerVS.hlsl">
       <ShaderType>Vertex</ShaderType>
     </FxCompile>
-    <FxCompile Include="Shaders\OcclusionCullCS.hlsl" />
-    <FxCompile Include="Shaders\OcclusionCullPass1CS.hlsl" />
-    <FxCompile Include="Shaders\OcclusionCullPass2CS.hlsl" />
     <FxCompile Include="Shaders\ResolveVBufferToGBufferCS.hlsl" />
     <FxCompile Include="Shaders\SkyboxPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
     <FxCompile Include="Shaders\SkyboxVS.hlsl">
       <ShaderType>Vertex</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\UberGBufferPS.hlsl">
-      <ShaderType>Pixel</ShaderType>
     </FxCompile>
     <FxCompile Include="Shaders\UberMeshShader.hlsl">
       <ShaderType>Mesh</ShaderType>

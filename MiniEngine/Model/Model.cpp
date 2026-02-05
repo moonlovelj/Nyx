@@ -26,12 +26,9 @@ using namespace Renderer;
 void Model::Destroy()
 {
     m_BoundingSphere = BoundingSphere(kZero);
-    //m_DataBuffer.Destroy();
     m_MaterialConstants.Destroy();
-	//m_MeshletConstants.Destroy();
     m_NumNodes = 0;
     m_NumMeshes = 0;
-    //m_MeshData = nullptr;
     m_SceneGraph = nullptr;
 }
 
@@ -49,44 +46,6 @@ void Model::Render(
     MeshSorter& sorter) const
 {
     sorter;
-    //sorter.SetIndexBuffer({m_DataBuffer.GetGpuVirtualAddress(), (uint32_t)m_DataBuffer.GetBufferSize(), DXGI_FORMAT_R32_UINT });
-
-    // Pointer to current mesh
-  //  const uint8_t* pMesh = m_MeshData.get();
-
-  //  const Frustum& frustum = sorter.GetViewFrustum();
-  //  const AffineTransform& viewMat = (const AffineTransform&)sorter.GetViewMatrix();
-
-  //  uint32_t indirectArgsOffset = 0;
-  //  for (uint32_t i = 0; i < m_NumMeshes; ++i)
-  //  {
-  //      const Mesh& mesh = *(const Mesh*)pMesh;
-		//bool alphaBlend = (mesh.psoFlags & PSOFlags::kAlphaBlend) == PSOFlags::kAlphaBlend;
-		//if (!alphaBlend) continue;
-
-  //      const AffineTransform& sphereXform = sphereTransforms[mesh.meshCBV];
-  //      Scalar scaleXSqr = LengthSquare((Vector3)sphereXform.GetX());
-  //      Scalar scaleYSqr = LengthSquare((Vector3)sphereXform.GetY());
-  //      Scalar scaleZSqr = LengthSquare((Vector3)sphereXform.GetZ());
-  //      Scalar sphereScale = Sqrt(Max(Max(scaleXSqr, scaleYSqr), scaleZSqr));
-
-		//BoundingSphere sphereLS((const XMFLOAT4*)mesh.bounds);
-		//BoundingSphere sphereWS = BoundingSphere(sphereXform * sphereLS.GetCenter(), sphereScale * sphereLS.GetRadius());
-  //      BoundingSphere sphereVS = BoundingSphere(viewMat * sphereWS.GetCenter(), sphereWS.GetRadius());
-
-  //      if (frustum.IntersectSphere(sphereVS))
-  //      {
-  //          float distance = -sphereVS.GetCenter().GetZ() - sphereVS.GetRadius();
-  //          sorter.AddMesh(mesh, distance,
-  //              meshConstants + sizeof(MeshConstants) * mesh.meshCBV,
-  //              m_MaterialConstants.GetGpuVirtualAddress() + sizeof(MaterialConstants) * mesh.materialCBV,
-  //              m_DataBuffer.GetGpuVirtualAddress(), mesh.numJoints > 0 ? meshJoints + sizeof(Joint) * mesh.startJoint : D3D12_GPU_VIRTUAL_ADDRESS_NULL,
-  //              indirectArgsBuffer, indirectArgsOffset * sizeof(GPUDriven::IndirectCommand));
-  //      }
-
-  //      indirectArgsOffset += mesh.numDraws;
-  //      pMesh += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
-  //  }
 }
 
 void ModelInstance::Render(MeshSorter& sorter) const
@@ -132,7 +91,7 @@ ModelInstance::ModelInstance( std::shared_ptr<const Model> sourceModel )
     }
     else
     {
-		m_Alloc = InstanceResourceManager::Get().Allocate(
+		m_Alloc = InstanceResourceManager::Allocate(
 			m_Model->m_NumNodes,
 			m_Model->m_NumJoints
 		);
@@ -192,7 +151,7 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
     }
     else
     {
-		m_Alloc = InstanceResourceManager::Get().Allocate(
+		m_Alloc = InstanceResourceManager::Allocate(
 			m_Model->m_NumNodes,
 			m_Model->m_NumJoints
 		);
@@ -368,70 +327,6 @@ Math::OrientedBox ModelInstance::GetBoundingBox() const
     return m_Locator * m_Model->m_BoundingBox;
 }
 
-//void ModelInstance::CreateMeshIndirectCommands()
-//{
-  //  if (m_Model)
-  //  {
-  //      //const uint32_t totalDraws = std::max(1u, m_Model->GetNumTotalDraws());
-
-		////std::vector<GPUDriven::IndirectCommand> cmds;
-		////cmds.reserve(totalDraws);
-		////std::vector<GPUDriven::IndirectCommand> cmdsZPass;
-  ////      cmdsZPass.reserve(totalDraws);
-
-		//const uint8_t* pMesh = m_Model->m_MeshData.get();
-		//uint32_t cmdIdx = 0;
-  //      for (uint32_t i = 0; i < m_Model->m_NumMeshes; i++)
-  //      {
-  //          const Mesh& mesh = *(const Mesh*)pMesh;
-  //          const bool alphaBlend = (mesh.psoFlags & PSOFlags::kAlphaBlend) == PSOFlags::kAlphaBlend;
-  //          const bool alphaTest = (mesh.psoFlags & PSOFlags::kAlphaTest) == PSOFlags::kAlphaTest;
-		//	const bool skinned = mesh.numJoints > 0;
-
-  //          for (uint32_t j = 0; j < mesh.numDraws; j++)
-  //          {
-  //              Renderer::IndirectCommand cmd;
-
-  //              ASSERT(mesh.ibOffset%4 == 0, "Index buffer error.");
-  //              cmd.InstanceIndex = m_Alloc.instanceID;
-  //              cmd.MeshletIndex = cmdIdx;
-  //              //cmds.push_back(cmd);
-
-  //              // ZPass
-		//		uint32_t stride = alphaTest ? 16u : 12u;
-		//		if (skinned)
-		//			stride += 16;
-
-  //              //cmdsZPass.push_back(cmd);
-
-  //              if (alphaBlend)
-  //              {
-  //                  Renderer::CommandBucketer::Get().AppendIndirectCommand(Renderer::PsoIdx::kPsoTransparent, cmd);
-  //              }
-  //              else
-  //              {
-		//			Renderer::CommandBucketer::Get().AppendIndirectCommand(Renderer::PsoIdx::kPsoShadow, cmd);
-		//			Renderer::CommandBucketer::Get().AppendIndirectCommand(Renderer::PsoIdx::kPsoMain, cmd);
-  //              }
-  //              ++cmdIdx;
-  //          }
-  //          pMesh += sizeof(Mesh) + (mesh.numDraws - 1) * sizeof(Mesh::Draw);
-  //      }
-
-		//m_IndirectArgsBuffer = std::make_shared<IndirectArgsBuffer>();
-        //m_IndirectArgsBuffer->Create(L"Model Indirect Command", totalDraws, sizeof(GPUDriven::IndirectCommand), cmds.data());
-    //}
-//}
-
-//void ModelInstance::DestroyMeshIndirectCommands()
-//{
-//    //if (m_IndirectArgsBuffer)
-//    //{
-//    //    m_IndirectArgsBuffer->Destroy();
-//    //    m_IndirectArgsBuffer.reset();
-//    //}
-//}
-
 void ModelInstance::GatherDrawItems() const
 {
     if (m_Model)
@@ -441,7 +336,7 @@ void ModelInstance::GatherDrawItems() const
         {
             for (uint32_t i = 0; i < mesh->numDraws; i++)
             {
-                CommandBucketer::Get().AddDrawItem({
+                 DrawCommandManager::AddDrawItem({
                      localInstanceID++,
                      mesh->draw[i].rootNodeIndex,
                     });

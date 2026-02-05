@@ -1,4 +1,4 @@
-﻿#include "Common.hlsli"
+#include "Common.hlsli"
 #include "CommonResources.hlsli"
 #include "DataCodec.hlsli"
 #include "ViewMode.hlsli"
@@ -28,7 +28,7 @@ static const uint NORMAL_UV_OFFSET = 4;
 
 struct Derivs
 {
-    float2 uv; // 插值的UV
+    float2 uv; // Interpolated UV
     float2 uv_dx;
     float2 uv_dy;
 };
@@ -144,79 +144,6 @@ MaterialProperties GetMaterialProperties(VSOutput vsOutput, MeshletHeader meshle
     return MatProps;
 }
 
-// 计算二维向量叉乘 (相当于三角形有向面积的2倍)
-float EdgeFunction(float2 a, float2 b, float2 c)
-{
-    return (c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x);
-}
-
-struct BarycentricDerivs
-{
-    float3 lambda; // 重心坐标
-    float3 lambda_correction; // 透视矫正重心坐标
-    float3 ddx_lambda; // 重心坐标对 Screen X 的偏导
-    float3 ddy_lambda; // 重心坐标对 Screen Y 的偏导
-    float3 oneOverW; // 预计算好的 1/w0, 1/w1, 1/w2
-};
-
-BarycentricDerivs CalculateBarycentricsAndDerivs(
-    float3 p[3], // 三角形三个顶点的世界坐标
-    float2 pixelPos, // 当前像素坐标
-    float4x4 viewProj,
-    float2 screenSize)
-{
-    BarycentricDerivs output;
-    
-    float4 clipPos[3];
-    float2 screenPos[3];
-    
-    [unroll]
-    for (int i = 0; i < 3; ++i)
-    {
-        clipPos[i] = mul(viewProj, float4(p[i], 1.0f));
-        // NDC -> Screen
-        float2 ndc = clipPos[i].xy / clipPos[i].w;
-        // 注意 Y 轴方向，DX 是左上角(0,0)，NDC Y向上，所以 ndc.y 要反转
-        screenPos[i] = (float2(ndc.x, -ndc.y) * 0.5f + 0.5f) * screenSize;
-        output.oneOverW[i] = 1.0f / clipPos[i].w; 
-    }
-
-    // 计算面积 (的2倍)
-    float area = EdgeFunction(screenPos[0], screenPos[1], screenPos[2]);
-    float invArea = rcp(sign(area + 1e-30f) * max(abs(area), 1e-7f));
-
-    // 计算重心坐标
-    float2 centerPos = pixelPos + 0.5f;
-    output.lambda.x = EdgeFunction(screenPos[1], screenPos[2], centerPos) * invArea;
-    output.lambda.y = EdgeFunction(screenPos[2], screenPos[0], centerPos) * invArea;
-    output.lambda.z = EdgeFunction(screenPos[0], screenPos[1], centerPos) * invArea;
-
-    // 计算重心坐标的屏幕空间导数 (解析解)
-    // d(lambda)/dx = (V_next.y - V_prev.y) / Area
-    // d(lambda)/dy = (V_prev.x - V_next.x) / Area
-    // 系数是 1.0/Area 还是 1.0/(2*Area) 取决于 EdgeFunction 的实现，EdgeFunction算出的是2倍面积，所以直接除以它即可
-    
-    output.ddx_lambda.x = (screenPos[1].y - screenPos[2].y) * invArea;
-    output.ddx_lambda.y = (screenPos[2].y - screenPos[0].y) * invArea;
-    output.ddx_lambda.z = (screenPos[0].y - screenPos[1].y) * invArea;
-
-    output.ddy_lambda.x = (screenPos[2].x - screenPos[1].x) * invArea;
-    output.ddy_lambda.y = (screenPos[0].x - screenPos[2].x) * invArea;
-    output.ddy_lambda.z = (screenPos[1].x - screenPos[0].x) * invArea;
-    
-    float3 oneOverW = float3(1.0f / clipPos[0].w, 1.0f / clipPos[1].w, 1.0f / clipPos[2].w);
-    
-    // 计算当前像素的 1/w
-    float pixelOneOverW = output.lambda.x * oneOverW.x +
-                          output.lambda.y * oneOverW.y +
-                          output.lambda.z * oneOverW.z;
-    
-    // 最终的重心坐标 (用于插值 UV、Normal、WorldPos 等)
-    output.lambda_correction = (output.lambda * oneOverW) / pixelOneOverW;
-
-    return output;
-}
-
 struct Barycentrics
 {
     float3 Value;
@@ -227,7 +154,7 @@ struct Barycentrics
 /** Calculates perspective correct barycentric coordinates and partial derivatives using screen derivatives. */
 Barycentrics CalculateTriangleBarycentrics(
     float4 clipPos[3],
-    float2 pixelPos, // 当前像素坐标
+    float2 pixelPos,
     float4x4 viewProj,
     float2 ViewInvSize)
 {
@@ -280,10 +207,6 @@ float4 InterpolateOnly(float4 val[3], Barycentrics barycentris)
            val[2] * barycentris.Value.z;
 }
 
-// 属性插值并计算导数 (透视矫正链式法则)
-// val: 顶点的属性数组 (如 uv0, uv1, uv2)
-// w: 顶点的 w 数组 (clipPos.w)
-// bary: 重心数据
 Derivs InterpolateWithDerivs(float2 val[3], Barycentrics barycentris)
 {
     Derivs d;
@@ -452,7 +375,6 @@ void main( uint2 DTid : SV_DispatchThreadID )
         }
         else
         {
-            //SceneColorUAV[DTid] = float4(0, 0, 0, 1);
             GBufferAUAV[DTid] = float4(0, 0, 0, 0);
             GBufferBUAV[DTid] = float4(0, 0, 0, 0);
             GBufferCUAV[DTid] = float4(0, 0, 0, 0);
