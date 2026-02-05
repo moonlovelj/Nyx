@@ -68,10 +68,10 @@ CREATE_APPLICATION( SceneViewer )
 ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 1.0f, -5.0f, 20.0f, 0.1f); // unit: lx
 NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0f, 0.1f );
 NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f);
-NumVar g_SunLightSize("Viewer/Lighting/Sun Light Size", 0.5f, 0.0f, 2.0f, 0.1f);
-NumVar g_SunShadowBias("Viewer/Lighting/Sun Shadow Bias", 4.f, 1.0f, 20.0f, 1.f );
-BoolVar g_SunShadow("Viewer/Lighting/Sun Shadow", false);
-BoolVar g_UseglTFCamera("Viewer/Camera/Use glTF Camera", false);
+//NumVar g_SunLightSize("Viewer/Lighting/Sun Light Size", 0.5f, 0.0f, 2.0f, 0.1f);
+//NumVar g_SunShadowBias("Viewer/Lighting/Sun Shadow Bias", 4.f, 1.0f, 20.0f, 1.f );
+//BoolVar g_SunShadow("Viewer/Lighting/Sun Shadow", false);
+BoolVar g_UseglTFCamera("Camera/Use glTF Camera", false);
 
 void ChangeIBLSet(EngineVar::ActionType);
 void ChangeIBLBias(EngineVar::ActionType);
@@ -384,8 +384,10 @@ void SceneViewer::RenderScene( void )
 
 
         globals.ShadowTexelSize[0] = 1.0f / g_ShadowBuffer.GetWidth();
-        globals.ShadowTexelSize[1] = g_SunLightSize;
-        globals.ShadowTexelSize[2] = g_SunShadowBias;
+        //globals.ShadowTexelSize[1] = g_SunLightSize;
+        //globals.ShadowTexelSize[2] = g_SunShadowBias;
+        globals.ShadowTexelSize[1] = 0.5f;
+        globals.ShadowTexelSize[2] = 4.f;
 
         globals.InvTileDim[0] = 1.0f / Lighting::LightGridDim;
         globals.InvTileDim[1] = 1.0f / Lighting::LightGridDim;
@@ -422,50 +424,40 @@ void SceneViewer::RenderScene( void )
 
         sorter.Sort();
 
-        {
-            ScopedTimer _prof(L"Depth Pre-Pass", gfxContext);
-            sorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);
-        }
+        //{
+        //    ScopedTimer _prof(L"Depth Pre-Pass", gfxContext);
+        //    sorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);
+        //}
 
-        SSAO::Render(gfxContext, m_Camera);
+        //SSAO::Render(gfxContext, m_Camera);
 
-        if (!SSAO::DebugDraw)
+        //if (!SSAO::DebugDraw)
         {
             Lighting::FillLightGrid(gfxContext, m_Camera);
             
             ScopedTimer _outerprof(L"Main Render", gfxContext);
 
-            if (g_SunShadow)
-            {
-                ScopedTimer _prof(L"Sun Shadow Map", gfxContext);
+    //        if (g_SunShadow)
+    //        {
+    //            ScopedTimer _prof(L"Sun Shadow Map", gfxContext);
 
-                MeshSorter shadowSorter(MeshSorter::kShadows);
-				shadowSorter.SetCamera(m_SunShadowCamera);
-				shadowSorter.SetDepthStencilTarget(g_ShadowBuffer);
+    //            MeshSorter shadowSorter(MeshSorter::kShadows);
+				//shadowSorter.SetCamera(m_SunShadowCamera);
+				//shadowSorter.SetDepthStencilTarget(g_ShadowBuffer);
 
-                ModelInstanceManager::Render(shadowSorter);
+    //            ModelInstanceManager::Render(shadowSorter);
 
-                shadowSorter.Sort();
-                shadowSorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);
-            }
+    //            shadowSorter.Sort();
+    //            shadowSorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);
+    //        }
 
-            {
-                Lighting::RenderLightShadows(gfxContext, globals);
-            }
+    //        {
+    //            Lighting::RenderLightShadows(gfxContext, globals);
+    //        }
 
             gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
             gfxContext.ClearColor(g_SceneColorBuffer);
             
-            //{
-            //    ScopedTimer _prof(L"Render Color", gfxContext);
-
-            //    gfxContext.TransitionResource(g_SSAOFullScreen, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-            //    gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_READ);
-            //    gfxContext.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV_DepthReadOnly());
-            //    gfxContext.SetViewportAndScissor(viewport, scissor);
-
-            //    sorter.RenderMeshes(MeshSorter::kOpaque, gfxContext, globals);
-            //}
             {
                 ScopedTimer _prof(L"Render VBuffer", gfxContext);
 				gfxContext.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
@@ -487,43 +479,7 @@ void SceneViewer::RenderScene( void )
 				Renderer::ResolveVBufferToGBuffer(gfxContext, globals);
             }
 
-            {
-                //ScopedTimer _prof(L"Render GBuffer", gfxContext);
-
-                //gfxContext.TransitionResource(g_GBufferA, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
-                //gfxContext.ClearColor(g_GBufferA);
-
-                //gfxContext.TransitionResource(g_GBufferB, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
-                //gfxContext.ClearColor(g_GBufferB);
-
-                //gfxContext.TransitionResource(g_GBufferC, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
-                //gfxContext.ClearColor(g_GBufferC);
-
-                //gfxContext.TransitionResource(g_GBufferD, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
-                //gfxContext.ClearColor(g_GBufferD);
-
-    //            gfxContext.TransitionResource(g_SSAOFullScreen, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    //            gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_READ);
-
-    //            const D3D12_CPU_DESCRIPTOR_HANDLE RTVs[] = {
-    //                g_SceneColorBuffer.GetRTV(),
-    //                g_GBufferA.GetRTV(),
-    //                g_GBufferB.GetRTV(),
-    //                g_GBufferC.GetRTV(),
-    //                g_GBufferD.GetRTV(),
-				//};
-    //            gfxContext.SetRenderTargets(5, RTVs, g_SceneDepthBuffer.GetDSV_DepthReadOnly());
-    //            gfxContext.SetViewportAndScissor(viewport, scissor);
-
-    //            sorter.RenderMeshes(MeshSorter::kGBuffer, gfxContext, globals);
-
-    //            gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-				//Renderer::GetCurrentHZB().GenerateHZB(gfxContext, g_SceneDepthBuffer);
-            }
-
-            {
-                Lighting::RenderDeferredLighting(gfxContext, globals);
-            }
+            Lighting::RenderDeferredLighting(gfxContext, globals);
 
             Renderer::DrawSkybox(gfxContext, m_Camera, viewport, scissor);
 

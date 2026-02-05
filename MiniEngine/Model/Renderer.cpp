@@ -57,7 +57,7 @@ namespace Renderer
 	BoolVar FreezeCull("Renderer/Freeze Cull", false);
     
 	const char* ViewModeLabels[] = { "Lit", "MeshletLOD", "MeshletID", "MeshletTriangle", "MeshID", "InstanceID", "MaterialID"};
-	EnumVar ViewMode("View/View Mode", 0, _countof(ViewModeLabels), ViewModeLabels);
+	EnumVar ViewMode("Visualize/View Mode", 0, _countof(ViewModeLabels), ViewModeLabels);
 
     bool s_Initialized = false;
 
@@ -291,7 +291,8 @@ void Renderer::SetIBLTextures()
     {
 		SetBindlessResourceDescriptor(SRV_IBL_DIFFUSE_LD, GetDefaultTexture(Graphics::kBlackCubeMap));
 		SetBindlessResourceDescriptor(SRV_IBL_SPECULAR_LD, GetDefaultTexture(Graphics::kBlackCubeMap));
-		SetBindlessResourceDescriptor(SRV_IBL_LUT, Graphics::GetDefaultTexture(Graphics::kBlackTransparent2D));
+		SetBindlessResourceDescriptor(SRV_IBL_LUT, GetDefaultTexture(Graphics::kBlackTransparent2D));
+        SetBindlessResourceDescriptor(SRV_IBL_CUBE_MAP, GetDefaultTexture(Graphics::kBlackCubeMap));
     }
 }
 

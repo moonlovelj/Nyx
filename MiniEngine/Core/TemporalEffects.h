@@ -1,4 +1,4 @@
-﻿//
+//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -21,7 +21,7 @@ namespace TemporalEffects
 {
     // Temporal antialiasing involves jittering sample positions and accumulating color over time to 
     // effectively supersample the image.
-    extern BoolVar EnableTAA;
+    //extern BoolVar EnableTAA;
 
     void Initialize( void );
 
