@@ -54,7 +54,8 @@ struct CompiledPrimitive
 {
 	uint32_t rootNodeIndex;         // BVH 在全局节点数组中的起始索引
 	uint32_t indexCount;            // 索引数量（用于统计或调试）
-	Math::BoundingSphere boundsLS;  // 局部空间包围球（Local Space）
+	//Math::BoundingSphere boundsLS;  // 局部空间包围球（Local Space）
+    AxisAlignedBox bboxLS;          // 局部空间包围盒（Local Space）
 	uint16_t materialIdx;
 	uint16_t psoFlags;
 	uint16_t vertexStride;
@@ -217,7 +218,8 @@ static void ParallelCompileMeshes(
 				finalPrim.psoFlags = draw->psoFlags;
 				finalPrim.vertexStride = draw->vertexStride;
 				finalPrim.indexCount = draw->primCount;
-				finalPrim.boundsLS = draw->m_BoundsLS;
+				//finalPrim.boundsLS = draw->m_BoundsLS;
+                finalPrim.bboxLS = draw->m_BBoxLS;
 
 				result.meshData.primitives.push_back(finalPrim);
 				result.logicProducts.push_back(std::move(products));
@@ -354,10 +356,16 @@ static void InstantiateMesh(
 		const auto& prim = cachedData.primitives[i];
 		mesh->draw[i].rootNodeIndex = prim.rootNodeIndex;
 
-		mesh->draw[i].boundingSphere[0] = prim.boundsLS.GetCenter().GetX();
-		mesh->draw[i].boundingSphere[1] = prim.boundsLS.GetCenter().GetY();
-		mesh->draw[i].boundingSphere[2] = prim.boundsLS.GetCenter().GetZ();
-		mesh->draw[i].boundingSphere[3] = prim.boundsLS.GetRadius();
+		//mesh->draw[i].boundingSphere[0] = prim.boundsLS.GetCenter().GetX();
+		//mesh->draw[i].boundingSphere[1] = prim.boundsLS.GetCenter().GetY();
+		//mesh->draw[i].boundingSphere[2] = prim.boundsLS.GetCenter().GetZ();
+		//mesh->draw[i].boundingSphere[3] = prim.boundsLS.GetRadius();
+        mesh->draw[i].boundingBoxMin[0] = prim.bboxLS.GetMin().GetX();
+        mesh->draw[i].boundingBoxMin[1] = prim.bboxLS.GetMin().GetY();
+        mesh->draw[i].boundingBoxMin[2] = prim.bboxLS.GetMin().GetZ();
+        mesh->draw[i].boundingBoxMax[0] = prim.bboxLS.GetMax().GetX();
+        mesh->draw[i].boundingBoxMax[1] = prim.bboxLS.GetMax().GetY();
+        mesh->draw[i].boundingBoxMax[2] = prim.bboxLS.GetMax().GetZ();
 	}
 
 	modelData.m_Meshes.push_back(mesh);

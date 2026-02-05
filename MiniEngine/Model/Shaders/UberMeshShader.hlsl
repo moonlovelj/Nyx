@@ -1,4 +1,4 @@
-﻿#include "Common.hlsli"
+#include "Common.hlsli"
 #include "CommonResources.hlsli"
 #include "DataCodec.hlsli"
 #include "GeometryCommon.hlsli"
@@ -72,6 +72,7 @@ inline bool IsTriangleOutsideFrustum(float4 h0, float4 h1, float4 h2)
 
 inline bool IsTinyTriangle(float4 h0, float4 h1, float4 h2)
 {
+    return false;
     float2 a = GetScreenPos(h0);
     float2 b = GetScreenPos(h1);
     float2 c = GetScreenPos(h2);
@@ -86,7 +87,7 @@ inline bool IsTinyTriangle(float4 h0, float4 h1, float4 h2)
     int2 ipMin = int2(round(pixelMin));
     int2 ipMax = int2(round(pixelMax));
 
-    return (ipMin.x == ipMax.x) || (ipMin.y == ipMax.y);
+    return (ipMin.x == ipMax.x) && (ipMin.y == ipMax.y);
 }
 
 [RootSignature(Renderer_RootSig)]

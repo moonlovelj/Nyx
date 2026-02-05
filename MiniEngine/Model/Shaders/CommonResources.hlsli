@@ -1,4 +1,4 @@
-﻿#ifndef __COMMON_RESOURCES_HLSLI__
+#ifndef __COMMON_RESOURCES_HLSLI__
 #define __COMMON_RESOURCES_HLSLI__
 
 #include "BindlessIndices.hlsli"
@@ -87,7 +87,8 @@ cbuffer CB4 : register(b5)
 
 struct InstanceConstant
 {
-    float4 BoundingSphere; // Local space bounding sphere
+    float3 BBoxMin;
+    float3 BBoxMax;
     uint MeshBufferIdx;
     uint JointBufferIdx;
 };

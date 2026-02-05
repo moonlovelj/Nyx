@@ -378,6 +378,8 @@ void MeshletBuilder::BuildMeshletsFromIndices(
 			tm.Vertices.data(), tm.Triangles.data(),
 			ml.triangle_count, ml.vertex_count);
 
+		ComputeMeshletAABB(buildArgs, tm, tm.BBoxMin, tm.BBoxMax);
+
 		out.emplace_back(std::move(tm));
 	}
 }
@@ -400,6 +402,36 @@ void MeshletBuilder::ComputeMeshletSphere(
 	outSphere[3] = b.radius;
 }
 
+void MeshletBuilder::ComputeMeshletAABB(
+	const MeshletBuildArgs& buildArgs,
+    const Meshlet& m,
+	float outMin[3],
+	float outMax[3])
+{
+	if (m.Vertices.empty())
+	{
+		outMin[0] = outMin[1] = outMin[2] = 0.0f;
+		outMax[0] = outMax[1] = outMax[2] = 0.0f;
+		return;
+	}
+
+	float minX = kInfinity, minY = kInfinity, minZ = kInfinity;
+	float maxX = -kInfinity, maxY = -kInfinity, maxZ = -kInfinity;
+
+	for (uint32_t idx : m.Vertices)
+	{
+		const unsigned char* vPtr = buildArgs.VBData + size_t(idx) * buildArgs.vertexStride;
+		const float* pos = reinterpret_cast<const float*>(vPtr);
+
+		minX = std::min(minX, pos[0]); maxX = std::max(maxX, pos[0]);
+		minY = std::min(minY, pos[1]); maxY = std::max(maxY, pos[1]);
+		minZ = std::min(minZ, pos[2]); maxZ = std::max(maxZ, pos[2]);
+	}
+
+	outMin[0] = minX; outMin[1] = minY; outMin[2] = minZ;
+	outMax[0] = maxX; outMax[1] = maxY; outMax[2] = maxZ;
+}
+
 void MeshletBuilder::MergeSphere(const float a[4], const float b[4], float out[4])
 {
 	Math::Vector3 ca(a[0], a[1], a[2]);
@@ -416,6 +448,20 @@ void MeshletBuilder::MergeSphere(const float a[4], const float b[4], float out[4
 	float newR = 0.5f * (ra + rb + dist);
 	Math::Vector3 newC = ca + dir * (newR - ra);
 	out[0] = newC.GetX(); out[1] = newC.GetY(); out[2] = newC.GetZ(); out[3] = newR;
+}
+
+static void MergeAABB(
+	const float aMin[3], const float aMax[3],
+	const float bMin[3], const float bMax[3],
+	float outMin[3], float outMax[3])
+{
+	outMin[0] = std::min(aMin[0], bMin[0]);
+	outMin[1] = std::min(aMin[1], bMin[1]);
+	outMin[2] = std::min(aMin[2], bMin[2]);
+
+	outMax[0] = std::max(aMax[0], bMax[0]);
+	outMax[1] = std::max(aMax[1], bMax[1]);
+	outMax[2] = std::max(aMax[2], bMax[2]);
 }
 
 static bool SphereContains(const float outer[4], const float inner[4], float eps)
@@ -493,12 +539,26 @@ std::vector<uint32_t> MeshletBuilder::GroupMeshlets(
 		auto& g = newGroups[groupIndex];
 		bool first = true;
 		float acc[4]{};
+		float bboxMin[3]{};
+		float bboxMax[3]{};
 		for (uint32_t mid : g.MeshletIDs)
 		{
-			if (first) { std::memcpy(acc, current[mid].BoundSphere, sizeof(float) * 4); first = false; }
-			else MergeSphere(acc, current[mid].BoundSphere, acc);
+			if (first)
+			{
+				std::memcpy(acc, current[mid].BoundSphere, sizeof(float) * 4);
+				std::memcpy(bboxMin, current[mid].BBoxMin, sizeof(float) * 3);
+				std::memcpy(bboxMax, current[mid].BBoxMax, sizeof(float) * 3);
+				first = false;
+			}
+			else
+			{
+				MergeSphere(acc, current[mid].BoundSphere, acc);
+				MergeAABB(bboxMin, bboxMax, current[mid].BBoxMin, current[mid].BBoxMax, bboxMin, bboxMax);
+			}
 		}
 		std::copy(acc, acc + 4, g.GroupSphere);
+		std::copy(bboxMin, bboxMin + 3, g.GroupBBoxMin);
+		std::copy(bboxMax, bboxMax + 3, g.GroupBBoxMax);
 
 		g.GroupID = static_cast<uint32_t>(groupIndex + groups.size());
 		g.LODLevel = static_cast<uint8_t>(LODLevel);
@@ -798,6 +858,8 @@ GroupPackage MeshletBuilder::SerializeGroup(
 	header.MeshletCount = count;
 	header.ParrentError = group.ParrentError;
 	std::memcpy(header.BoundSphere, group.GroupSphere, sizeof(float) * 4);
+	std::memcpy(header.BBoxMin, group.GroupBBoxMin, sizeof(float) * 3);
+	std::memcpy(header.BBoxMax, group.GroupBBoxMax, sizeof(float) * 3);
 	std::memcpy(pBase, &header, sizeof(GroupHeader));
 
 	// meshlet headers
@@ -823,7 +885,8 @@ GroupPackage MeshletBuilder::SerializeGroup(
 		mh.VertexStride = buildArgs.vertexStride;
 		mh.RefineGroupIndex = (m.RefineGroupID != 0xFFFFFFFF) ? 
 			(groupIdToOrder.at(m.RefineGroupID) + buildArgs.baseGroupIndex) : 0xFFFFFFFF;
-		std::memcpy(mh.BoundSphere, m.BoundSphere, sizeof(float) * 4);
+		std::memcpy(mh.BBoxMin, m.BBoxMin, sizeof(float) * 3);
+		std::memcpy(mh.BBoxMax, m.BBoxMax, sizeof(float) * 3);
 
 		// 拷贝索引数据
 		const size_t triBytes = m.Triangles.size();
@@ -910,6 +973,8 @@ MeshletBuildProducts MeshletBuilder::BuildStreamingData(
 		{
 			Renderer::HierarchyNode node{};
 			std::memcpy(node.BoundSphere, groups[gid].GroupSphere, sizeof(float) * 4);
+			std::memcpy(node.BBoxMin, groups[gid].GroupBBoxMin, sizeof(float) * 3);
+			std::memcpy(node.BBoxMax, groups[gid].GroupBBoxMax, sizeof(float) * 3);
 			node.MaxParrentError = groups[gid].ParrentError;
 			node.Leaf.IsGroup = 1;
 			node.Leaf.GroupIndex = groupIdToOrder[gid] + buildArgs.baseGroupIndex;
@@ -1254,6 +1319,8 @@ std::vector<Renderer::HierarchyNode> MeshletBuilder::BuildHierarchy(
 			parent.Internal.ChildCount = 1;
 			parent.Internal.ChildStartIndex = 1; // 子节点在索引1
 			std::copy(initNodes[0].BoundSphere, initNodes[0].BoundSphere + 4, parent.BoundSphere);
+			std::copy(initNodes[0].BBoxMin, initNodes[0].BBoxMin + 3, parent.BBoxMin);
+			std::copy(initNodes[0].BBoxMax, initNodes[0].BBoxMax + 3, parent.BBoxMax);
 			parent.MaxParrentError = initNodes[0].MaxParrentError;
 
 			// 返回 [父节点, 子节点]
@@ -1349,16 +1416,27 @@ std::vector<Renderer::HierarchyNode> MeshletBuilder::BuildHierarchy(
 			std::copy(sortedCurrent[clusterStarts[c]].BoundSphere,
 				sortedCurrent[clusterStarts[c]].BoundSphere + 4,
 				mergedSphere);
+			float mergedMin[3];
+			float mergedMax[3];
+			std::copy(sortedCurrent[clusterStarts[c]].BBoxMin,
+				sortedCurrent[clusterStarts[c]].BBoxMin + 3,
+				mergedMin);
+			std::copy(sortedCurrent[clusterStarts[c]].BBoxMax,
+				sortedCurrent[clusterStarts[c]].BBoxMax + 3,
+				mergedMax);
 			float maxError = sortedCurrent[clusterStarts[c]].MaxParrentError;
 
 			for (uint32_t j = 1; j < clusterSizes[c]; ++j)
 			{
 				const auto& child = sortedCurrent[clusterStarts[c] + j];
 				MergeSphere(mergedSphere, child.BoundSphere, mergedSphere);
+				MergeAABB(mergedMin, mergedMax, child.BBoxMin, child.BBoxMax, mergedMin, mergedMax);
 				maxError = std::max(maxError, child.MaxParrentError);
 			}
 
 			std::copy(mergedSphere, mergedSphere + 4, parent.BoundSphere);
+			std::copy(mergedMin, mergedMin + 3, parent.BBoxMin);
+			std::copy(mergedMax, mergedMax + 3, parent.BBoxMax);
 			parent.MaxParrentError = maxError;
 
 			parentLevel.push_back(std::move(parent));

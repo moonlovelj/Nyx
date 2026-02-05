@@ -77,6 +77,8 @@ private:
 	{
 		std::vector<uint32_t> MeshletIDs; // 本组包含的 meshlet（指向 current 数组）
 		float GroupSphere[4]{};
+		float GroupBBoxMin[3]{};
+		float GroupBBoxMax[3]{};
 		float ParrentError = 0;
 		uint32_t GroupID = 0xFFFFFFFF;
 		uint8_t LODLevel = 0xFF;
@@ -87,6 +89,8 @@ private:
 		std::vector<uint32_t> Vertices; // 原始顶点索引
 		std::vector<uint8_t>  Triangles;// 局部索引
 		float BoundSphere[4]{};
+		float BBoxMin[3]{};
+		float BBoxMax[3]{};
 		uint32_t GroupChildIndex = 0xFFFFFFFF; // 组内子索引
 		uint32_t GroupID = 0;
 		uint32_t RefineGroupID = 0xFFFFFFFF;// LOD0没有精细组
@@ -107,6 +111,12 @@ private:
 		const MeshletBuildArgs& buildArgs,
 		const Meshlet& m,
 		float outSphere[4]);
+
+    static void ComputeMeshletAABB(
+        const MeshletBuildArgs& buildArgs,
+        const Meshlet& m,
+        float outMin[3],
+        float outMax[3]);
 
 	// 合并两个球（Ritter 合并）
 	static void MergeSphere(const float a[4], const float b[4], float out[4]);

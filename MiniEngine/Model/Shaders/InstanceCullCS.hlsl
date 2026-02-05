@@ -1,4 +1,4 @@
-﻿#ifndef __INSTANCE_CULL_CS_HLSL__
+#ifndef __INSTANCE_CULL_CS_HLSL__
 #define __INSTANCE_CULL_CS_HLSL__
 
 #include "Common.hlsli"
@@ -22,19 +22,33 @@ void main(uint3 DTid : SV_DispatchThreadID)
         DrawItem item = drawItems[DTid.x];
         InstanceConstant instanceConstant = GetInstanceConstantSRV(item.InstanceIndex);
         MeshConstant meshConstant = GetMeshConstantSRV(instanceConstant.MeshBufferIdx);
-        bool bInFrustrum = IsSphereInFrustum(meshConstant.WorldMatrix, instanceConstant.BoundingSphere);
-        bool bVisible = bInFrustrum;
+        //bool bInFrustrum = IsSphereInFrustum(meshConstant.WorldMatrix, instanceConstant.BoundingSphere);
+
+        
+        bool bVisible = false;
 #ifdef INSTANCE_CULL_PASS0
-        bVisible = bVisible && 
-            IsSphereNotOccluded(GetPrevSceneHZBSRV(FrameIndexMod2), PrevViewerPos, 
-                            meshConstant.WorldMatrix, 
-        PrevViewMatrix, PrevProjMatrix, PrevViewProjMatrix, instanceConstant.BoundingSphere);
-#endif         
+        float4 clipMin, clipMax;
+        bool bClipValid;
+        bVisible = BBoxIntersectFrustum(instanceConstant.BBoxMin, instanceConstant.BBoxMax,
+                                        meshConstant.WorldMatrix,
+                                        PrevViewProjMatrix,
+                                        clipMin, clipMax,
+                                        bClipValid);
+
+        bVisible = bVisible && (!bClipValid || (LargeEnough(clipMin, clipMax, 1.0) && HZBVisible(GetPrevSceneHZBSRV(FrameIndexMod2), clipMin, clipMax)));
+#endif
+        
 #ifdef INSTANCE_CULL_PASS1
-        bVisible = bVisible && 
-            IsSphereNotOccluded(GetCurrentSceneHZBSRV(FrameIndexMod2), ViewerPos, 
-                            meshConstant.WorldMatrix, 
-        ViewMatrix, ProjMatrix, ViewProjMatrix, instanceConstant.BoundingSphere);
+        float4 clipMin, clipMax;
+        bool bClipValid;
+        bVisible = BBoxIntersectFrustum(instanceConstant.BBoxMin, instanceConstant.BBoxMax,
+                                        meshConstant.WorldMatrix,
+                                        ViewProjMatrix,
+                                        clipMin, clipMax,
+                                        bClipValid);
+        
+        bVisible = bVisible && (!bClipValid || (LargeEnough(clipMin, clipMax, 1.0) &&
+            HZBVisible(GetCurrentSceneHZBSRV(FrameIndexMod2), clipMin, clipMax)));
 #endif
         
         uint WaveVisibleCount = WaveActiveCountBits(bVisible);
@@ -61,26 +75,6 @@ void main(uint3 DTid : SV_DispatchThreadID)
             taskQueueUAV.Store(byteOffset, item.InstanceIndex);
             taskQueueUAV.Store(byteOffset + 4, item.NodeIndex);
         }
-        
-//#ifdef INSTANCE_CULL_PASS0
-
-//        // Pass1
-//        if (visible & CULLING_FRUSTUM_VISIBLE &&
-//            IsSphereVisible(GetPrevSceneHZBSRV(FrameIndexMod2), PrevViewerPos, PrevViewProjMatrix, WorldMatrix, meshletConstant.BoundingSphere))
-//        {
-//            visibleFlagUAV.Store(index * 4, visible | CULLING_OCCLUSION_PASS1_VISIBLE);
-//        }
-//#endif
-        
-//#ifdef INSTANCE_CULL_PASS1
-        
-//        // Pass2
-//        if ((visible & CULLING_FRUSTUM_VISIBLE) && !(visible & CULLING_OCCLUSION_PASS1_VISIBLE) &&
-//            IsSphereVisible(GetCurrentSceneHZBSRV(FrameIndexMod2), ViewerPos, ViewProjMatrix, WorldMatrix, meshletConstant.BoundingSphere))
-//        {
-//            visibleFlagUAV.Store(index * 4, visible | CULLING_OCCLUSION_PASS2_VISIBLE);
-//        }
-//#endif
    }
 }
     

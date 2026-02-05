@@ -1,4 +1,4 @@
-﻿#ifndef __DAG_CULL_HLSL__
+#ifndef __DAG_CULL_HLSL__
 #define __DAG_CULL_HLSL__
 #include "Common.hlsli"
 #include "CommonResources.hlsli"
@@ -55,21 +55,35 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
     
     InstanceConstant inst = GetInstanceConstantSRV(instanceIndex);
     MeshConstant meshInstance = GetMeshConstantSRV(inst.MeshBufferIdx);
-    const bool bInFrustrum = IsSphereInFrustum(meshInstance.WorldMatrix, node.BoundSphere);
-    const bool bLargeEnough = !IsSphereTiny(meshInstance.WorldMatrix, node.BoundSphere, TINY_NODE_PIXEL_DIAMETER);
-    const bool bTestForLod = !TestForLod(meshInstance.WorldMatrix, ViewerPos, node.MaxParrentError, node.BoundSphere);
-    bool bNotOccluded = true;
+
+    
+    Texture2D<float> hzbTexture;
 #ifdef DAG_CULL_PASS0
-    bNotOccluded = IsSphereNotOccluded(GetPrevSceneHZBSRV(FrameIndexMod2), PrevViewerPos, 
-                            meshInstance.WorldMatrix, PrevViewMatrix, PrevProjMatrix, PrevViewProjMatrix, node.BoundSphere);
+    hzbTexture = GetPrevSceneHZBSRV(FrameIndexMod2);
+    float4 clipMin, clipMax;
+    bool bClipValid;
+    const bool bInFrustrum = BBoxIntersectFrustum(node.BBoxMin, node.BBoxMax,
+                                        meshInstance.WorldMatrix,
+                                        PrevViewProjMatrix,
+                                        clipMin, clipMax,
+                                        bClipValid);
+    bVisible = bVisible && bInFrustrum && (!bClipValid || (LargeEnough(clipMin, clipMax, 1.0) && HZBVisible(hzbTexture, clipMin, clipMax)));
 #endif
 #ifdef DAG_CULL_PASS1
-    bNotOccluded = IsSphereNotOccluded(GetCurrentSceneHZBSRV(FrameIndexMod2), ViewerPos, 
-                            meshInstance.WorldMatrix, ViewMatrix, ProjMatrix, ViewProjMatrix, node.BoundSphere);
+    hzbTexture = GetCurrentSceneHZBSRV(FrameIndexMod2);
+    float4 clipMin, clipMax;
+    bool bClipValid;
+    const bool bInFrustrum = BBoxIntersectFrustum(node.BBoxMin, node.BBoxMax,
+                                        meshInstance.WorldMatrix,
+                                        ViewProjMatrix,
+                                        clipMin, clipMax,
+                                        bClipValid);
+
+     bVisible = bVisible && bInFrustrum && (!bClipValid || (LargeEnough(clipMin, clipMax, 1.0) && HZBVisible(hzbTexture, clipMin, clipMax)));
 #endif
-    
-    
-    bVisible = bVisible && bInFrustrum && bTestForLod && bNotOccluded && bLargeEnough;
+
+    bVisible = bVisible &&
+    !TestForLod(meshInstance.WorldMatrix, ViewerPos, node.MaxParrentError, node.BoundSphere);
     
     bool bIsLeaf = node.IsGroup();
 
@@ -212,49 +226,55 @@ void ProcessClusterBatch(uint clusterBatchStartIndex, uint clusterBatchReadySize
         //+ meshletIndexInGroup * sizeof(MeshletHeader)));
         InstanceConstant inst = GetInstanceConstantSRV(meshletPayload.InstanceIndex);
         MeshConstant meshInstance = GetMeshConstantSRV(inst.MeshBufferIdx);
-        const bool bIsInFustrum = IsSphereInFrustum(meshInstance.WorldMatrix, meshletHeader.BoundSphere);
-        const bool bLargeEnough = !IsSphereTiny(meshInstance.WorldMatrix, meshletHeader.BoundSphere, TINY_CLUSTER_PIXEL_DIAMETER);
-        bool bNotOccluded = true;
-#ifdef DAG_CULL_PASS0
-        bNotOccluded = IsSphereNotOccluded(GetPrevSceneHZBSRV(FrameIndexMod2), PrevViewerPos, 
-                            meshInstance.WorldMatrix, PrevViewMatrix, PrevProjMatrix, PrevViewProjMatrix, meshletHeader.BoundSphere);
-#endif
-#ifdef DAG_CULL_PASS1
-        const bool bNotOccludedPass0 = IsSphereNotOccluded(GetPrevSceneHZBSRV(FrameIndexMod2), PrevViewerPos, 
-                            meshInstance.WorldMatrix, PrevViewMatrix, PrevProjMatrix, PrevViewProjMatrix, meshletHeader.BoundSphere);
-        
-        bNotOccluded = (!bNotOccludedPass0) && IsSphereNotOccluded(GetCurrentSceneHZBSRV(FrameIndexMod2), ViewerPos, 
-                            meshInstance.WorldMatrix, ViewMatrix, ProjMatrix, ViewProjMatrix, meshletHeader.BoundSphere);
-#endif
-        
-        bool bTestForLod = true;
-        if (meshletHeader.RefineGroupIndex == INVALID_ID)
-        {
-            bTestForLod = true;
-        }
-        else
-        {
-            GroupDataLocation refineGroupDataLocation = groupDataLocationSRV[meshletHeader.RefineGroupIndex];
-            ByteAddressBuffer refineGometryChunksBuffer = GetGeometryChunksBufferSRV(refineGroupDataLocation.ChunkIndex);
-            GroupHeader refineGroupHeader = refineGometryChunksBuffer.Load < GroupHeader > (refineGroupDataLocation.ByteOffset);
-            //float projectError = GetScreenError(meshInstance.WorldMatrix, refineGroupHeader.ParrentError, refineGroupHeader.BoundSphere);
-            //bLodCulled = projectError > PIXEL_ERROR_THRESHOLD;
-            
-            bTestForLod = TestForLod(meshInstance.WorldMatrix, ViewerPos, refineGroupHeader.ParrentError, refineGroupHeader.BoundSphere);
-        }
-        
-        if (!bTestForLod)
-        {
-            GroupDataLocation refineGroupDataLocation = groupDataLocationSRV[meshletHeader.RefineGroupIndex];
-            if (refineGroupDataLocation.ChunkIndex == INVALID_ID)
-                bTestForLod = true;
-        }
-        
-        //bTestForLod |= (groupDataLocation.ChunkIndex != INVALID_ID);
-        
         bool bAlphaBlend = (meshletHeader.GetPSOFlags() & PSO_ALPHA_BLEND);
+        float4 clipMin, clipMax;
+        bool bClipValid;
+        bool bClusterVisible = BBoxIntersectFrustum(meshletHeader.BBoxMin, meshletHeader.BBoxMax,
+                                        meshInstance.WorldMatrix,
+                                        PrevViewProjMatrix,
+                                        clipMin, clipMax,
+                                        bClipValid);
+
+        bClusterVisible = bClusterVisible && (!bClipValid || (LargeEnough(clipMin, clipMax, 1.0) &&
+            HZBVisible(GetPrevSceneHZBSRV(FrameIndexMod2), clipMin, clipMax)));
+        
+        if (!bClusterVisible)
+        {
+
+#ifdef DAG_CULL_PASS1
+
+        bClusterVisible = BBoxIntersectFrustum(meshletHeader.BBoxMin, meshletHeader.BBoxMax,
+                                        meshInstance.WorldMatrix,
+                                        ViewProjMatrix,
+                                        clipMin, clipMax,
+                                        bClipValid);
+            
+        bClusterVisible = bClusterVisible && (!bClipValid || (LargeEnough(clipMin, clipMax, 1.0) &&
+            HZBVisible(GetCurrentSceneHZBSRV(FrameIndexMod2), clipMin, clipMax)));
+#endif
+        }
+        
+        bClusterVisible = bClusterVisible && !bAlphaBlend;
+
+        if (bClusterVisible)
+        {
+            if (meshletHeader.RefineGroupIndex != INVALID_ID)
+            {
+                GroupDataLocation refineGroupDataLocation = groupDataLocationSRV[meshletHeader.RefineGroupIndex];
+                ByteAddressBuffer refineGometryChunksBuffer = GetGeometryChunksBufferSRV(refineGroupDataLocation.ChunkIndex);
+                GroupHeader refineGroupHeader = refineGometryChunksBuffer.Load < GroupHeader > (refineGroupDataLocation.ByteOffset);
+                bClusterVisible = TestForLod(meshInstance.WorldMatrix, ViewerPos, refineGroupHeader.ParrentError, refineGroupHeader.BoundSphere);
+                if (!bClusterVisible)
+                {
+                    GroupDataLocation refineGroupDataLocation = groupDataLocationSRV[meshletHeader.RefineGroupIndex];
+                    if (refineGroupDataLocation.ChunkIndex == INVALID_ID)
+                        bClusterVisible = true;
+                }
+            }  
+        }
+
         uint level = meshletHeader.GetLODLevel();
-        if (bIsInFustrum && bNotOccluded && bTestForLod && !bAlphaBlend && bLargeEnough)
+        if (bClusterVisible)
         {
             globallycoherent RWStructuredBuffer<QueueState> taskStateUAV = GetTaskQueueStateBufferUAV();
             uint writeOffset;

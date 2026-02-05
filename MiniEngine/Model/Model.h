@@ -79,7 +79,8 @@ struct Mesh
 		//uint16_t meshCBV;       // Index of mesh constant buffer
 		//uint16_t materialCBV;   // Index of material constant buffer
 		//uint16_t psoFlags;      // Flags needed to request a PSO
-		float boundingSphere[4];  // Local space bounding sphere
+		float boundingBoxMin[3];  // Local space AABB min
+		float boundingBoxMax[3];  // Local space AABB max
 		uint32_t rootNodeIndex; // 指向 m_Nodes 数组的根节点
 		//uint32_t groupMetadataStartIndex; // 指向 m_GroupMetadatas 数组
 		//uint32_t groupCount; // 有多少个 group

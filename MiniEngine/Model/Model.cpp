@@ -1,4 +1,4 @@
-﻿//
+//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -109,7 +109,9 @@ void ModelInstance::SetupInstanceData(InstanceConstants* instanceContants) const
             InstanceConstants& data = instanceContants[localInstanceIdx++];
             data.MeshBufferIdx = meshPtr->matrixIdx + m_Alloc.meshConstantBase;
 			data.JointBufferIdx = 0XFFFFFFFF;
-			std::memcpy(data.BoundingSphere, meshPtr->draw[i].boundingSphere, sizeof(float) * 4);
+			//std::memcpy(data.BoundingSphere, meshPtr->draw[i].boundingSphere, sizeof(float) * 4);
+            std::memcpy(data.BBoxMin, meshPtr->draw[i].boundingBoxMin, sizeof(float) * 3);
+            std::memcpy(data.BBoxMax, meshPtr->draw[i].boundingBoxMax, sizeof(float) * 3);
         }
     }
 }

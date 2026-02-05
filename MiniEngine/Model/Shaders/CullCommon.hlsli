@@ -1,13 +1,13 @@
-﻿#ifndef __CULLING_COMMON_HLSLI__
+#ifndef __CULLING_COMMON_HLSLI__
 #define __CULLING_COMMON_HLSLI__
 
 #include "Common.hlsli"
 
 #define FLT_MAX 3.402823466e+38
+#define CULL_EPSILON 1.2e-07f
+#define DEPTH_EPSILON (2.0 / float(1 << 24))
 
 #define DESIRED_FOOTPRINT_PIXELS 4
-#define TINY_NODE_PIXEL_DIAMETER 8.0f
-#define TINY_CLUSTER_PIXEL_DIAMETER 4.0f
 
 bool IsSphereInFrustum(float4x4 WorldMatrix, float4 sphereLS)
 {
@@ -43,25 +43,72 @@ bool IsSphereInFrustum(float4x4 WorldMatrix, float4 sphereLS)
     return true;
 }
 
-bool IsSphereTiny(float4x4 WorldMatrix, float4 sphereLS, float pixelThreshold)
+float4 GetBoxCorner(float3 bboxMin, float3 bboxMax, int n)
 {
-    float3 column0 = float3(WorldMatrix._m00, WorldMatrix._m10, WorldMatrix._m20);
-    float3 column1 = float3(WorldMatrix._m01, WorldMatrix._m11, WorldMatrix._m21);
-    float3 column2 = float3(WorldMatrix._m02, WorldMatrix._m12, WorldMatrix._m22);
-    float sphereScale = max(length(column0), max(length(column1), length(column2)));
+    bool3 useMax = bool3((n & 1) != 0, (n & 2) != 0, (n & 4) != 0);
+    return float4(lerp(bboxMin, bboxMax, useMax), 1);
+}
 
-    float4 sphereWS = float4(mul(WorldMatrix, float4(sphereLS.xyz, 1)).xyz, sphereScale * sphereLS.w);
-    float4 sphereVS = float4(mul(ViewMatrix, float4(sphereWS.xyz, 1)).xyz, sphereWS.w);
+float4 GetClip(float4 hPos, out bool valid)
+{
+    valid = hPos.w >= CULL_EPSILON;
+    return float4(hPos.xyz / hPos.w, hPos.w);
+}
 
-    float viewZ = -sphereVS.z;
-    if (viewZ <= 1e-6f || viewZ <= sphereVS.w)
-        return false;
+uint GetCullBits(float4 hPos)
+{
+    uint cullBits = 0;
+    cullBits |= hPos.x < -hPos.w ? 1 : 0;
+    cullBits |= hPos.x > hPos.w ? 2 : 0;
+    cullBits |= hPos.y < -hPos.w ? 4 : 0;
+    cullBits |= hPos.y > hPos.w ? 8 : 0;
+    cullBits |= hPos.z < 0 ? 16 : 0;
+    cullBits |= hPos.z > hPos.w ? 32 : 0;
+    cullBits |= hPos.w <= 0 ? 64 : 0;
+    return cullBits;
+}
 
-    float cotHalfFovY = ProjMatrix._m11;
-    float screenErrorConstant = cotHalfFovY * ViewportHeight * 0.5f;
+bool BBoxIntersectFrustum(
+    float3 bboxMin, float3 bboxMax,
+    float4x4 worldMatrix,
+    float4x4 viewProjMatrix,
+    out float4 oClipmin, out float4 oClipmax, out bool oClipvalid)
+{
+    float4x4 worldViewProj = mul(viewProjMatrix, worldMatrix);
+    bool valid;
+    float4 hPos = mul(worldViewProj, GetBoxCorner(bboxMin, bboxMax, 0));
+    float4 clip = GetClip(hPos, valid);
+    uint bits = GetCullBits(hPos);
+    float4 clipMin = clip;
+    float4 clipMax = clip;
+    bool clipValid = valid;
 
-    float radiusPixels = sphereVS.w * screenErrorConstant / viewZ;
-    return (radiusPixels * 2.0f) < pixelThreshold;
+    [[unroll]]
+    for (int n = 1; n < 8; n++)
+    {
+        hPos = mul(worldViewProj, GetBoxCorner(bboxMin, bboxMax, n));
+        clip = GetClip(hPos, valid);
+        bits &= GetCullBits(hPos);
+
+        clipMin = min(clipMin, clip);
+        clipMax = max(clipMax, clip);
+
+        clipValid = clipValid && valid;
+    }
+
+    oClipvalid = clipValid;
+    oClipmin = float4(clamp(clipMin.xy, float2(-1, -1), float2(1, 1)), clipMin.zw);
+    oClipmax = float4(clamp(clipMax.xy, float2(-1, -1), float2(1, 1)), clipMax.zw);
+
+    return bits == 0;
+}
+
+bool LargeEnough(float4 clipMin, float4 clipMax, float threshold)
+{
+    //return true;
+    float2 rect = (clipMax.xy - clipMin.xy) * 0.5 * float2(ViewportWidth, ViewportHeight);
+    float2 clipThreshold = float2(threshold, threshold);
+    return any(rect >= clipThreshold);
 }
 
 float GetMipLevel(float2 texelRectSize)
@@ -69,80 +116,6 @@ float GetMipLevel(float2 texelRectSize)
     float maxDim = max(texelRectSize.x, texelRectSize.y);
     float logicalMip = floor(log2(max(maxDim, 1.0)));
     return max(logicalMip, 0.0);
-}
-
-float4 ComputeAABBUVRect(float3 boxMin, float3 boxMax, float4x4 vpMatrix)
-{
-    float3 corners[8];
-    corners[0] = float3(boxMin.x, boxMin.y, boxMin.z);
-    corners[1] = float3(boxMax.x, boxMin.y, boxMin.z);
-    corners[2] = float3(boxMin.x, boxMax.y, boxMin.z);
-    corners[3] = float3(boxMax.x, boxMax.y, boxMin.z);
-    corners[4] = float3(boxMin.x, boxMin.y, boxMax.z);
-    corners[5] = float3(boxMax.x, boxMin.y, boxMax.z);
-    corners[6] = float3(boxMin.x, boxMax.y, boxMax.z);
-    corners[7] = float3(boxMax.x, boxMax.y, boxMax.z);
-
-    float2 uvMin = float2(FLT_MAX, FLT_MAX);
-    float2 uvMax = float2(-FLT_MAX, -FLT_MAX);
-
-    uint validCount = 0;
-
-    [unroll]
-        for (uint i = 0; i < 8; ++i)
-        {
-            float4 clip = mul(vpMatrix, float4(corners[i], 1.0));
-
-            if (clip.w <= 0.0f)
-                continue;
-
-            float3 ndc = clip.xyz / clip.w;
-            float2 uv = ndc.xy * 0.5f + 0.5f;
-            uv.y = 1.0f - uv.y;
-
-            uvMin = min(uvMin, uv);
-            uvMax = max(uvMax, uv);
-            validCount++;
-        }
-
-    if (validCount == 0)
-    {
-        return float4(FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX);
-    }
-
-    if (uvMax.x < 0 || uvMin.x > 1 || uvMax.y < 0 || uvMin.y > 1)
-    {
-        return float4(FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX);
-    }
-
-    float4 uvRect = float4(uvMin.x, uvMin.y, uvMax.x, uvMax.y);
-    uvRect = saturate(uvRect);
-
-    return uvRect;
-}
-
-float SampleHZBMinDepth(Texture2D<float> hzb, float4 texUVRect, float mip)
-{
-    float2 rectSize = float2(texUVRect.z - texUVRect.x, texUVRect.w - texUVRect.y);
-    // 采用4x4采样网格，避免深度空洞产生的错误剔除
-    const uint grid = 4;
-    float2 step = rectSize / (grid - 1);
-    float minDepth = FLT_MAX;
-    float2 start = float2(texUVRect.x, texUVRect.y);
-
-    [unroll]
-        for (uint iy = 0; iy < grid; ++iy)
-        {
-            float v = start.y + step.y * iy;
-            [unroll]
-                for (uint ix = 0; ix < grid; ++ix)
-                {
-                    float u = start.x + step.x * ix;
-                    float d = hzb.SampleLevel(pointSampler, float2(u, v), mip).r;
-                    minDepth = min(minDepth, d);
-                }
-        }
-    return minDepth;
 }
 
 float2 ProjectSphere(float x, float z, float r, float ResultScale)
@@ -211,49 +184,31 @@ float4 LoadHZBRow4(Texture2D<float> hzb, float4 XCoords, float YCoord, float Mip
         hzb.SampleLevel(pointSampler, float2(XCoords.w, YCoord), MipLevel).r);
 }
 
-bool IsSphereNotOccluded(
+bool HZBVisible(
     Texture2D<float> hzb,
-    float3 viewPos,
-    float4x4 WorldMatrix,
-    float4x4 viewMatrix,
-    float4x4 projMatrix,
-    float4x4 vpMatrix,
-    float4 sphereLS)
+    float4 clipMin,
+    float4 clipMax)
 {
-    float3 column0 = float3(WorldMatrix._m00, WorldMatrix._m10, WorldMatrix._m20);
-    float3 column1 = float3(WorldMatrix._m01, WorldMatrix._m11, WorldMatrix._m21);
-    float3 column2 = float3(WorldMatrix._m02, WorldMatrix._m12, WorldMatrix._m22);
-    float sphereScale = max(length(column0), max(length(column1), length(column2)));
-    float4 sphereWS = float4(mul(WorldMatrix, float4(sphereLS.xyz, 1)).xyz, sphereScale * sphereLS.w);
-    float4 sphereVS = float4(mul(viewMatrix, float4(sphereWS.xyz, 1)).xyz, sphereWS.w);
-
-    return true;
-
-   if (abs(sphereVS.z) < sphereVS.w + 0.1)
-        return true;
-
-    float4 ndcCullRect = SphereToScreenRect(sphereVS.xyz, sphereVS.w, projMatrix);
-
-    if (ndcCullRect.z < -1 || ndcCullRect.x > 1 || ndcCullRect.w < -1 || ndcCullRect.y > 1)
+    if (clipMin.x > 1 || clipMin.y > 1 || clipMax.x < -1 || clipMax.y < -1)
         return false;
 
-    return true;
+    // uvRect minx miny maxx maxy
+    float4 uvRect = saturate(float4(clipMin.xy, clipMax.xy) * float2(0.5, -0.5).xyxy + 0.5).xwzy;
 
-    float4 uvRect = saturate(float4(ndcCullRect.xy, ndcCullRect.zw) * float2(0.5, -0.5).xyxy + 0.5).xwzy;
     int4 pixelsRect = int4(uvRect * float4(ViewportWidth, ViewportHeight, ViewportWidth, ViewportHeight) + float4(0.5f, 0.5f, -0.5f, -0.5f));
-	pixelsRect.xy = min(pixelsRect.xy, pixelsRect.zw);
-	pixelsRect.zw = max(pixelsRect.xy, pixelsRect.zw);
+    pixelsRect.xy = min(pixelsRect.xy, pixelsRect.zw);
+    pixelsRect.zw = max(pixelsRect.xy, pixelsRect.zw);
 
     int4 hzbPixelRect = pixelsRect >> 1;
     int HZBLevel = MipLevelForRect(hzbPixelRect, DESIRED_FOOTPRINT_PIXELS);
-	hzbPixelRect >>= HZBLevel;
+    hzbPixelRect >>= HZBLevel;
 
     // TexelSize = (1 / HZBSize) * exp2(MipLevel);
-    float2 TexelSize = asfloat(0x7F000000 - asint(HZBSizeAndInv.xy) + (HZBLevel << 23));		// Assumes HZB is po2
+    float2 TexelSize = asfloat(0x7F000000 - asint(HZBSizeAndInv.xy) + (HZBLevel << 23)); // Assumes HZB is po2
 
     float4 XCoords = (min(hzbPixelRect.x + int4(0, 1, 2, 3), hzbPixelRect.z) + 0.5f) * TexelSize.x;
     float4 YCoords = (min(hzbPixelRect.y + int4(0, 1, 2, 3), hzbPixelRect.w) + 0.5f) * TexelSize.y;
-    
+
     float4 Depth0 = LoadHZBRow4(hzb, XCoords, YCoords.x, HZBLevel);
     float4 Depth1 = LoadHZBRow4(hzb, XCoords, YCoords.y, HZBLevel);
     float4 Depth2 = LoadHZBRow4(hzb, XCoords, YCoords.z, HZBLevel);
@@ -261,10 +216,7 @@ bool IsSphereNotOccluded(
     float4 Depth = min(min(min(Depth0, Depth1), Depth2), Depth3);
     float MinDepth = min(min(min(Depth.x, Depth.y), Depth.z), Depth.w);
 
-    float closestZVS = sphereVS.z + sphereVS.w;
-    float sphereClosestDepth = (projMatrix._m22 * closestZVS + projMatrix._m23) / -closestZVS;
-    const float DepthBias = 0;//0.0001f;
-    return sphereClosestDepth + DepthBias >= MinDepth;
+    return clipMax.z + DEPTH_EPSILON >= MinDepth;
 }
 
 bool TestForLod(float4x4 WorldMatrix, float3 CameraPos, float error, float4 sphereLS)
@@ -275,7 +227,6 @@ bool TestForLod(float4x4 WorldMatrix, float3 CameraPos, float error, float4 sphe
     float sphereScale = max(length(column0), max(length(column1), length(column2)));
 
     float4 sphereWS = float4(mul(WorldMatrix, float4(sphereLS.xyz, 1)).xyz, sphereScale * sphereLS.w);
-    //float4 sphereVS = float4(mul(ViewMatrix, float4(sphereWS.xyz, 1)).xyz, sphereWS.w);
     float errorWS = error * sphereScale;
 
 	const float lod_factor = 1.0;

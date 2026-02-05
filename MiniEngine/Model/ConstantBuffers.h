@@ -1,4 +1,4 @@
-﻿//
+//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -20,7 +20,8 @@
 
 struct InstanceConstants
 {
-	float BoundingSphere[4]; // Local space bounding sphere
+    float BBoxMin[3];
+    float BBoxMax[3];
     uint32_t MeshBufferIdx;
     uint32_t JointBufferIdx;
 };

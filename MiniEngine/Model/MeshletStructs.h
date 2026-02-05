@@ -16,6 +16,8 @@ namespace Renderer
 	{
 #ifdef __cplusplus
 		float BoundSphere[4];
+		float BBoxMin[3];
+		float BBoxMax[3];
 		float MaxParrentError;
 		union {
 			struct {
@@ -32,12 +34,16 @@ namespace Renderer
 		};
 #else
 		float4 BoundSphere;
+		float3 BBoxMin;
+		float3 BBoxMax;
 		float MaxParrentError;
 		uint NodeData;
 
 		void Init()
 		{
 			BoundSphere = float4(0.0f, 0.0f, 0.0f, 0.0f);
+			BBoxMin = float3(0.0f, 0.0f, 0.0f);
+			BBoxMax = float3(0.0f, 0.0f, 0.0f);
 			MaxParrentError = 0.0f;
 			NodeData = 0;
 		}
@@ -76,6 +82,8 @@ namespace Renderer
 	struct GroupHeader
 	{
 		float    BoundSphere[4];				// Center(3) + Radius(1)
+		float    BBoxMin[3];					// Tight AABB Min (xyz)
+		float    BBoxMax[3];					// Tight AABB Max (xyz)
 		float    ParrentError;					// 父误差（更粗糙一层的误差）
 		uint32_t MeshletCount;
 		//uint32_t ResidentID;					// 运行时数据 (磁盘上为 0，加载到 GPU 后由流式系统填充)
@@ -86,6 +94,8 @@ namespace Renderer
 	struct GroupHeader
 	{
 		float4    BoundSphere;				// Center(3) + Radius(1)
+		float3    BBoxMin;					// Tight AABB Min (xyz)
+		float3    BBoxMax;					// Tight AABB Max (xyz)
 		float     ParrentError;					// 父误差（更粗糙一层的误差）
 		uint	  MeshletCount;
 	};
@@ -109,7 +119,8 @@ namespace Renderer
 
 		uint32_t RefineGroupIndex;				// 精细化组Index (0xFFFFFFFF 表示无精细化组)
 
-		float   BoundSphere[4];					// Center(3) + Radius(1)
+		float   BBoxMin[3];						// Tight AABB Min (xyz)
+		float   BBoxMax[3];						// Tight AABB Max (xyz)
 
 		// 相对偏移量：相对于 Group 数据块起始位置的字节偏移
 		uint32_t VertexOffset;					// 顶点索引数组 (uint32_t 或压缩格式)
@@ -124,7 +135,8 @@ namespace Renderer
 		uint PackedIndices;						// MeshBufferIndex(16) + MaterialBufferIndex(16)
 		uint PackedFlags;						// PSOFlags(16) + VertexStride(16)
 		uint RefineGroupIndex;					// 精细化组Index (0xFFFFFFFF 表示无精细化组)
-		float4   BoundSphere;
+		float3   BBoxMin;
+		float3   BBoxMax;
 		uint VertexOffset;						// 顶点索引数组偏移
 		uint TriangleOffset;				    // 三角形索引数组 (uint8_t)
 
