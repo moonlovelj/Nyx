@@ -41,7 +41,7 @@ float4 IntegrateCubeLDOnly(in float3 V, in float3 N, in float Roughness)
             float3 L;
             float NdotL;
             float PDF;
-            // see reference code in appendix 11
+
             ImportanceSampleCosDir(eta, N, L, NdotL, PDF);
             if (NdotL > 0)
             {

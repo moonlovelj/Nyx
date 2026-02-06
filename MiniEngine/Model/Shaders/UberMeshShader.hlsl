@@ -3,6 +3,7 @@
 #include "DataCodec.hlsli"
 #include "GeometryCommon.hlsli"
 #include "WaveUtil.hlsli"
+#include "CullCommon.hlsli"
 
 #define MAX_VERTS 128
 #define MAX_PRIMS 128
@@ -25,11 +26,6 @@ struct PrimitiveAttributes
     uint primitiveIndex : SV_PrimitiveID;
 };
 
-inline bool isFrontFacingHW(float4 ha, float4 hb, float4 hc)
-{
-    return determinant(float3x3(ha.xyw, hb.xyw, hc.xyw)) >= 0;
-}
-
 inline float4 GetClipPosition(ByteAddressBuffer geometryChunksBuffer,
     uint vertexByteOffset,
     uint vertexStride,
@@ -51,22 +47,9 @@ inline float2 GetScreenPos(float4 clipPos)
     return (ndc * 0.5f + 0.5f) * float2((float)ViewportWidth, (float)ViewportHeight);
 }
 
-inline uint GetClipCullBits(float4 hPos)
-{
-    uint bits = 0;
-    bits |= (hPos.x < -hPos.w) ? 1u : 0u;
-    bits |= (hPos.x >  hPos.w) ? 2u : 0u;
-    bits |= (hPos.y < -hPos.w) ? 4u : 0u;
-    bits |= (hPos.y >  hPos.w) ? 8u : 0u;
-    bits |= (hPos.z <  0.0f)  ? 16u : 0u;
-    bits |= (hPos.z >  hPos.w) ? 32u : 0u;
-    bits |= (hPos.w <= 0.0f) ? 64u : 0u;
-    return bits;
-}
-
 inline bool IsTriangleOutsideFrustum(float4 h0, float4 h1, float4 h2)
 {
-    uint cullBits = GetClipCullBits(h0) & GetClipCullBits(h1) & GetClipCullBits(h2);
+    uint cullBits = ComputeHomogeneousClipMask(h0) & ComputeHomogeneousClipMask(h1) & ComputeHomogeneousClipMask(h2);
     return cullBits != 0;
 }
 
@@ -157,7 +140,7 @@ void main(
             float4 h1 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.y, meshInstance.WorldMatrix, ViewProjMatrix);
             float4 h2 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.z, meshInstance.WorldMatrix, ViewProjMatrix);
 
-            bool logicalFrontFacing = isFrontFacingHW(h0, h1, h2) ^ isWorldFlipped;
+            bool logicalFrontFacing = IsFrontFacing(h0, h1, h2) ^ isWorldFlipped;
             isVisible = twoSided || logicalFrontFacing;
 
             if (isVisible)

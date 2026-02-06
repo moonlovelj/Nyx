@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #ifdef __cplusplus
 #include <cstdint>
@@ -85,11 +85,6 @@ struct QueuePassState
 
 struct QueueState
 {
-#ifdef __cplusplus
-	uint32_t	TotalMeshlets;
-#else
-	uint		TotalMeshlets;
-#endif
 	QueuePassState PassState[2];
 };
 

@@ -367,6 +367,32 @@ void Renderer::InstanceCull(GraphicsContext& gfxContext, const GlobalConstants& 
     context.Dispatch1D( DrawCommandManager::GetNumPotentialDrawItems());
 }
 
+ static uint32_t GetDAGCullGroupCount()
+{
+    static uint32_t s_GroupCount = 0;
+    if (s_GroupCount != 0)
+        return s_GroupCount;
+
+    ID3D12Device* device = Graphics::g_Device;
+    if (device == nullptr)
+    {
+        s_GroupCount = 768;
+        return s_GroupCount;
+    }
+
+    // Vendor defaults (tune by profiling)
+    if (Graphics::IsDeviceAMD(device))
+        s_GroupCount = 1024;
+    else if (Graphics::IsDeviceNvidia(device))
+        s_GroupCount = 768;
+    else if (Graphics::IsDeviceIntel(device))
+        s_GroupCount = 512;
+    else
+        s_GroupCount = 768;
+
+    return s_GroupCount;
+}
+
 void Renderer::DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, const BaseCamera* camera, 
     const D3D12_VIEWPORT& viewport, uint32_t cullPassIdx)
 {
@@ -397,7 +423,8 @@ void Renderer::DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlo
 	context.SetConstants(kCommandConstants, 0,
 		screenErrorConstant);
 
-	context.Dispatch1D(2048 * 128);
+    const uint32_t dagGroups = GetDAGCullGroupCount();
+    context.Dispatch1D(dagGroups * DAG_CULL_GROUP_SIZE, DAG_CULL_GROUP_SIZE);
 }
 
 

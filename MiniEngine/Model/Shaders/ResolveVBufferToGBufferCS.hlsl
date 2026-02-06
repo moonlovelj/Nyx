@@ -151,53 +151,121 @@ struct Barycentrics
     float3 ValueDDY;
 };
 
-/** Calculates perspective correct barycentric coordinates and partial derivatives using screen derivatives. */
+float2 PixelToClipSpace(float2 pixelPos, float2 invViewportSize)
+{
+    return pixelPos * invViewportSize * float2(2.0f, -2.0f) + float2(-1.0f, 1.0f);
+}
+
+float EdgeFunction(float2 a, float2 b, float2 p)
+{
+    float2 ap = p - a;
+    float2 ab = b - a;
+    return ap.x * ab.y - ap.y * ab.x;
+}
+
+void BuildTriangleEdgeDerivatives(float2 p0, float2 p1, float2 p2, out float3 dEdgeDx, out float3 dEdgeDy)
+{
+    // e0 = edge(p1, p2, p), e1 = edge(p2, p0, p), e2 = edge(p0, p1, p)
+    dEdgeDx = float3(
+        p2.y - p1.y,
+        p0.y - p2.y,
+        p1.y - p0.y);
+
+    dEdgeDy = float3(
+        p1.x - p2.x,
+        p2.x - p0.x,
+        p0.x - p1.x);
+}
+
+/*
+    Perspective-correct barycentrics from clip-space edge equations
+    ---------------------------------------------------------------
+    Let clip vertex i be Vi = (xi, yi, wi), and NDC vertex pi = (xi/wi, yi/wi).
+    For sample position p (in clip/NDC xy), define edge values:
+
+        e0 = edge(p1, p2, p)
+        e1 = edge(p2, p0, p)
+        e2 = edge(p0, p1, p)
+
+    Perspective-correct weights:
+
+        ni = ei / wi
+        H  = n0 + n1 + n2
+        lambda_i = ni / H = (ei/wi) / sum_k(ek/wk)
+
+    Derivatives in clip space (u in {x_clip, y_clip}):
+
+        d(lambda_i)/du = (d(ni)/du * H - ni * dH/du) / H^2
+        dH/du          = sum_k d(nk)/du
+        d(ni)/du       = d(ei)/du / wi
+
+    Edge derivatives are constants per triangle:
+
+        de0/dx = p2.y - p1.y,   de0/dy = p1.x - p2.x
+        de1/dx = p0.y - p2.y,   de1/dy = p2.x - p0.x
+        de2/dx = p1.y - p0.y,   de2/dy = p0.x - p1.x
+
+    Clip->pixel derivative mapping:
+
+        x_clip =  2 * x_px * InvViewportWidth  - 1
+        y_clip = -2 * y_px * InvViewportHeight + 1
+
+        d/dx_px = (2 * InvViewportWidth)  * d/dx_clip
+        d/dy_px = (-2 * InvViewportHeight) * d/dy_clip
+*/
 Barycentrics CalculateTriangleBarycentrics(
     float4 clipPos[3],
     float2 pixelPos,
-    float4x4 viewProj,
     float2 ViewInvSize)
 {
-    Barycentrics barycentrics;
-    const float2 PixelClip = pixelPos * ViewInvSize * float2(2, -2) + float2(-1, 1);
+    Barycentrics bary;
+    const float2 pixelClip = PixelToClipSpace(pixelPos, ViewInvSize);
+    const float3 invW = rcp(float3(clipPos[0].w, clipPos[1].w, clipPos[2].w));
 
-    const float3 RcpW = rcp(float3(clipPos[0].w, clipPos[1].w, clipPos[2].w));
-    const float3 Pos0 = clipPos[0].xyz * RcpW.x;
-    const float3 Pos1 = clipPos[1].xyz * RcpW.y;
-    const float3 Pos2 = clipPos[2].xyz * RcpW.z;
+    // NDC positions used to evaluate edge equations in clip space.
+    const float2 ndc0 = clipPos[0].xy * invW.x;
+    const float2 ndc1 = clipPos[1].xy * invW.y;
+    const float2 ndc2 = clipPos[2].xy * invW.z;
 
-    const float3 Pos120X = float3(Pos1.x, Pos2.x, Pos0.x);
-    const float3 Pos120Y = float3(Pos1.y, Pos2.y, Pos0.y);
-    const float3 Pos201X = float3(Pos2.x, Pos0.x, Pos1.x);
-    const float3 Pos201Y = float3(Pos2.y, Pos0.y, Pos1.y);
+    const float3 edge = float3(
+        EdgeFunction(ndc1, ndc2, pixelClip),
+        EdgeFunction(ndc2, ndc0, pixelClip),
+        EdgeFunction(ndc0, ndc1, pixelClip));
 
-    const float3 C_dx = Pos201Y - Pos120Y;
-    const float3 C_dy = Pos120X - Pos201X;
+    float3 dEdgeDx;
+    float3 dEdgeDy;
+    BuildTriangleEdgeDerivatives(ndc0, ndc1, ndc2, dEdgeDx, dEdgeDy);
 
-    const float3 C = C_dx * (PixelClip.x - Pos120X) + C_dy * (PixelClip.y - Pos120Y); // Evaluate the 3 edge functions
-    const float3 G = C * RcpW;
+    // Perspective-correct barycentrics: lambda = (edge / w) / sum(edge / w).
+    const float3 numer = edge * invW;
+    const float denom = dot(numer, 1.0f.xxx);
 
-    const float H = dot(C, RcpW);
-    const float RcpH = rcp(H);
+    // Degenerate or near-degenerate triangles can produce unstable derivatives.
+    if (abs(denom) < 1e-20f)
+    {
+        bary.Value = float3(1.0f, 0.0f, 0.0f);
+        bary.ValueDDX = 0.0f;
+        bary.ValueDDY = 0.0f;
+        return bary;
+    }
 
-	// UVW = C * RcpW / dot(C, RcpW)
-    barycentrics.Value = G * RcpH;
+    const float invDenom = rcp(denom);
+    const float invDenom2 = invDenom * invDenom;
 
-	// Texture coordinate derivatives:
-	// UVW = G / H where G = C * RcpW and H = dot(C, RcpW)
-	// UVW' = (G' * H - G * H') / H^2
-	// float2 TexCoordDX = UVW_dx.y * TexCoord10 + UVW_dx.z * TexCoord20;
-	// float2 TexCoordDY = UVW_dy.y * TexCoord10 + UVW_dy.z * TexCoord20;
-    const float3 G_dx = C_dx * RcpW;
-    const float3 G_dy = C_dy * RcpW;
+    bary.Value = numer * invDenom;
 
-    const float H_dx = dot(C_dx, RcpW);
-    const float H_dy = dot(C_dy, RcpW);
+    const float3 dNumerDx = dEdgeDx * invW;
+    const float3 dNumerDy = dEdgeDy * invW;
+    const float dDenomDx = dot(dNumerDx, 1.0f.xxx);
+    const float dDenomDy = dot(dNumerDy, 1.0f.xxx);
 
-    barycentrics.ValueDDX = (G_dx * H - G * H_dx) * (RcpH * RcpH) * (2.0f * ViewInvSize.x);
-    barycentrics.ValueDDY = (G_dy * H - G * H_dy) * (RcpH * RcpH) * (-2.0f * ViewInvSize.y);
+    // Quotient rule in clip space, then map clip derivatives to pixel derivatives.
+    const float3 dLambdaDxClip = (dNumerDx * denom - numer * dDenomDx) * invDenom2;
+    const float3 dLambdaDyClip = (dNumerDy * denom - numer * dDenomDy) * invDenom2;
 
-    return barycentrics;
+    bary.ValueDDX = dLambdaDxClip * (2.0f * ViewInvSize.x);
+    bary.ValueDDY = dLambdaDyClip * (-2.0f * ViewInvSize.y);
+    return bary;
 }
 
 float4 InterpolateOnly(float4 val[3], Barycentrics barycentris)
@@ -286,8 +354,7 @@ void main( uint2 DTid : SV_DispatchThreadID )
             clipPos[2] = mul(ViewProjMatrix, float4(worldPos[2], 1.0f));
             
             Barycentrics barycentris =
-                CalculateTriangleBarycentrics(clipPos, DTid + float2(0.5, 0.5),
-                ViewProjMatrix, float2(InvViewportWidth, InvViewportHeight));
+                CalculateTriangleBarycentrics(clipPos, DTid + float2(0.5, 0.5), float2(InvViewportWidth, InvViewportHeight));
 
             float3 worldPosition = worldPos[0] * barycentris.Value.x +
                                   worldPos[1] * barycentris.Value.y +

@@ -22,33 +22,16 @@ void main(uint3 DTid : SV_DispatchThreadID)
         DrawItem item = drawItems[DTid.x];
         InstanceConstant instanceConstant = GetInstanceConstantSRV(item.InstanceIndex);
         MeshConstant meshConstant = GetMeshConstantSRV(instanceConstant.MeshBufferIdx);
-        //bool bInFrustrum = IsSphereInFrustum(meshConstant.WorldMatrix, instanceConstant.BoundingSphere);
 
-        
         bool bVisible = false;
 #ifdef INSTANCE_CULL_PASS0
-        float4 clipMin, clipMax;
-        bool bClipValid;
-        bVisible = BBoxIntersectFrustum(instanceConstant.BBoxMin, instanceConstant.BBoxMax,
-                                        meshConstant.WorldMatrix,
-                                        PrevViewProjMatrix,
-                                        clipMin, clipMax,
-                                        bClipValid);
-
-        bVisible = bVisible && (!bClipValid || (LargeEnough(clipMin, clipMax, 1.0) && HZBVisible(GetPrevSceneHZBSRV(FrameIndexMod2), clipMin, clipMax)));
+        bVisible = EvaluateBoundsVisibility(instanceConstant.BBoxMin, instanceConstant.BBoxMax,
+            meshConstant.WorldMatrix, PrevViewProjMatrix, GetPrevSceneHZBSRV(FrameIndexMod2));
 #endif
         
 #ifdef INSTANCE_CULL_PASS1
-        float4 clipMin, clipMax;
-        bool bClipValid;
-        bVisible = BBoxIntersectFrustum(instanceConstant.BBoxMin, instanceConstant.BBoxMax,
-                                        meshConstant.WorldMatrix,
-                                        ViewProjMatrix,
-                                        clipMin, clipMax,
-                                        bClipValid);
-        
-        bVisible = bVisible && (!bClipValid || (LargeEnough(clipMin, clipMax, 1.0) &&
-            HZBVisible(GetCurrentSceneHZBSRV(FrameIndexMod2), clipMin, clipMax)));
+        bVisible = EvaluateBoundsVisibility(instanceConstant.BBoxMin, instanceConstant.BBoxMax,
+            meshConstant.WorldMatrix, ViewProjMatrix, GetCurrentSceneHZBSRV(FrameIndexMod2));
 #endif
         
         uint WaveVisibleCount = WaveActiveCountBits(bVisible);

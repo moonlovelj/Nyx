@@ -16,89 +16,96 @@ groupshared uint GroupNodeCount;
 groupshared uint GroupNodeMask;
 groupshared uint2 GroupNodeData[MAX_BVH_NODES_PER_GROUP];
 
-groupshared uint GroupClusterBatchStartIndex;
-groupshared uint GroupClusterBatchReadySize;
+groupshared uint GroupMeshletBatchStartIndex;
+groupshared uint GroupMeshletBatchReadySize;
+
+groupshared uint GroupLeafCount;
+groupshared uint GroupLeafPrefix[DAG_CULL_GROUP_SIZE + 1];
+groupshared uint2 GroupLeafKey[DAG_CULL_GROUP_SIZE];
+groupshared uint GroupLeafMeshletCount[DAG_CULL_GROUP_SIZE];
+groupshared uint GroupCandidateMeshletBase;
+groupshared uint GroupCandidateMeshletCount;
+
+uint FindLeafIndexForFlatMeshlet(uint flatIndex, uint leafCount)
+{
+    uint lo = 0u;
+    uint hi = leafCount;
+    while (lo + 1u < hi)
+    {
+        const uint mid = (lo + hi) >> 1u;
+        if (GroupLeafPrefix[mid] <= flatIndex)
+            lo = mid;
+        else
+            hi = mid;
+    }
+    return lo;
+}
 
 void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
 {
     globallycoherent RWStructuredBuffer<QueueState> taskStateUAV = GetTaskQueueStateBufferUAV();
     globallycoherent RWByteAddressBuffer taskQueueUAV = GetTaskQueueBufferUAV();
     
-    // Compute the node index this thread handles
-    const uint localNodeIndex = (groupIndex >> MAX_BVH_NODE_CHILDREN_BITS_NUM);
-    const uint childIndex = groupIndex & (MAX_BVH_NODE_CHILDREN_NUM - 1);
-    const uint fetchIndex = min(localNodeIndex, batchSize - 1);
+    // Each thread maps to (node slot in batch, child slot within that node).
+    const uint nodeSlotInBatch = (groupIndex >> MAX_BVH_NODE_CHILDREN_BITS_NUM);
+    const uint childSlotInNode = groupIndex & (MAX_BVH_NODE_CHILDREN_NUM - 1u);
+    const uint safeNodeSlot = min(nodeSlotInBatch, batchSize - 1u);
     
-    uint2 nodeData = GroupNodeData[fetchIndex];
+    uint2 nodeData = GroupNodeData[safeNodeSlot];
     uint instanceIndex = nodeData.x;
-    uint hierarchyNodeIndex = nodeData.y;
+    uint parentNodeIndex = nodeData.y;
 
-    StructuredBuffer<HierarchyNode> nodeBufferSRV = GetHierarchyNodesBufferSRV();
-    HierarchyNode nodeParent = nodeBufferSRV[hierarchyNodeIndex];
+    StructuredBuffer<HierarchyNode> hierarchyNodeSRV = GetHierarchyNodesBufferSRV();
+    HierarchyNode parentNode = hierarchyNodeSRV[parentNodeIndex];
 
-    uint childNodeCount = nodeParent.GetChildNodeCount();
-    uint childNodeStartIndex = nodeParent.GetChildNodeStartIndex();
-    uint currentChildNodeIndex = childIndex + childNodeStartIndex;
-    HierarchyNode node;
-    node.Init();
+    uint childNodeCount = parentNode.GetChildNodeCount();
+    uint childNodeStartIndex = parentNode.GetChildNodeStartIndex();
+    uint childNodeIndex = childSlotInNode + childNodeStartIndex;
+    HierarchyNode childNode;
+    childNode.Init();
 
-    if (childIndex < childNodeCount)
+    if (childSlotInNode < childNodeCount)
     {
-        node = nodeBufferSRV[currentChildNodeIndex];
+        childNode = hierarchyNodeSRV[childNodeIndex];
     }
-    // Culling test
-    bool bVisible = true;
-    if (localNodeIndex >= batchSize)
-    {
-        bVisible = false;
-    }
+
+    bool bVisible = (nodeSlotInBatch < batchSize);
     
     InstanceConstant inst = GetInstanceConstantSRV(instanceIndex);
     MeshConstant meshInstance = GetMeshConstantSRV(inst.MeshBufferIdx);
 
-    
-    Texture2D<float> hzbTexture;
 #ifdef DAG_CULL_PASS0
-    hzbTexture = GetPrevSceneHZBSRV(FrameIndexMod2);
-    float4 clipMin, clipMax;
-    bool bClipValid;
-    const bool bInFrustrum = BBoxIntersectFrustum(node.BBoxMin, node.BBoxMax,
-                                        meshInstance.WorldMatrix,
-                                        PrevViewProjMatrix,
-                                        clipMin, clipMax,
-                                        bClipValid);
-    bVisible = bVisible && bInFrustrum && (!bClipValid || (LargeEnough(clipMin, clipMax, 1.0) && HZBVisible(hzbTexture, clipMin, clipMax)));
+    bVisible = bVisible && EvaluateBoundsVisibility(
+        childNode.BBoxMin, childNode.BBoxMax,
+        meshInstance.WorldMatrix,
+        PrevViewProjMatrix,
+        GetPrevSceneHZBSRV(FrameIndexMod2));
 #endif
 #ifdef DAG_CULL_PASS1
-    hzbTexture = GetCurrentSceneHZBSRV(FrameIndexMod2);
-    float4 clipMin, clipMax;
-    bool bClipValid;
-    const bool bInFrustrum = BBoxIntersectFrustum(node.BBoxMin, node.BBoxMax,
-                                        meshInstance.WorldMatrix,
-                                        ViewProjMatrix,
-                                        clipMin, clipMax,
-                                        bClipValid);
-
-     bVisible = bVisible && bInFrustrum && (!bClipValid || (LargeEnough(clipMin, clipMax, 1.0) && HZBVisible(hzbTexture, clipMin, clipMax)));
+    bVisible = bVisible && EvaluateBoundsVisibility(
+        childNode.BBoxMin, childNode.BBoxMax,
+        meshInstance.WorldMatrix,
+        ViewProjMatrix,
+        GetCurrentSceneHZBSRV(FrameIndexMod2));
 #endif
 
     bVisible = bVisible &&
-    !TestForLod(meshInstance.WorldMatrix, ViewerPos, node.MaxParrentError, node.BoundSphere);
+        !TestForLod(meshInstance.WorldMatrix, ViewerPos, childNode.MaxParrentError, childNode.BoundSphere);
     
-    bool bIsLeaf = node.IsGroup();
+    bool bIsLeaf = childNode.IsGroup();
 
-    bool bPushNode = bVisible && !bIsLeaf && (childIndex < childNodeCount);
+    bool bPushNode = bVisible && !bIsLeaf && (childSlotInNode < childNodeCount);
     
     uint nodeWriteOffsetInGroup = 0;
     if (bPushNode)
     {
-        // Compute how many new nodes to push in this group
+        // Reserve one slot per visible internal child node.
         WaveInterlockedAddScalar(GroupNumCandidateNodes, bPushNode, 1u, nodeWriteOffsetInGroup);
     }
 
     GroupMemoryBarrierWithGroupSync();
 
-    // Group leader reserves space in the global queue (producer write)
+    // Group leader reserves a contiguous range in the global node queue.
     if (groupIndex == 0)
     {
         InterlockedAdd(taskStateUAV[0].PassState[passIndex].NodeWriteOffset, GroupNumCandidateNodes, GroupCandidateNodesOffset);
@@ -110,77 +117,104 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
     if (bPushNode)
     {
         uint globalIdx = (GroupCandidateNodesOffset + nodeWriteOffsetInGroup);
-        taskQueueUAV.Store2(globalIdx * NODE_BYTE_STRIDE, uint2(instanceIndex, currentChildNodeIndex));
+        taskQueueUAV.Store2(globalIdx * NODE_BYTE_STRIDE, uint2(instanceIndex, childNodeIndex));
     }
 
     DeviceMemoryBarrierWithGroupSync();
-    
-    // Process leaf nodes (clusters)
+
+    GroupMemoryBarrierWithGroupSync();
+    if (groupIndex == 0)
+    {
+        GroupLeafCount = 0;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    // Collect visible leaf nodes for group-wide parallel candidate emission.
     if (bVisible && bIsLeaf)
     {
-        const uint groupID = node.GetGroupIndex();
-        
+        const uint groupID = childNode.GetGroupIndex();
+
         globallycoherent RWByteAddressBuffer requestMaskUAV = GetGeometryStreamingRequestMaskBufferUAV();
         const uint requestMaskAddress = (groupID >> 5) << 2;
         const uint requestBitMask = 1u << (groupID & 31);
         uint originalTemp;
         requestMaskUAV.InterlockedOr(requestMaskAddress, requestBitMask, originalTemp);
-        
+
         StructuredBuffer<GroupDataLocation> groupDataLocationSRV = GetGroupDataLocationBufferSRV();
         GroupDataLocation groupDataLocation = groupDataLocationSRV[groupID];
+        bool bResident = groupDataLocation.ChunkIndex != INVALID_ID;
 
-        if (groupDataLocation.ChunkIndex != INVALID_ID)
+        uint leafOffsetInGroup = 0;
+        WaveInterlockedAddScalar(GroupLeafCount, bResident, 1u, leafOffsetInGroup);
+        if (bResident)
         {
-        
-            uint NumClusters = node.GetMeshletCount();
-            uint ClusterIndex = 0;
-            WaveInterlockedAdd(taskStateUAV[0].PassState[passIndex].TotalMeshlets, NumClusters, ClusterIndex);
-
-            // Overflow check: if allocated index plus new count exceeds buffer capacity
-            const uint ClusterIndexEnd = min(ClusterIndex + NumClusters, MAX_CANDIDATE_MESHLETS);
-            // Recompute actual storable count (avoid buffer overflow causing GPU hang)
-            NumClusters = (uint) max((int) ClusterIndexEnd - (int) ClusterIndex, 0);
-        
-            uint CandidateClustersOffset = 0;
-            // Reserve a contiguous range in the CandidateClusters queue
-            WaveInterlockedAdd(taskStateUAV[0].PassState[passIndex].CandidateMeshletWriteOffset, NumClusters, CandidateClustersOffset);
-        
-            const uint StartIndex = CandidateClustersOffset;
-            const uint EndIndex = min(CandidateClustersOffset + NumClusters, MAX_CANDIDATE_MESHLETS);
-            for (uint Index = StartIndex; Index < EndIndex; Index++)
-            {
-                VisibleMeshletPayload meshletPayload;
-                meshletPayload.InstanceIndex = instanceIndex;
-                meshletPayload.PackedData = meshletPayload.PackData(node.GetGroupIndex(), (Index - StartIndex));
-                globallycoherent RWByteAddressBuffer candicateMeshletBufferUAV = GetCandidateMeshletBufferUAV();
-                candicateMeshletBufferUAV.Store2(Index * MESHLET_BYTE_STRIDE, uint2(meshletPayload.InstanceIndex, meshletPayload.PackedData));
-            }
-        
-            DeviceMemoryBarrier();
-        
-            for (uint Index = StartIndex; Index < EndIndex;)
-            {
-            // Compute which batch this index belongs to (one bin per 64)
-                const uint BatchIndex = Index / DAG_CULL_GROUP_SIZE;
-    
-            // Compute the next 64-aligned index (start of next bin)
-                const uint NextIndex = (Index & ~(64 - 1u)) + 64;
-    
-            // Compute how many slots are used in the current bin
-                const uint MaxIndex = min(NextIndex, EndIndex);
-                const uint Num = MaxIndex - Index;
-    
-            // Update the ready counter for this batch
-                globallycoherent RWByteAddressBuffer meshletBatchBufferUAV = GetMeshletBatchBufferUAV();
-                uint temp;
-                meshletBatchBufferUAV.InterlockedAdd(BatchIndex * 4, Num, temp);
-    
-            // Advance to the next bin
-                Index = NextIndex;
-            }
+            GroupLeafKey[leafOffsetInGroup] = uint2(instanceIndex, groupID);
+            GroupLeafMeshletCount[leafOffsetInGroup] = childNode.GetMeshletCount();
         }
     }
-    
+
+    GroupMemoryBarrierWithGroupSync();
+
+    // Build leaf prefix and reserve candidate range once per group.
+    if (groupIndex == 0)
+    {
+        GroupLeafPrefix[0] = 0;
+        [loop]
+        for (uint leafIndex = 0; leafIndex < GroupLeafCount; ++leafIndex)
+        {
+            GroupLeafPrefix[leafIndex + 1] = GroupLeafPrefix[leafIndex] + GroupLeafMeshletCount[leafIndex];
+        }
+
+        const uint totalMeshletsInGroup = GroupLeafPrefix[GroupLeafCount];
+
+        uint meshletStart = 0;
+        InterlockedAdd(taskStateUAV[0].PassState[passIndex].TotalMeshlets, totalMeshletsInGroup, meshletStart);
+
+        uint candidateWriteOffset = 0;
+        InterlockedAdd(taskStateUAV[0].PassState[passIndex].CandidateMeshletWriteOffset, totalMeshletsInGroup, candidateWriteOffset);
+
+        const uint candidateEnd = min(candidateWriteOffset + totalMeshletsInGroup, MAX_CANDIDATE_MESHLETS);
+        GroupCandidateMeshletBase = candidateWriteOffset;
+        GroupCandidateMeshletCount = (uint)max((int)candidateEnd - (int)candidateWriteOffset, 0);
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    globallycoherent RWByteAddressBuffer candidateMeshletBufferUAV = GetCandidateMeshletBufferUAV();
+    for (uint flatMeshletIndex = groupIndex; flatMeshletIndex < GroupCandidateMeshletCount; flatMeshletIndex += DAG_CULL_GROUP_SIZE)
+    {
+        const uint leafIndex = FindLeafIndexForFlatMeshlet(flatMeshletIndex, GroupLeafCount);
+        const uint localMeshletIndex = flatMeshletIndex - GroupLeafPrefix[leafIndex];
+        const uint2 leafKey = GroupLeafKey[leafIndex];
+
+        VisibleMeshletPayload meshletPayload;
+        meshletPayload.InstanceIndex = leafKey.x;
+        meshletPayload.PackedData = meshletPayload.PackData(leafKey.y, localMeshletIndex);
+
+        const uint outIndex = GroupCandidateMeshletBase + flatMeshletIndex;
+        candidateMeshletBufferUAV.Store2(outIndex * MESHLET_BYTE_STRIDE, uint2(meshletPayload.InstanceIndex, meshletPayload.PackedData));
+    }
+
+    DeviceMemoryBarrierWithGroupSync();
+
+    if (groupIndex == 0)
+    {
+        const uint startIndex = GroupCandidateMeshletBase;
+        const uint endIndex = GroupCandidateMeshletBase + GroupCandidateMeshletCount;
+        globallycoherent RWByteAddressBuffer meshletBatchBufferUAV = GetMeshletBatchBufferUAV();
+
+        for (uint index = startIndex; index < endIndex;)
+        {
+            const uint batchIndex = index / DAG_CULL_GROUP_SIZE;
+            const uint nextIndex = (index & ~(DAG_CULL_GROUP_SIZE - 1u)) + DAG_CULL_GROUP_SIZE;
+            const uint maxIndex = min(nextIndex, endIndex);
+            const uint num = maxIndex - index;
+            uint temp;
+            meshletBatchBufferUAV.InterlockedAdd(batchIndex * 4, num, temp);
+            index = nextIndex;
+        }
+    }
+
     DeviceMemoryBarrierWithGroupSync();
     
     if (groupIndex == 0)
@@ -189,19 +223,21 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
     }
 }
 
-void ProcessClusterBatch(uint clusterBatchStartIndex, uint clusterBatchReadySize, uint groupIndex, uint passIndex)
+void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize, uint groupIndex, uint passIndex)
 {
-    if (groupIndex < clusterBatchReadySize)
+    if (groupIndex < meshletBatchReadySize)
     {
-        const uint CandidateIndex = clusterBatchStartIndex * DAG_CULL_GROUP_SIZE + groupIndex;
-        globallycoherent RWByteAddressBuffer candicateMeshletBufferUAV = GetCandidateMeshletBufferUAV();
+        const uint candidateIndex = meshletBatchStartIndex * DAG_CULL_GROUP_SIZE + groupIndex;
+        globallycoherent RWByteAddressBuffer candidateMeshletBufferUAV = GetCandidateMeshletBufferUAV();
         VisibleMeshletPayload meshletPayload;
-        const uint2 loadedMeshlet = candicateMeshletBufferUAV.Load2(CandidateIndex * MESHLET_BYTE_STRIDE);
+        const uint2 loadedMeshlet = candidateMeshletBufferUAV.Load2(candidateIndex * MESHLET_BYTE_STRIDE);
         meshletPayload.InstanceIndex = loadedMeshlet.x;
         meshletPayload.PackedData = loadedMeshlet.y;
+
         const uint meshletGroupIndex = meshletPayload.GetGroupIndex();
         StructuredBuffer<GroupDataLocation> groupDataLocationSRV = GetGroupDataLocationBufferSRV();
         GroupDataLocation groupDataLocation = groupDataLocationSRV[meshletGroupIndex];
+
         ByteAddressBuffer geometryChunksBuffer = GetGeometryChunksBufferSRV(groupDataLocation.ChunkIndex);
         const uint meshletHeaderStart = groupDataLocation.ByteOffset + sizeof(GroupHeader);
         const uint meshletIndexInGroup = meshletPayload.GetMeshletIndex();
@@ -209,49 +245,38 @@ void ProcessClusterBatch(uint clusterBatchStartIndex, uint clusterBatchReadySize
         MeshletHeader meshletHeader = geometryChunksBuffer.Load<MeshletHeader>(meshletHeaderStart + meshletIndexInGroup * sizeof(MeshletHeader));
         InstanceConstant inst = GetInstanceConstantSRV(meshletPayload.InstanceIndex);
         MeshConstant meshInstance = GetMeshConstantSRV(inst.MeshBufferIdx);
-        bool bAlphaBlend = (meshletHeader.GetPSOFlags() & PSO_ALPHA_BLEND);
-        float4 clipMin, clipMax;
-        bool bClipValid;
-        bool bClusterVisible = BBoxIntersectFrustum(meshletHeader.BBoxMin, meshletHeader.BBoxMax,
-                                        meshInstance.WorldMatrix,
-                                        PrevViewProjMatrix,
-                                        clipMin, clipMax,
-                                        bClipValid);
+        bool bAlphaBlend = (meshletHeader.GetPSOFlags() & PSO_ALPHA_BLEND) != 0u;
 
-        bClusterVisible = bClusterVisible && (!bClipValid || (LargeEnough(clipMin, clipMax, 1.0) &&
-            HZBVisible(GetPrevSceneHZBSRV(FrameIndexMod2), clipMin, clipMax)));
+        bool bMeshletVisible = EvaluateBoundsVisibility(
+            meshletHeader.BBoxMin,
+            meshletHeader.BBoxMax,
+            meshInstance.WorldMatrix,
+            PrevViewProjMatrix,
+            GetPrevSceneHZBSRV(FrameIndexMod2));
         
-        if (!bClusterVisible)
-        {
-
 #ifdef DAG_CULL_PASS1
-
-        bClusterVisible = BBoxIntersectFrustum(meshletHeader.BBoxMin, meshletHeader.BBoxMax,
-                                        meshInstance.WorldMatrix,
-                                        ViewProjMatrix,
-                                        clipMin, clipMax,
-                                        bClipValid);
-            
-        bClusterVisible = bClusterVisible && (!bClipValid || (LargeEnough(clipMin, clipMax, 1.0) &&
-            HZBVisible(GetCurrentSceneHZBSRV(FrameIndexMod2), clipMin, clipMax)));
+            bMeshletVisible = !bMeshletVisible && EvaluateBoundsVisibility(
+                meshletHeader.BBoxMin,
+                meshletHeader.BBoxMax,
+                meshInstance.WorldMatrix,
+                ViewProjMatrix,
+                GetCurrentSceneHZBSRV(FrameIndexMod2));
 #endif
-        }
         
-        bClusterVisible = bClusterVisible && !bAlphaBlend;
+        bMeshletVisible = bMeshletVisible && !bAlphaBlend;
 
-        if (bClusterVisible && meshletHeader.RefineGroupIndex != INVALID_ID)
+        if (bMeshletVisible && meshletHeader.RefineGroupIndex != INVALID_ID)
         {
             GroupDataLocation refineGroupDataLocation = groupDataLocationSRV[meshletHeader.RefineGroupIndex];
             if (refineGroupDataLocation.ChunkIndex != INVALID_ID)
             {
-                ByteAddressBuffer refineGometryChunksBuffer = GetGeometryChunksBufferSRV(refineGroupDataLocation.ChunkIndex);
-                GroupHeader refineGroupHeader = refineGometryChunksBuffer.Load < GroupHeader > (refineGroupDataLocation.ByteOffset);
-                bClusterVisible = TestForLod(meshInstance.WorldMatrix, ViewerPos, refineGroupHeader.ParrentError, refineGroupHeader.BoundSphere);
+                ByteAddressBuffer refineGeometryChunksBuffer = GetGeometryChunksBufferSRV(refineGroupDataLocation.ChunkIndex);
+                GroupHeader refineGroupHeader = refineGeometryChunksBuffer.Load < GroupHeader > (refineGroupDataLocation.ByteOffset);
+                bMeshletVisible = TestForLod(meshInstance.WorldMatrix, ViewerPos, refineGroupHeader.ParrentError, refineGroupHeader.BoundSphere);
             }
         }
 
-        uint level = meshletHeader.GetLODLevel();
-        if (bClusterVisible)
+        if (bMeshletVisible)
         {
             globallycoherent RWStructuredBuffer<QueueState> taskStateUAV = GetTaskQueueStateBufferUAV();
             uint writeOffset;
@@ -270,7 +295,7 @@ void ProcessClusterBatch(uint clusterBatchStartIndex, uint clusterBatchReadySize
 
     // Clear immediately for the next pass
     globallycoherent RWByteAddressBuffer meshletBatchBufferUAV = GetMeshletBatchBufferUAV();
-    meshletBatchBufferUAV.Store(clusterBatchStartIndex * 4, 0);
+    meshletBatchBufferUAV.Store(meshletBatchStartIndex * 4, 0);
 }
 
 [RootSignature(Renderer_RootSig)]
@@ -285,13 +310,14 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
     globallycoherent RWStructuredBuffer<QueueState> taskStateUAV = GetTaskQueueStateBufferUAV();
     globallycoherent RWByteAddressBuffer taskQueueUAV = GetTaskQueueBufferUAV();
     
-    bool bProcessNodes = true;
-    uint NodeBatchReadyOffset = MAX_BVH_NODES_PER_GROUP;
-    uint NodeBatchStartIndex = 0;
-    uint ClusterBatchStartIndex = INVALID_ID;
+    bool processNodeQueue = true;
+    uint nodeBatchLocalOffset = MAX_BVH_NODES_PER_GROUP;
+    uint nodeBatchBaseIndex = 0;
+    uint meshletBatchStartIndex = INVALID_ID;
     
     while (true)
     {
+        // Reset per-iteration group-shared counters.
         GroupMemoryBarrierWithGroupSync();
         if (groupIndex == 0)
         {
@@ -300,12 +326,12 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
         }
         GroupMemoryBarrierWithGroupSync();
         
-        uint NodeReadyMask = 0;
-        if (bProcessNodes)
+        uint readyNodeMask = 0;
+        if (processNodeQueue)
         {
-            if (NodeBatchReadyOffset == MAX_BVH_NODES_PER_GROUP)
+            if (nodeBatchLocalOffset == MAX_BVH_NODES_PER_GROUP)
             {
-				// Collect a new batch of data
+                // Claim the next node-batch range from the global queue.
                 if (groupIndex == 0)
                 {
                     InterlockedAdd(taskStateUAV[0].PassState[passIndex].NodeReadOffset, MAX_BVH_NODES_PER_GROUP, GroupNodeBatchStartIndex);
@@ -313,91 +339,89 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
                 
                 GroupMemoryBarrierWithGroupSync();
 
-                // Reset node state
-                NodeBatchReadyOffset = 0;
-                // Get the group's start index in the task queue
-                NodeBatchStartIndex = GroupNodeBatchStartIndex;
-                if (NodeBatchStartIndex >= MAX_NODES)
+                nodeBatchLocalOffset = 0;
+                nodeBatchBaseIndex = GroupNodeBatchStartIndex;
+                if (nodeBatchBaseIndex >= MAX_NODES)
                 {
-                    // Exceeded queue capacity limit
-                    bProcessNodes = false;
+                    processNodeQueue = false;
                     continue;
                 }
             }
             
-            // Compute this thread's node index
-            const uint NodeIndex = NodeBatchStartIndex + NodeBatchReadyOffset + groupIndex;
-            bool bNodeReady = (NodeBatchReadyOffset + groupIndex < MAX_BVH_NODES_PER_GROUP);
-            if (bNodeReady)
+            const uint nodeQueueIndex = nodeBatchBaseIndex + nodeBatchLocalOffset + groupIndex;
+            bool laneHasNode = (nodeBatchLocalOffset + groupIndex < MAX_BVH_NODES_PER_GROUP);
+            if (laneHasNode)
             {
-                uint2 nodeData = taskQueueUAV.Load2(NodeIndex * NODE_BYTE_STRIDE);
-                bNodeReady = nodeData.x != INVALID_ID && nodeData.y != INVALID_ID;
-                if (bNodeReady)
+                uint2 nodeData = taskQueueUAV.Load2(nodeQueueIndex * NODE_BYTE_STRIDE);
+                laneHasNode = nodeData.x != INVALID_ID && nodeData.y != INVALID_ID;
+                if (laneHasNode)
                 {
                     GroupNodeData[groupIndex] = nodeData;
                 }
-
             }
-            if (bNodeReady)
+
+            if (laneHasNode)
             {
                 InterlockedOr(GroupNodeMask, 1u << groupIndex);
             }
             AllMemoryBarrierWithGroupSync();
             
-            NodeReadyMask = GroupNodeMask;
+            readyNodeMask = GroupNodeMask;
 
-			// Check whether the first node data is ready
-            if (NodeReadyMask & 1u)
+            // If the first slot is valid, process the contiguous ready prefix.
+            if (readyNodeMask & 1u)
             {
-                uint batchSize = firstbitlow(~NodeReadyMask);
+                uint batchSize = firstbitlow(~readyNodeMask);
                 ProcessNodeBatch(batchSize, groupIndex, passIndex);
                 if (groupIndex < batchSize)
                 {
-                    // Clear immediately for the next pass
-                    taskQueueUAV.Store2(NodeIndex * NODE_BYTE_STRIDE, uint2(INVALID_ID, INVALID_ID));
+                    taskQueueUAV.Store2(nodeQueueIndex * NODE_BYTE_STRIDE, uint2(INVALID_ID, INVALID_ID));
                 }
 
-                NodeBatchReadyOffset += batchSize;
+                nodeBatchLocalOffset += batchSize;
                 continue;
             }
         }
         
-        // No nodes to process; handle clusters
-        // Collect a new cluster batch
-        if (ClusterBatchStartIndex == INVALID_ID)
+        // No processable nodes this iteration; poll meshlet batches.
+        if (meshletBatchStartIndex == INVALID_ID)
         {
             if (groupIndex == 0)
             {
-                InterlockedAdd(taskStateUAV[0].PassState[passIndex].MeshletBatchReadOffset, 1, GroupClusterBatchStartIndex);
+                InterlockedAdd(taskStateUAV[0].PassState[passIndex].MeshletBatchReadOffset, 1, GroupMeshletBatchStartIndex);
             }
             GroupMemoryBarrierWithGroupSync();
-            ClusterBatchStartIndex = GroupClusterBatchStartIndex;
+            meshletBatchStartIndex = GroupMeshletBatchStartIndex;
         }
 
-        if (!bProcessNodes && GroupClusterBatchStartIndex >= MAX_CANDIDATE_MESHLETS_BATCH)
+        if (!processNodeQueue && GroupMeshletBatchStartIndex >= MAX_CANDIDATE_MESHLETS_BATCH)
             break;
 
         if (groupIndex == 0)
         {
             GroupNodeCount = taskStateUAV[0].PassState[passIndex].NodeCount;
             globallycoherent RWByteAddressBuffer meshletBatchUAV = GetMeshletBatchBufferUAV();
-            GroupClusterBatchReadySize = meshletBatchUAV.Load(ClusterBatchStartIndex * 4);
+            GroupMeshletBatchReadySize = meshletBatchUAV.Load(meshletBatchStartIndex * 4);
         }
         GroupMemoryBarrierWithGroupSync();
 
-        uint ClusterBatchReadySize = GroupClusterBatchReadySize;
-        if (!bProcessNodes && ClusterBatchReadySize == 0)	// No clusters to process
+        uint meshletBatchReadySize = GroupMeshletBatchReadySize;
+        if (!processNodeQueue && meshletBatchReadySize == 0)
             break;
 
-        if ((bProcessNodes && ClusterBatchReadySize == DAG_CULL_GROUP_SIZE) || (!bProcessNodes && ClusterBatchReadySize > 0))
+        bool canRunMeshletPass =
+            (processNodeQueue && meshletBatchReadySize == DAG_CULL_GROUP_SIZE) ||
+            (!processNodeQueue && meshletBatchReadySize > 0);
+
+        if (canRunMeshletPass)
         {
-            ProcessClusterBatch(ClusterBatchStartIndex, ClusterBatchReadySize, groupIndex, passIndex);
-            ClusterBatchStartIndex = INVALID_ID;
+            ProcessMeshletBatch(meshletBatchStartIndex, meshletBatchReadySize, groupIndex, passIndex);
+            meshletBatchStartIndex = INVALID_ID;
         }
 
-        if (bProcessNodes && GroupNodeCount == 0)
+        if (processNodeQueue && GroupNodeCount == 0)
         {
-            bProcessNodes = false;
+            processNodeQueue = false;
         }
     }
 }

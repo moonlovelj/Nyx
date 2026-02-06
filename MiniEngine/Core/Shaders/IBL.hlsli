@@ -58,14 +58,9 @@ float3 GetOffSpecularPeakReflectionDir(float3 Normal, float3 ReflectionVector, f
     return lerp(Normal, ReflectionVector, (1 - a) * (sqrt(1 - a) + a));
 }
 
-/**
- * Compute absolute mip for a reflection capture cubemap given a roughness. Come from UE5
- */
 float ComputeIBLMipFromRoughness(float Roughness, float CubemapMaxMip)
 {
     // Heuristic that maps roughness to mip level
-    // This is done in a way such that a certain mip level will always have the same roughness, regardless of how many mips are in the texture
-    // Using more mips in the cubemap just allows sharper reflections to be supported
     float LevelFrom1x1 = 1.0f - 1.2f * log2(max(Roughness, 0.001));
     return CubemapMaxMip - 1 - LevelFrom1x1;
 }
