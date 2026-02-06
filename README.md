@@ -1,5 +1,3 @@
-<div align="center">
-
 # Nyx
 
 **Nanite-style Virtualized Geometry Renderer on DirectX 12 (MiniEngine-based)**
