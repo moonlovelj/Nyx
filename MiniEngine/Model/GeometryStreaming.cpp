@@ -373,8 +373,10 @@ void GeometryStreaming::PinRootPages(Model* model)
 
 void GeometryStreaming::Shutdown()
 {
-	std::lock_guard<std::mutex> lock(m_IOQueueMutex);
-	m_StopIOThread = true;
+	{
+		std::lock_guard<std::mutex> lock(m_IOQueueMutex);
+		m_StopIOThread = true;
+	}
 	m_IOCV.notify_all();
 
 	if (m_IOThread.joinable())

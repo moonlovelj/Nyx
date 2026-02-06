@@ -25,7 +25,10 @@
 #include "TextureConvert.h"
 #include "ModelInstanceManager.h"
 #include "GeometryStreaming.h"
+#include "imgui.h"
 #include <chrono>
+#include <algorithm>
+#include <wchar.h>
 
 extern "C" {
 	__declspec(dllexport) extern const UINT D3D12SDKVersion = 616; // Matches the Agility SDK version
@@ -51,6 +54,9 @@ public:
 
     virtual void Update( float deltaT ) override;
     virtual void RenderScene( void ) override;
+    virtual void RenderUI( class GraphicsContext& ) override;
+    void ReloadModel( const std::wstring& filePath, bool useOrbit );
+    void QueueModelReload( const std::wstring& filePath, bool useOrbit );
 
 private:
 	Camera m_PrevCamera;
@@ -61,6 +67,12 @@ private:
     D3D12_RECT m_MainScissor;
 
     ShadowCamera m_SunShadowCamera;
+
+    bool m_ShowLoadingUI = false;
+    bool m_LoadPending = false;
+    int m_LoadDelayFrames = 0;
+    bool m_PendingUseOrbit = false;
+    std::wstring m_PendingModelPath;
 };
 
 CREATE_APPLICATION( SceneViewer )
@@ -75,38 +87,31 @@ BoolVar g_UseglTFCamera("Camera/Use glTF Camera", false);
 
 void ChangeIBLSet(EngineVar::ActionType);
 void ChangeIBLBias(EngineVar::ActionType);
+void ChangeGltfSet(EngineVar::ActionType);
 
 //DynamicEnumVar g_IBLSet("Viewer/Lighting/Environment", ChangeIBLSet)ModelInstanceManager;
 std::vector<std::pair<TextureRef, TextureRef>> g_IBLTextures;
 //NumVar g_IBLBias("Viewer/Lighting/Gloss Reduction", 2.0f, 0.0f, 10.0f, 1.0f, ChangeIBLBias);
 
 std::vector<TextureRef> g_IBLHDRITextures;
-DynamicEnumVar g_IBLSet("Viewer/Lighting/Environment", ChangeIBLSet);
+DynamicEnumVar g_IBLSet("Application/IBL", ChangeIBLSet);
+
+DynamicEnumVar g_GltfSet("Application/GLTF", ChangeGltfSet);
+std::vector<std::wstring> g_GltfFiles;
+static bool g_ForceRebuild = false;
+static SceneViewer* g_SceneViewer = nullptr;
 
 void ChangeIBLSet(EngineVar::ActionType)
 {
-    //int setIdx = g_IBLSet - 1;
-    //if (setIdx < 0)
-    //{
-    //    Renderer::SetIBLTextures(nullptr, nullptr);
-    //}
-    //else
-    //{
-    //    auto texturePair = g_IBLTextures[setIdx];
-    //    Renderer::SetIBLTextures(texturePair.first, texturePair.second);
-    //}
-
 	int setIdx = g_IBLSet - 1;
     if (setIdx < 0)
     {
-        //Renderer::SetIBLTextures(nullptr, nullptr);
         IBL::ChangeIBL(nullptr);
     }
     else
     {
         auto IBLHDRITexture = g_IBLHDRITextures[setIdx];
         IBL::ChangeIBL(IBLHDRITexture);
-        //Renderer::SetIBLTextures(texturePair.first, texturePair.second);
     }
 
     Renderer::SetIBLTextures();
@@ -115,6 +120,24 @@ void ChangeIBLSet(EngineVar::ActionType)
 void ChangeIBLBias(EngineVar::ActionType)
 {
     //Renderer::SetIBLBias(g_IBLBias);
+}
+
+void ChangeGltfSet(EngineVar::ActionType)
+{
+    if (g_SceneViewer == nullptr)
+        return;
+
+    int setIdx = g_GltfSet - 1;
+    if (setIdx < 0)
+    {
+        g_SceneViewer->QueueModelReload(L"Sponza/PBR/sponza2.gltf", false);
+        return;
+    }
+
+    if (setIdx >= (int)g_GltfFiles.size())
+        return;
+
+    g_SceneViewer->QueueModelReload(g_GltfFiles[setIdx], false);
 }
 
 #include <direct.h> // for _getcwd() to check data root path
@@ -165,6 +188,99 @@ void LoadIBLHDRITextures()
     Utility::Printf("Found %u IBL hdri environment map \n", g_IBLHDRITextures.size());
 }
 
+void CollectGltfFiles(const std::wstring& rootPath, const std::wstring& relativePath)
+{
+    std::wstring searchPath = rootPath;
+    if (!relativePath.empty())
+        searchPath += L"\\" + relativePath;
+    searchPath += L"\\*";
+
+    WIN32_FIND_DATA ffd;
+    HANDLE hFind = FindFirstFile(searchPath.c_str(), &ffd);
+    if (hFind == INVALID_HANDLE_VALUE)
+        return;
+
+    do
+    {
+        if (ffd.cFileName[0] == L'.')
+            continue;
+
+        if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        {
+            std::wstring subPath = relativePath.empty() ? ffd.cFileName : relativePath + L"\\" + ffd.cFileName;
+            CollectGltfFiles(rootPath, subPath);
+            continue;
+        }
+
+        const wchar_t* ext = wcsrchr(ffd.cFileName, L'.');
+        if (ext == nullptr || _wcsicmp(ext, L".gltf") != 0)
+            continue;
+
+        std::wstring relPath = relativePath.empty() ? ffd.cFileName : relativePath + L"\\" + ffd.cFileName;
+        std::wstring displayPath = relPath;
+        std::replace(displayPath.begin(), displayPath.end(), L'\\', L'/');
+
+        g_GltfFiles.push_back(rootPath + L"\\" + relPath);
+        g_GltfSet.AddEnum(displayPath);
+    } while (FindNextFile(hFind, &ffd) != 0);
+
+    FindClose(hFind);
+}
+
+void LoadGltfFiles()
+{
+    Utility::Printf("Loading glTF files under Assets\n");
+
+    g_GltfFiles.clear();
+    g_GltfSet.AddEnum(L"Default");
+
+    CollectGltfFiles(L"Assets", L"");
+
+    Utility::Printf("Found %u glTF files under Assets\n", (uint32_t)g_GltfFiles.size());
+}
+
+void SceneViewer::ReloadModel( const std::wstring& filePath, bool useOrbit )
+{
+    auto model = Renderer::LoadModel(filePath, g_ForceRebuild);
+    if (model == nullptr)
+    {
+        Utility::Printf("Error: Failed to load model %ws\n", filePath.c_str());
+        return;
+    }
+
+    if (ModelInstanceManager::GetNumModelInstances() > 0)
+        ModelInstanceManager::Cleanup();
+
+    ModelInstanceManager::Initialize(model, 1);
+    OrientedBox obb = ModelInstanceManager::GetModelInstance(0).GetBoundingBox();
+    float modelRadius = Length(obb.GetDimensions()) * 0.5f;
+
+    const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 0.5f, 0.0f, 0.0f);
+    m_Camera.SetEyeAtUp(eye, obb.GetCenter(), Vector3(kYUnitVector));
+    m_Camera.SetZRange(0.01f, 100000.0f);
+
+    if (useOrbit)
+    {
+        m_CameraController.reset(new OrbitCamera(m_Camera, ModelInstanceManager::GetModelInstance(0).GetBoundingSphere(), Vector3(kYUnitVector)));
+    }
+    else
+    {
+        FlyingFPSCamera* flyingCamera = new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector));
+        flyingCamera->SetMoveSpeed(modelRadius * 0.02f);
+        flyingCamera->SetStrafeSpeed(modelRadius * 0.02f);
+        m_CameraController.reset(flyingCamera);
+    }
+}
+
+void SceneViewer::QueueModelReload( const std::wstring& filePath, bool useOrbit )
+{
+    m_PendingModelPath = filePath;
+    m_PendingUseOrbit = useOrbit;
+    m_LoadPending = true;
+    m_LoadDelayFrames = 1;
+    m_ShowLoadingUI = true;
+}
+
 void SceneViewer::Startup( void )
 {
     // Setup your data
@@ -176,6 +292,8 @@ void SceneViewer::Startup( void )
     //SSAO::Enable = false;
     //PostEffects::BloomEnable = false;
     PostEffects::EnableAdaptation = false;
+
+    g_SceneViewer = this;
     
     Renderer::Initialize();
 
@@ -192,66 +310,20 @@ void SceneViewer::Startup( void )
 
     Renderer::SetIBLTextures();
 
+    LoadGltfFiles();
+
     std::wstring gltfFileName;
 
-    bool forceRebuild = false;
     uint32_t rebuildValue;
     if (CommandLineArgs::GetInteger(L"rebuild", rebuildValue))
-        forceRebuild = rebuildValue != 0;
-
-    float modelRadius = 0;
-    if (CommandLineArgs::GetString(L"model", gltfFileName) == false)
-    {
-        auto startTime = std::chrono::steady_clock::now();
-        auto model = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
-        //auto model = Renderer::LoadModel(L"Assets/Cube/scene.gltf", forceRebuild);
-        //auto model = Renderer::LoadModel(L"Assets/lumber_mill_wood_factory_gltf/scene.gltf", forceRebuild);
-		//auto model = Renderer::LoadModel(L"Assets/DamagedHelmet/glTF/DamagedHelmet.gltf", forceRebuild);
-        //auto model = Renderer::LoadModel(L"Assets/Jinx/scene.gltf", forceRebuild);
-        //auto model = Renderer::LoadModel(L"Assets/xyzrgb_statuette.ply/scene.gltf", forceRebuild);
-		//auto model = Renderer::LoadModel(L"Assets/zorah_main_public.gltf/zorah_main_public.gltf", forceRebuild);
-		//auto model = Renderer::LoadModel(L"Assets/San_Miguel/scene.gltf", forceRebuild);
-        //auto model = Renderer::LoadModel(L"Assets/Dragon/Dragon.gltf", forceRebuild);
-		//auto model = Renderer::LoadModel(L"Assets/japanese_metal_lantern_vfvjccaqx_gltf_raw/Japanese_Metal_Lantern_vfvjccaqx_Raw.gltf", forceRebuild);
-        //auto model = Renderer::LoadModel(L"Assets/OcclusionTest/scene.gltf", forceRebuild);
-        //m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
-
-        auto endTime = std::chrono::steady_clock::now();
-		auto durationTime = duration_cast<std::chrono::milliseconds>(endTime - startTime);
-		Utility::Printf("Model loading time: %lld ms\n", durationTime.count());
-
-		//ModelInstanceManager::Initialize(model, 1);
-		ModelInstanceManager::Initialize(model, 1);
-		OrientedBox obb = ModelInstanceManager::GetModelInstance(0).GetBoundingBox();
-		//OrientedBox obb = ModelInstanceManager::GetModelInstance(0).GetBoundingBox();
-        modelRadius = Length(obb.GetDimensions()) * 0.5f;
-
-		const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 0.5f, 0.0f, 0.0f);
-		m_Camera.SetEyeAtUp(eye, obb.GetCenter(), Vector3(kYUnitVector));
-
-		//const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 10.f, modelRadius * 10.f, modelRadius * 10.f);
-		//m_Camera.SetEyeAtUp(eye, Vector3(-modelRadius * 10.f, 0, -modelRadius * 10.f), Vector3(kYUnitVector));
-    }
+        g_ForceRebuild = rebuildValue != 0;
     else
-    {
-        auto model = Renderer::LoadModel(gltfFileName, forceRebuild);
-        ModelInstanceManager::Initialize(model);
-		OrientedBox obb = ModelInstanceManager::GetModelInstance(0).GetBoundingBox();
-		modelRadius = Length(obb.GetDimensions()) * 0.5f;
-		const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 0.5f, 0.0f, 0.0f);
-		m_Camera.SetEyeAtUp(eye, obb.GetCenter(), Vector3(kYUnitVector));
-    }
+        g_ForceRebuild = false;
 
-    m_Camera.SetZRange(0.01f, 80000.0f);
-	if (gltfFileName.size() == 0)
-    { 
-        FlyingFPSCamera* flyingCamera = new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector));
-        flyingCamera->SetMoveSpeed(modelRadius * 0.02f);
-        flyingCamera->SetStrafeSpeed(modelRadius * 0.02f);
-        m_CameraController.reset(flyingCamera);
-    }
-	else
-        m_CameraController.reset(new OrbitCamera(m_Camera, ModelInstanceManager::GetModelInstance(0).GetBoundingSphere(), Vector3(kYUnitVector)));
+    if (CommandLineArgs::GetString(L"model", gltfFileName))
+        ReloadModel(gltfFileName, true);
+    else
+        ReloadModel(L"Sponza/PBR/sponza2.gltf", false);
 
     //const Vector3 BoxCenter = m_ModelInst.GetBoundingBox().GetCenter();
     //const Vector3 BoxDimensions = m_ModelInst.GetBoundingBox().GetDimensions();
@@ -266,6 +338,8 @@ void SceneViewer::Cleanup( void )
     g_IBLTextures.clear();
 
     g_IBLHDRITextures.clear();
+    g_GltfFiles.clear();
+    g_SceneViewer = nullptr;
 
     Renderer::Shutdown();
     Lighting::Shutdown();
@@ -285,6 +359,20 @@ void SceneViewer::Update( float deltaT )
         DebugZoom.Decrement();
     else if (GameInput::IsFirstPressed(GameInput::kRShoulder))
         DebugZoom.Increment();
+
+    if (m_LoadPending)
+    {
+        if (m_LoadDelayFrames > 0)
+        {
+            --m_LoadDelayFrames;
+        }
+        else
+        {
+            ReloadModel(m_PendingModelPath, m_PendingUseOrbit);
+            m_LoadPending = false;
+            m_ShowLoadingUI = false;
+        }
+    }
 
     const size_t NumCameras = ModelInstanceManager::GetModelInstance(0).GetNumCameras();
     const bool bUseglTFCamera = NumCameras > 0 && g_UseglTFCamera;
@@ -507,4 +595,32 @@ void SceneViewer::RenderScene( void )
 
     m_PrevCamera = m_Camera;
     gfxContext.Finish();
+}
+
+void SceneViewer::RenderUI( GraphicsContext& )
+{
+    if (!m_ShowLoadingUI)
+        return;
+
+    ImGuiIO& io = ImGui::GetIO();
+    const char* text = "Loading model...";
+    const ImVec2 textSize = ImGui::CalcTextSize(text);
+    const ImVec2 padding(24.0f, 16.0f);
+    const ImVec2 windowSize(textSize.x + padding.x * 2.0f, textSize.y + padding.y * 2.0f);
+    const ImVec2 windowPos((io.DisplaySize.x - windowSize.x) * 0.5f, (io.DisplaySize.y - windowSize.y) * 0.5f);
+
+    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
+    drawList->AddRectFilled(ImVec2(0.0f, 0.0f), io.DisplaySize, IM_COL32(0, 0, 0, 120));
+
+    ImGui::SetNextWindowPos(windowPos, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav |
+        ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoFocusOnAppearing;
+    if (ImGui::Begin("Loading##SceneViewer", nullptr, flags))
+    {
+        ImGui::SetCursorPos(ImVec2(padding.x, padding.y));
+        ImGui::TextUnformatted(text);
+    }
+    ImGui::End();
 }
