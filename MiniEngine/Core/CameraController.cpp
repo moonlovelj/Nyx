@@ -65,6 +65,17 @@ void FlyingFPSCamera::Update( float deltaTime )
     const bool captureMouse = ImGuiManager::WantsCaptureMouse();
     const bool captureKeyboard = ImGuiManager::WantsCaptureKeyboard();
 
+    if (!captureMouse)
+    {
+        const float scroll = GameInput::GetAnalogInput(GameInput::kAnalogMouseScroll);
+        if (scroll != 0.0f)
+        {
+            float speed = g_CameraSpeed;
+            const float scale = scroll > 0.0f ? 1.25f : 0.8f;
+            g_CameraSpeed = speed * scale;
+        }
+    }
+
     if (GameInput::IsFirstPressed(GameInput::kLThumbClick) || (!captureKeyboard && GameInput::IsFirstPressed(GameInput::kKey_lshift)))
         m_FineMovement = !m_FineMovement;
 
