@@ -77,19 +77,19 @@
     </Manifest>
     <ClCompile>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">..\ThirdParty\lz4;..\ThirdParty\meshoptimizer;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">..\ThirdParty\lz4;..\ThirdParty\meshoptimizer;..\ThirdParty\cgltf;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OpenMPSupport Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</OpenMPSupport>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <ClCompile>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">..\ThirdParty\lz4;..\ThirdParty\meshoptimizer;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">..\ThirdParty\lz4;..\ThirdParty\meshoptimizer;..\ThirdParty\cgltf;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OpenMPSupport Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">true</OpenMPSupport>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <ClCompile>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Release|x64'">stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|x64'">..\ThirdParty\lz4;..\ThirdParty\meshoptimizer;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|x64'">..\ThirdParty\lz4;..\ThirdParty\meshoptimizer;..\ThirdParty\cgltf;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OpenMPSupport Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</OpenMPSupport>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
@@ -104,8 +104,8 @@
     </FxCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="..\ThirdParty\cgltf\cgltf.h" />
     <ClInclude Include="Animation.h" />
-    <ClInclude Include="cgltf.h" />
     <ClInclude Include="ConstantBuffers.h" />
     <ClInclude Include="GeometryStreaming.h" />
     <ClInclude Include="glTF.h" />

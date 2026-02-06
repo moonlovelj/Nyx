@@ -182,9 +182,6 @@
     <ClInclude Include="glTFLoader.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="cgltf.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
     <ClInclude Include="InstanceResourceManager.h">
       <Filter>Source Files</Filter>
     </ClInclude>
@@ -192,6 +189,9 @@
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="ModelInstanceManager.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\ThirdParty\cgltf\cgltf.h">
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>

@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-#include "cgltf.h"
+#include "../ThirdParty/cgltf/cgltf.h"
 #include <string>
 #include <vector>
 #include <memory>
