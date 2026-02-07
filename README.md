@@ -22,8 +22,16 @@ It serves as a hands-on experimental platform built on Microsoft MiniEngine and 
 
 - Demo video: 
 
-- [![Nyx-Nanite Zorah Demo](Images/Zorah_Shading.jpg)]
-  (https://www.youtube.com/watch?v=qyV6u7DOglQ)
+  ## 🎬 Demo
+
+  <p align="center">
+    <a href="https://www.youtube.com/watch?v=qyV6u7DOglQ&t=9s">
+      <img src="docs/images/demo_cover.png" width="900"/>
+    </a>
+  </p>
+
+
+  > 18.9G triangles • Nanite-style • GPU-driven culling • Mesh shader pipeline • Real-time streaming
 
 - Screen Shot:
 
