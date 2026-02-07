@@ -214,6 +214,7 @@ public:
     void LoopAllAnimations(void);
 
     void SetPosition(Math::Vector3 position);
+    void SetRotation(Math::Quaternion rotation);
 
     size_t GetNumCameras() const { return m_Cameras.size(); }
     std::vector<std::shared_ptr<Math::Camera>> GetCameras() const;

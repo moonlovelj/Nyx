@@ -18,4 +18,7 @@ namespace ModelInstanceManager
 	uint32_t GetNumModelInstances();
 	ModelInstance& GetModelInstance(uint32_t index);
 	Model* GetSourceModel();
+	Math::Vector3 GetInstanceDistributionCenter();
+	Math::Vector3 GetInstanceDistributionHalfExtents();
+	float GetInstanceDistributionRadius();
 };

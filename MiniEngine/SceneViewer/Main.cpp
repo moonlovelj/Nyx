@@ -28,6 +28,7 @@
 #include "imgui.h"
 #include <chrono>
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <system_error>
 #include <wchar.h>
@@ -135,7 +136,7 @@ void ChangeGltfSet(EngineVar::ActionType)
     int setIdx = g_GltfSet - 1;
     if (setIdx < 0)
     {
-        g_SceneViewer->QueueModelReload(L"Sponza/PBR/sponza2.gltf", false);
+        g_SceneViewer->QueueModelReload(L"Assets/bunny/bunny.gltf", false);
         return;
     }
 
@@ -322,22 +323,28 @@ void SceneViewer::ReloadModel(const std::wstring& filePath, bool useOrbit, uint3
         ModelInstanceManager::Cleanup();
 
     ModelInstanceManager::Initialize(model, instanceCount);
-    OrientedBox obb = ModelInstanceManager::GetModelInstance(0).GetBoundingBox();
-    float modelRadius = Length(obb.GetDimensions()) * 0.5f;
+    const Vector3 sceneCenter = ModelInstanceManager::GetInstanceDistributionCenter();
+    const Vector3 sceneHalfExtents = ModelInstanceManager::GetInstanceDistributionHalfExtents();
+    const float sceneRadius = std::max(ModelInstanceManager::GetInstanceDistributionRadius() * 0.1f, 0.01f);
+    const float halfX = std::max(static_cast<float>(sceneHalfExtents.GetX()), 5.f);
+    const float halfZ = std::max(static_cast<float>(sceneHalfExtents.GetZ()), 5.f);
+    const Vector3 cornerCenter = sceneCenter + Vector3(halfX, 0.0f, halfZ);
+    const Vector3 eye = cornerCenter + std::max((float)model->m_BoundingSphere.GetRadius()* 0.4f, 5.f) * Normalize(Vector3(0.5f, 0.2f, 0.0f));
+    m_Camera.SetEyeAtUp(eye, sceneCenter, Vector3(kYUnitVector));
 
-    const Vector3 eye = obb.GetCenter() + Vector3(modelRadius * 0.5f, 0.0f, 0.0f);
-    m_Camera.SetEyeAtUp(eye, obb.GetCenter(), Vector3(kYUnitVector));
-    m_Camera.SetZRange(0.01f, 100000.0f);
+    const float farClip = std::clamp(ModelInstanceManager::GetInstanceDistributionRadius(), 1000.0f, 100000.0f);
+    m_Camera.SetZRange(0.01f, farClip);
 
     if (useOrbit)
     {
-        m_CameraController.reset(new OrbitCamera(m_Camera, ModelInstanceManager::GetModelInstance(0).GetBoundingSphere(), Vector3(kYUnitVector)));
+        m_CameraController.reset(new OrbitCamera(m_Camera, BoundingSphere(sceneCenter, sceneRadius), Vector3(kYUnitVector)));
     }
     else
     {
         FlyingFPSCamera* flyingCamera = new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector));
-        flyingCamera->SetMoveSpeed(modelRadius * 0.02f);
-        flyingCamera->SetStrafeSpeed(modelRadius * 0.02f);
+        const float cameraMoveSpeed = std::max(sceneRadius * 0.2f, 0.1f);
+        flyingCamera->SetMoveSpeed(cameraMoveSpeed);
+        flyingCamera->SetStrafeSpeed(cameraMoveSpeed);
         m_CameraController.reset(flyingCamera);
     }
 }
@@ -394,16 +401,12 @@ void SceneViewer::Startup( void )
 
     uint32_t instanceCount = 1;
     if (CommandLineArgs::GetInteger(L"instances", instanceCount))
-        instanceCount = std::clamp(instanceCount, 1u, 100000000u);
+        instanceCount = std::clamp(instanceCount, 1u, 1000000u);
 
     if (CommandLineArgs::GetString(L"model", gltfFileName))
         ReloadModel(gltfFileName, false, instanceCount);
     else
-        ReloadModel(L"Assets/bunny/bunny.gltf", false, instanceCount);
-
-    //const Vector3 BoxCenter = m_ModelInst.GetBoundingBox().GetCenter();
-    //const Vector3 BoxDimensions = m_ModelInst.GetBoundingBox().GetDimensions();
-    //Lighting::CreateRandomLights(BoxCenter - BoxDimensions * 0.5f, BoxCenter + BoxDimensions * 0.5f);
+        ReloadModel(L"Assets/bunny/bunny.gltf", false, 10000);
 }
 
 void SceneViewer::Cleanup( void )

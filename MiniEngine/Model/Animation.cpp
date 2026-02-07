@@ -194,6 +194,11 @@ void ModelInstance::SetPosition(Math::Vector3 position)
     m_Locator.SetTranslation(position);
 }
 
+void ModelInstance::SetRotation(Math::Quaternion rotation)
+{
+    m_Locator.SetRotation(Math::Normalize(rotation));
+}
+
 std::vector<std::shared_ptr<Math::Camera>> ModelInstance::GetCameras() const
 {
 	std::vector<std::shared_ptr<Math::Camera>> cameras;
