@@ -1,0 +1,11 @@
+Model Information:
+* title:	Arcane - Jinx
+* source:	https://sketchfab.com/3d-models/arcane-jinx-b74f25a5ee6e43efbe9766b9fbebc705
+* author:	Craft Tama (https://sketchfab.com/rizky08)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Arcane - Jinx" (https://sketchfab.com/3d-models/arcane-jinx-b74f25a5ee6e43efbe9766b9fbebc705) by Craft Tama (https://sketchfab.com/rizky08) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
