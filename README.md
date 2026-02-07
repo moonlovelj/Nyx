@@ -4,7 +4,7 @@
 
 Nyx is a learning- and research-driven personal rendering project dedicated to studying extreme-scale geometry rendering techniques, such as continuous LOD, GPU-driven culling, mesh-shader dispatch, and demand-driven geometry streaming.
 
-It serves as a hands-on experimental platform built on Microsoft MiniEngine and is currently validated with a mega scene containing:
+It serves as a hands-on experimental platform built on Microsoft MiniEngine and is currently validated with a mega scene [Zorah](http://developer.download.nvidia.com/ProGraphics/nvpro-samples/zorah_main_public.gltf.7z)(from Nvidia) containing:
 
 - **1,639,668,228 unique triangles**
 - **18,949,504,889 instanced triangles**
@@ -13,31 +13,27 @@ It serves as a hands-on experimental platform built on Microsoft MiniEngine and 
 
 - [Showcase](#showcase)
 - [Core Features](#core-features)
-- [Performance Snapshot](#performance-snapshot)
 - [Architecture](#architecture)
 - [Build and Run](#build-and-run)
 
 ## Showcase
 
-- Demo video: `TODO`
-- Technical breakdown post: `TODO`
-- PIX capture screenshots: `TODO`
+- All benchmarks were performed on a system featuring an i7-14700KF and an RTX 4070 Ti Super at 4K rendering resolution.
 
-| View | Preview |
-|---|---|
-| Hero shot | `TODO` |
-| Meshlet LOD view | `TODO` |
-| Culling debug view | `TODO` |
-| Streaming stress view | `TODO` |
+- Demo video: 
 
-## Why Nyx
+- [![Nyx-Nanite Zorah Demo](Images/Zorah_Shading.jpg)]
+  (https://www.youtube.com/watch?v=qyV6u7DOglQ)
 
-Real-time scenes are increasingly dominated by tiny triangles and massive geometry datasets. Nyx explores a practical DX12 implementation strategy to:
+- Screen Shot:
 
-1. Keep visual detail where it matters via screen-space error traversal.
-2. Move visibility and traversal work to GPU.
-3. Stream only required geometry pages under memory pressure.
-4. Keep the pipeline inspectable and tunable in runtime.
+  ![Zorah Shaing](Images/Zorah_Shading.jpg)
+
+  ![Zorah Meshlets](Images/Zorah_Meshlet.jpg)
+
+  ![Zorah Triangles](Images/Zorah_Triangle.jpg)
+
+  ![Zorah Profile](Images/Zorah_GPUTrace.png)
 
 ## Core Features
 
@@ -48,36 +44,9 @@ Real-time scenes are increasingly dominated by tiny triangles and massive geomet
 - Dynamic geometry streaming with residency table updates
 - Async IO worker + LZ4-compressed geometry pages
 - Runtime ImGui controls:
-  - GLTF hot switching
   - pixel error threshold
   - freeze culling
   - debug visualization modes
-
-## Performance Snapshot
-
-### Triangle Scale
-
-| Scene | Unique Triangles | Instanced Triangles |
-|---|---:|---:|
-| `zorah_main_public.gltf` | 1,639,668,228 | 18,949,504,889 |
-
-Data source: `MiniEngine/SceneViewer/Assets/zorah_main_public.gltf/CountGltfTriangles.ps1`
-
-### Local Asset Size (Stress Setup)
-
-| File | Size |
-|---|---:|
-| `zorah_main_public.gltf.bin` | ~38.8 GB |
-| `zorah_main_public.gltf.nvsngeo` | ~49.1 GB |
-| `zorah_main_public.mini` | ~55.5 GB |
-
-### Reproducible Benchmark Table Template
-
-| Scene | Resolution | GPU | CPU | Avg FPS | 1% Low | Notes |
-|---|---|---|---|---:|---:|---|
-| Zorah | `TODO` | `TODO` | `TODO` | `TODO` | `TODO` | `TODO` |
-| San Miguel | `TODO` | `TODO` | `TODO` | `TODO` | `TODO` | `TODO` |
-| Jinx | `TODO` | `TODO` | `TODO` | `TODO` | `TODO` | `TODO` |
 
 ## Architecture
 
@@ -112,11 +81,6 @@ When loading `.gltf` / `.glb`, Nyx can build a cached `.mini`:
 - LZ4 decompress + upload + address table sync
 - Dynamic chunk growth for VRAM pool
 
-### Diagrams
-
-- Cluster culling flow: `Docs/ClusterCull.md`
-- DAG sketch: `Docs/DAG.md`
-
 ## Technical Snapshot
 
 - Language: **C++20**
@@ -126,6 +90,8 @@ When loading `.gltf` / `.glb`, Nyx can build a cached `.mini`:
 - Meshlet defaults:
   - Max vertices: **128**
   - Max triangles: **128**
+  - Meshlet group size: **32**
+  - BVH node children: **8**
 - Max streaming requests/update: **16384**
 
 ## Build and Run
@@ -152,17 +118,35 @@ Recommended for mega scenes:
 
 ## Command Line Examples
 
+Open power shell,  cd to `MiniEngine\Build\x64\Release\Output\SceneViewer`
+
 Load a model:
 
 ```bash
-SceneViewer.exe -model Assets/jinx/scene.gltf
+.\SceneViewer.exe -model .\Assets\bunny_v2\bunny.gltf
+```
+
+Load a model with instance count:
+
+```
+.\SceneViewer.exe -model .\Assets\bunny_v2\bunny.gltf -instances 3600
 ```
 
 Force rebuild `.mini` cache:
 
 ```bash
-SceneViewer.exe -model Assets/jinx/scene.gltf -rebuild 1
+.\SceneViewer.exe -model .\Assets\bunny_v2\bunny.gltf -rebuild 1
 ```
+
+## Notes
+
+If you would like to load your own glTF file, please place it inside the **Assets** folder and launch the program via the command line.
+
+Note that for extremely large scenes, the build process may still be slow even with parallel construction enabled. The performance depends heavily on your hardware specifications.
+
+If you plan to build and load the **Zorah** scene yourself, make sure your system has at least **48 GB of RAM** and a high-speed SSD.
+
+Alternatively, you can download and use the prebuilt files I have provided:
 
 ## Controls
 
@@ -181,8 +165,8 @@ SceneViewer.exe -model Assets/jinx/scene.gltf -rebuild 1
 
 ## Acknowledgements
 
-- [Microsoft MiniEngine](https://github.com/microsoft/DirectX-Graphics-Samples/tree/master/MiniEngine)
 - [Unreal Engine Nanite talks and publications](https://advances.realtimerendering.com/s2021/Karis_Nanite_SIGGRAPH_Advances_2021_final.pdf)
+- [Microsoft MiniEngine](https://github.com/microsoft/DirectX-Graphics-Samples/tree/master/MiniEngine)
 - [`meshoptimizer`](https://github.com/zeux/meshoptimizer)
 - [`lz4`](https://github.com/lz4/lz4)
 - [`cgltf`](https://github.com/jkuhlmann/cgltf)
@@ -198,7 +182,6 @@ SceneViewer.exe -model Assets/jinx/scene.gltf -rebuild 1
 
 ## Contact
 
-- GitHub: https://github.com/moonlovelj
 - Email: `love.jingjing.forever.1314@gmail.com`
 
 
