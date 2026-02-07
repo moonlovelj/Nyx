@@ -28,6 +28,8 @@
 #include "imgui.h"
 #include <chrono>
 #include <algorithm>
+#include <filesystem>
+#include <system_error>
 #include <wchar.h>
 
 extern "C" {
@@ -55,7 +57,7 @@ public:
     virtual void Update( float deltaT ) override;
     virtual void RenderScene( void ) override;
     virtual void RenderUI( class GraphicsContext& ) override;
-    void ReloadModel( const std::wstring& filePath, bool useOrbit );
+    void ReloadModel( const std::wstring& filePath, bool useOrbit, uint32_t instanceCount = 1 );
     void QueueModelReload( const std::wstring& filePath, bool useOrbit );
 
 private:
@@ -75,7 +77,10 @@ private:
     std::wstring m_PendingModelPath;
 };
 
-CREATE_APPLICATION( SceneViewer )
+int wmain(int /*argc*/, wchar_t** /*argv*/)
+{
+    return GameCore::RunApplication(SceneViewer(), L"SceneViewer", GetModuleHandle(nullptr), SW_SHOWDEFAULT);
+}
 
 ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 1.0f, -5.0f, 20.0f, 0.1f); // unit: lx
 NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0f, 0.1f );
@@ -140,13 +145,78 @@ void ChangeGltfSet(EngineVar::ActionType)
     g_SceneViewer->QueueModelReload(g_GltfFiles[setIdx], false);
 }
 
-#include <direct.h> // for _getcwd() to check data root path
+namespace
+{
+    bool DirectoryExists(const std::filesystem::path& path)
+    {
+        std::error_code ec;
+        return std::filesystem::exists(path, ec) && std::filesystem::is_directory(path, ec);
+    }
+
+    bool IsSceneViewerResourceRoot(const std::filesystem::path& path)
+    {
+        return DirectoryExists(path / L"Assets") && DirectoryExists(path / L"Textures" / L"HDRIs");
+    }
+
+    void EnsureSceneViewerResourceRoot()
+    {
+        wchar_t cwdBuffer[MAX_PATH] = {};
+        GetCurrentDirectoryW(_countof(cwdBuffer), cwdBuffer);
+        std::filesystem::path cwd(cwdBuffer);
+        if (IsSceneViewerResourceRoot(cwd))
+        {
+            Utility::Printf("Resource root: %ws\n", cwd.c_str());
+            return;
+        }
+
+        wchar_t modulePath[MAX_PATH] = {};
+        DWORD modulePathLen = GetModuleFileNameW(nullptr, modulePath, _countof(modulePath));
+        if (modulePathLen == 0 || modulePathLen >= _countof(modulePath))
+        {
+            Utility::Printf("Warning: Unable to query executable path for resource root detection.\n");
+            return;
+        }
+
+        const std::filesystem::path exeDir = std::filesystem::path(modulePath).parent_path();
+        std::vector<std::filesystem::path> candidates;
+
+        for (std::filesystem::path probe = exeDir;;)
+        {
+            candidates.push_back(probe);
+            candidates.push_back(probe / L"SceneViewer");
+            candidates.push_back(probe / L"MiniEngine" / L"SceneViewer");
+
+            std::filesystem::path parent = probe.parent_path();
+            if (parent == probe)
+                break;
+            probe = parent;
+        }
+
+        for (const std::filesystem::path& candidate : candidates)
+        {
+            if (!IsSceneViewerResourceRoot(candidate))
+                continue;
+
+            std::error_code ec;
+            std::filesystem::path normalized = std::filesystem::weakly_canonical(candidate, ec);
+            const std::wstring target = ec ? candidate.wstring() : normalized.wstring();
+            if (SetCurrentDirectoryW(target.c_str()))
+            {
+                Utility::Printf("Resource root: %ws\n", target.c_str());
+            }
+            else
+            {
+                Utility::Printf("Warning: Failed to switch working directory to %ws\n", target.c_str());
+            }
+            return;
+        }
+
+        Utility::Printf("Warning: SceneViewer resource root not found. cwd=%ws exeDir=%ws\n", cwd.c_str(), exeDir.c_str());
+    }
+}
 
 void LoadIBLHDRITextures()
 {
-    char CWD[256];
-    _getcwd(CWD, 256);
-
     Utility::Printf("Loading IBL hdri environment maps\n");
 
     g_IBLSet.AddEnum(L"None");
@@ -239,7 +309,7 @@ void LoadGltfFiles()
     Utility::Printf("Found %u glTF files under Assets\n", (uint32_t)g_GltfFiles.size());
 }
 
-void SceneViewer::ReloadModel( const std::wstring& filePath, bool useOrbit )
+void SceneViewer::ReloadModel(const std::wstring& filePath, bool useOrbit, uint32_t instanceCount)
 {
     auto model = Renderer::LoadModel(filePath, g_ForceRebuild);
     if (model == nullptr)
@@ -251,7 +321,7 @@ void SceneViewer::ReloadModel( const std::wstring& filePath, bool useOrbit )
     if (ModelInstanceManager::GetNumModelInstances() > 0)
         ModelInstanceManager::Cleanup();
 
-    ModelInstanceManager::Initialize(model, 1);
+    ModelInstanceManager::Initialize(model, instanceCount);
     OrientedBox obb = ModelInstanceManager::GetModelInstance(0).GetBoundingBox();
     float modelRadius = Length(obb.GetDimensions()) * 0.5f;
 
@@ -284,6 +354,8 @@ void SceneViewer::QueueModelReload( const std::wstring& filePath, bool useOrbit 
 void SceneViewer::Startup( void )
 {
     // Setup your data
+
+    EnsureSceneViewerResourceRoot();
 
     // MotionBlur::Enable = true;
     //TemporalEffects::EnableTAA = false;
@@ -320,10 +392,14 @@ void SceneViewer::Startup( void )
     else
         g_ForceRebuild = false;
 
+    uint32_t instanceCount = 1;
+    if (CommandLineArgs::GetInteger(L"instances", instanceCount))
+        instanceCount = std::clamp(instanceCount, 1u, 100000000u);
+
     if (CommandLineArgs::GetString(L"model", gltfFileName))
-        ReloadModel(gltfFileName, true);
+        ReloadModel(gltfFileName, false, instanceCount);
     else
-        ReloadModel(L"Sponza/PBR/sponza2.gltf", false);
+        ReloadModel(L"Assets/bunny/bunny.gltf", false, instanceCount);
 
     //const Vector3 BoxCenter = m_ModelInst.GetBoundingBox().GetCenter();
     //const Vector3 BoxDimensions = m_ModelInst.GetBoundingBox().GetDimensions();

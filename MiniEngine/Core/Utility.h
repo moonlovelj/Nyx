@@ -1,4 +1,4 @@
-﻿//
+//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -21,8 +21,18 @@ namespace Utility
     inline void Print( const char* msg ) { printf("%s", msg); }
     inline void Print( const wchar_t* msg ) { wprintf(L"%ws", msg); }
 #else
-    inline void Print( const char* msg ) { OutputDebugStringA(msg); }
-    inline void Print( const wchar_t* msg ) { OutputDebugString(msg); }
+    inline void Print( const char* msg )
+    {
+        OutputDebugStringA(msg);
+        if (msg != nullptr)
+            fputs(msg, stdout);
+    }
+    inline void Print( const wchar_t* msg )
+    {
+        OutputDebugString(msg);
+        if (msg != nullptr)
+            fputws(msg, stdout);
+    }
 #endif
 
     inline void Printf( const char* format, ... )

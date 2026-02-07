@@ -1,4 +1,4 @@
-﻿//
+//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -37,6 +37,11 @@ namespace GameCore
     bool gIsSupending = false;
     static bool s_ExitRequested = false;
     extern HWND g_hWnd;
+
+    static void RequestExit()
+    {
+        s_ExitRequested = true;
+    }
 
     void InitializeApplication( IGameApp& game )
     {
@@ -241,13 +246,13 @@ namespace GameCore
         {
             if (wParam == VK_F4)
             {
-                s_ExitRequested = true;
+                RequestExit();
                 DestroyWindow(hWnd);
                 return 0;
             }
             if (wParam == VK_ESCAPE)
             {
-                s_ExitRequested = true;
+                RequestExit();
                 DestroyWindow(hWnd);
                 return 0;
             }
@@ -260,7 +265,7 @@ namespace GameCore
 
         if (message == WM_KEYDOWN && wParam == VK_ESCAPE)
         {
-            s_ExitRequested = true;
+            RequestExit();
             DestroyWindow(hWnd);
             return 0;
         }
@@ -290,7 +295,7 @@ namespace GameCore
         switch( message )
         {
         case WM_CLOSE:
-            s_ExitRequested = true;
+            RequestExit();
             DestroyWindow(hWnd);
             return 0;
 
@@ -299,7 +304,7 @@ namespace GameCore
             break;
 
         case WM_DESTROY:
-            s_ExitRequested = true;
+            RequestExit();
             PostQuitMessage(0);
             break;
 

@@ -79,12 +79,12 @@ namespace GeometryStreaming
 		const size_t freeSlots = m_FreePool.size();
 		const size_t usedSlots = allocatedSlots > freeSlots ? (allocatedSlots - freeSlots) : 0;
 		const uint64_t usedBytes = static_cast<uint64_t>(usedSlots) * static_cast<uint64_t>(Renderer::kPageSizeInBytes);
-		Utility::Printf(L"GeometryStreaming: %ls chunks=%llu/%u, allocated=%llu MB, used=%llu MB, freeSlots=%zu\n",
+		Utility::Printf(L"GeometryStreaming: %ls chunks=%llu/%u, allocated=%llu MB, used=%.2f MB, freeSlots=%zu\n",
 			tag,
 			allocatedChunks,
 			kMaxChunks,
 			allocatedBytes / (1024 * 1024),
-			usedBytes / (1024 * 1024),
+			usedBytes / (1024.0 * 1024.0),
 			freeSlots);
 	}
 
@@ -369,6 +369,8 @@ void GeometryStreaming::PinRootPages(Model* model)
 	{
 		Utility::Printf(L"GeometryStreaming: Pinned %zu root pages.\n", pinnedCount);
 	}
+
+    LogChunkStats(L"after pinning root pages");
 }
 
 void GeometryStreaming::Shutdown()
