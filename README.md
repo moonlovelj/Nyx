@@ -22,11 +22,11 @@ It serves as a hands-on experimental platform built on Microsoft MiniEngine and 
 
 - Demo video: 
 
-  ## 🎬 Demo
+  ## 🎬 Zorah
 
   <p align="center">
     <a href="https://www.youtube.com/watch?v=qyV6u7DOglQ&t=9s">
-      <img src="docs/images/demo_cover.png" width="900"/>
+      <img src="Images/Zorah_Shading.jpg" width="900"/>
     </a>
   </p>
 
