@@ -1,4 +1,4 @@
-# Nyx
+# Nanite-style virtualized geometry renderer on DirectX 12
 
 Nanite-style virtualized geometry renderer on DirectX 12 (built on Microsoft MiniEngine).
 
