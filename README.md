@@ -1,93 +1,160 @@
 # Nyx
 
-**Nanite-style Virtualized Geometry Renderer on DirectX 12 (MiniEngine-based)**
+Nanite-style virtualized geometry renderer on DirectX 12 (built on Microsoft MiniEngine).
 
-Nyx is a learning- and research-driven personal rendering project dedicated to studying extreme-scale geometry rendering techniques, such as continuous LOD, GPU-driven culling, mesh-shader dispatch, and demand-driven geometry streaming.
+Nyx is a personal research project focused on extreme-scale geometry rendering: continuous LOD, GPU-driven culling, mesh-shader dispatch, and demand-driven geometry streaming.
 
-It serves as a hands-on experimental platform built on Microsoft MiniEngine and is currently validated with a mega scene [Zorah](http://developer.download.nvidia.com/ProGraphics/nvpro-samples/zorah_main_public.gltf.7z)(from Nvidia) containing:
+The current stress test scene is [Zorah](http://developer.download.nvidia.com/ProGraphics/nvpro-samples/zorah_main_public.gltf.7z) (NVIDIA), with:
 
 - **1,639,668,228 unique triangles**
 - **18,949,504,889 instanced triangles**
 
-## Jump To
-
-- [Showcase](#showcase)
-- [Core Features](#core-features)
-- [Architecture](#architecture)
-- [Build and Run](#build-and-run)
-
 ## Showcase
 
-- All benchmarks were performed on a system featuring an i7-14700KF and an RTX 4070 Ti Super at 4K rendering resolution.
+Test platform for the screenshots/video below: **i7-14700KF + RTX 4070 Ti SUPER**, rendered at **4K**.
 
-- Demo video: 
+Demo video:
 
-  ## 🎬 Zorah
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=qyV6u7DOglQ&t=9s">
+    <img src="Images/Zorah_Shading.jpg" width="900" alt="Nyx Zorah demo"/>
+  </a>
+</p>
 
-  <p align="center">
-    <a href="https://www.youtube.com/watch?v=qyV6u7DOglQ&t=9s">
-      <img src="Images/Zorah_Shading.jpg" width="900"/>
-    </a>
-  </p>
+> 18.9G triangles, Nanite-style pipeline, GPU-driven culling, mesh shader rendering, real-time streaming
+
+Screenshots:
+
+<p align="center">Lit mode</p>
+
+![Zorah shading](Images/Zorah_Shading.jpg)
 
 
-  > 18.9G triangles • Nanite-style • GPU-driven culling • Mesh shader pipeline • Real-time streaming
 
-- Screen Shot:
+<p align="center">Meshlet mode</p>
 
-  ![Zorah Shaing](Images/Zorah_Shading.jpg)
+![Zorah meshlets](Images/Zorah_Meshlet.jpg)
 
-  ![Zorah Meshlets](Images/Zorah_Meshlet.jpg)
 
-  ![Zorah Triangles](Images/Zorah_Triangle.jpg)
 
-  ![Zorah Profile](Images/Zorah_GPUTrace.png)
+<p align="center">Triangle mode</p>
+
+![Zorah triangles](Images/Zorah_Triangle.jpg)
+
+
+
+![Zorah GPU trace](Images/Zorah_GPUTrace.png)
 
 ## Core Features
 
 - Nanite-style meshlet hierarchy with DAG/BVH traversal
-- GPU-driven rendering with indirect `DispatchMesh`
+- GPU-driven rendering via indirect `DispatchMesh`
 - Two-pass frustum + HZB occlusion culling
-- Visibility buffer path + resolve to deferred GBuffer
-- Dynamic geometry streaming with residency table updates
-- Async IO worker + LZ4-compressed geometry pages
-- Runtime ImGui controls:
-  - pixel error threshold
-  - freeze culling
-  - debug visualization modes
+- Visibility buffer pipeline, then resolve to deferred GBuffer
+- Dynamic geometry streaming with residency/address table updates
+- Async page IO + LZ4-compressed geometry pages
+- Runtime debug/tuning UI (pixel error, culling freeze, debug modes)
 
-## Architecture
+## Quick Start
 
-### Offline / First-load Build
+### Requirements
 
-When loading `.gltf` / `.glb`, Nyx can build a cached `.mini`:
+- Windows 10/11
+- Visual Studio 2022
+- DX12 GPU with Mesh Shader support
+- NuGet package restore enabled
 
-1. Parse scene/material/camera/animation data.
-2. Build meshlets and group them.
-3. Simplify groups iteratively to generate multi-level LOD.
-4. Build hierarchy nodes and metadata.
-5. Pack geometry into pages.
-6. Compress pages with LZ4.
-7. Save metadata + blob into `.mini`.
+Recommended for large scenes:
+
+- High-VRAM GPU
+- 32 GB+ RAM (48 GB+ recommended for rebuilding very large assets)
+- NVMe SSD
+- Large free disk space
+
+### Build
+
+1. Open `MiniEngine/SceneViewer/SceneViewer.sln`
+2. Select `Release | x64`
+3. Build and run `SceneViewer`
+
+By default, SceneViewer loads:
+
+- `Assets/bunny/bunny.gltf`
+
+### Zorah Quick Start (Prebuilt Cache)
+
+Building Zorah cache locally can be time-consuming and memory-intensive.
+If you only want to run the demo, use the prebuilt files:
+
+- [Download prebuilt Zorah package](https://pan.quark.cn/s/28de91939fee)
+
+After download, extract/copy the files to:
+
+`MiniEngine/SceneViewer/Assets/zorah_main_public/`
+
+Then run:
+
+```powershell
+.\SceneViewer.exe -model .\Assets\zorah_main_public\zorah_main_public.gltf
+```
+
+## Command Line
+
+From the SceneViewer output directory, examples:
+
+Typical path (default MiniEngine layout):
+
+`MiniEngine\Build\x64\Release\Output\SceneViewer\`
+
+```powershell
+.\SceneViewer.exe -model .\Assets\bunny\bunny.gltf
+.\SceneViewer.exe -model .\Assets\Jinx\scene.gltf -instances 3600
+.\SceneViewer.exe -model .\Assets\bunny\bunny.gltf -rebuild 1
+```
+
+Arguments:
+
+- `-model <path>`: glTF/glb scene path
+- `-instances <N>`: instance count (clamped to `1..1000000`)
+- `-rebuild 1`: force rebuild `.mini` cache
+
+## Controls
+
+- `W A S D` / `Q E`: move
+- Mouse: look
+- Mouse wheel: movement speed scale
+- `Shift`: fine movement toggle
+- `Backspace`: engine tuning/debug UI
+
+## Architecture Overview
+
+### Offline / First-load Build (`.gltf/.glb` -> `.mini`)
+
+1. Parse scene/material/camera/animation data
+2. Build meshlets and meshlet groups
+3. Iteratively simplify groups for multi-level LOD
+4. Build hierarchy nodes and metadata
+5. Pack geometry pages
+6. Compress pages with LZ4
+7. Save metadata + blob to `.mini`
 
 ### Runtime Frame Flow
 
-1. Instance cull pass
-2. DAG/hierarchy cull pass (frustum + HZB)
+1. Instance culling
+2. DAG/hierarchy culling (frustum + HZB)
 3. Build indirect mesh dispatch args
 4. Mesh shader pass 0
-5. Export depth + generate HZB
+5. Export depth and generate HZB
 6. Repeat cull + mesh shader pass 1
 7. Resolve visibility buffer to GBuffer
-8. Deferred lighting + post
+8. Deferred lighting + post effects
 
 ### Streaming Runtime
 
 - Page size: **256 KB**
 - Chunk size: **256 MB**
-- GPU request mask readback + async page load
-- LZ4 decompress + upload + address table sync
-- Dynamic chunk growth for VRAM pool
+- Max streaming requests/update: **16384**
+- GPU request mask readback + async page load + LZ4 decompress + upload
 
 ## Technical Snapshot
 
@@ -95,81 +162,20 @@ When loading `.gltf` / `.glb`, Nyx can build a cached `.mini`:
 - Graphics API: **DirectX 12**
 - Shader Model: **6.6**
 - Agility SDK package: `Microsoft.Direct3D.D3D12 1.616.1`
-- Meshlet defaults:
-  - Max vertices: **128**
-  - Max triangles: **128**
-  - Meshlet group size: **32**
-  - BVH node children: **8**
-- Max streaming requests/update: **16384**
-
-## Build and Run
-
-### Requirements
-
-- Windows 10/11
-- Visual Studio 2022
-- DX12-capable GPU with Mesh Shader support
-- NuGet package restore enabled
-
-Recommended for mega scenes:
-
-- High VRAM GPU
-- 32 GB+ RAM
-- NVMe SSD
-- Large free disk space
-
-### Steps
-
-1. Open `MiniEngine/SceneViewer/SceneViewer.sln`
-2. Select `Release | x64`
-3. Build and run `SceneViewer`
-
-## Command Line Examples
-
-Open power shell,  cd to `MiniEngine\Build\x64\Release\Output\SceneViewer`
-
-Load a model:
-
-```bash
-.\SceneViewer.exe -model .\Assets\bunny_v2\bunny.gltf
-```
-
-Load a model with instance count:
-
-```
-.\SceneViewer.exe -model .\Assets\bunny_v2\bunny.gltf -instances 3600
-```
-
-Force rebuild `.mini` cache:
-
-```bash
-.\SceneViewer.exe -model .\Assets\bunny_v2\bunny.gltf -rebuild 1
-```
-
-## Notes
-
-If you would like to load your own glTF file, please place it inside the **Assets** folder and launch the program via the command line.
-
-Note that for extremely large scenes, the build process may still be slow even with parallel construction enabled. The performance depends heavily on your hardware specifications.
-
-If you plan to build and load the **Zorah** scene yourself, make sure your system has at least **48 GB of RAM** and a high-speed SSD.
-
-Alternatively, you can download and use the prebuilt files I have provided:
-
-## Controls
-
-- `W A S D` / `Q E`: move
-- Mouse: look
-- Mouse wheel: camera speed scaling
-- `Shift`: fine movement toggle
-- `Backspace`: engine tuning/debug UI
+- Meshlet defaults: max vertices **128**, max triangles **128**, group size **32**, BVH node children **8**
 
 ## Repository Layout
 
-- `MiniEngine/Core`: engine core, graphics systems, input, tuning
-- `MiniEngine/Model`: model pipeline, meshlets, culling, streaming, shaders
-- `MiniEngine/SceneViewer`: runtime viewer application
+- `MiniEngine/Core`: engine core and rendering systems
+- `MiniEngine/Model`: model conversion, meshlets, culling, streaming, shaders
+- `MiniEngine/SceneViewer`: runtime app
 - `MiniEngine/SceneViewer/Assets`: sample and stress scenes
+
+## Notes
+
+- To load custom glTF assets, place them under `MiniEngine/SceneViewer/Assets` and pass the path with `-model`.
+- This project uses MiniEngine conventions (right-handed coordinate handling inside the renderer path).
+- Large-scene build time depends heavily on CPU, storage bandwidth, and available memory.
 
 ## Acknowledgements
 
@@ -181,16 +187,15 @@ Alternatively, you can download and use the prebuilt files I have provided:
 - [`imgui`](https://github.com/ocornut/imgui)
 - Inspiration references: [`nanite-webgpu`](https://github.com/Scthe/nanite-webgpu), [`vk_lod_clusters`](https://github.com/nvpro-samples/vk_lod_clusters)
 
-## License and Asset Notice
+## License
 
-- Nyx source code is licensed under the MIT License. See `LICENSE`.
-- Third-party components keep their original licenses. See `THIRD_PARTY_NOTICES.md`.
-- Scene assets may have separate licenses and usage restrictions.
-- Verify asset terms before redistribution.
+- Nyx source code: MIT License (`LICENSE`)
+- Third-party components: original licenses (`THIRD_PARTY_NOTICES.md`)
+- Scene assets may have separate licenses and restrictions; verify before redistribution
 
 ## Contact
 
-- Email: `love.jingjing.forever.1314@gmail.com`
+- `love.jingjing.forever.1314@gmail.com`
 
 
 
