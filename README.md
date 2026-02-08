@@ -17,9 +17,10 @@ Demo video:
 
 <p align="center">
   <a href="https://www.youtube.com/watch?v=qyV6u7DOglQ&t=9s">
-    <img src="Images/Zorah_Shading.jpg" width="900" alt="Nyx Zorah demo"/>
+    <img src="Images/Zorah_Shading.png" width="900" alt="Nyx Zorah demo"/>
   </a>
 </p>
+
 
 > 18.9G triangles, Nanite-style pipeline, GPU-driven culling, mesh shader rendering, real-time streaming
 
@@ -27,19 +28,19 @@ Screenshots:
 
 <p align="center">Lit mode</p>
 
-![Zorah shading](Images/Zorah_Shading.jpg)
+![Zorah shading](Images/Zorah_Shading.png)
 
 
 
 <p align="center">Meshlet mode</p>
 
-![Zorah meshlets](Images/Zorah_Meshlet.jpg)
+![Zorah meshlets](Images/Zorah_Meshlet.png)
 
 
 
 <p align="center">Triangle mode</p>
 
-![Zorah triangles](Images/Zorah_Triangle.jpg)
+![Zorah triangles](Images/Zorah_Triangle.png)
 
 
 
