@@ -182,11 +182,11 @@ Arguments:
 
 - [Unreal Engine Nanite talks and publications](https://advances.realtimerendering.com/s2021/Karis_Nanite_SIGGRAPH_Advances_2021_final.pdf)
 - [Microsoft MiniEngine](https://github.com/microsoft/DirectX-Graphics-Samples/tree/master/MiniEngine)
-- [`meshoptimizer`](https://github.com/zeux/meshoptimizer)
-- [`lz4`](https://github.com/lz4/lz4)
-- [`cgltf`](https://github.com/jkuhlmann/cgltf)
-- [`imgui`](https://github.com/ocornut/imgui)
-- Inspiration references: [`nanite-webgpu`](https://github.com/Scthe/nanite-webgpu), [`vk_lod_clusters`](https://github.com/nvpro-samples/vk_lod_clusters)
+- [meshoptimizer](https://github.com/zeux/meshoptimizer)
+- [lz4](https://github.com/lz4/lz4)
+- [cgltf](https://github.com/jkuhlmann/cgltf)
+- [imgui](https://github.com/ocornut/imgui)
+- Inspiration references: [nanite-webgpu](https://github.com/Scthe/nanite-webgpu), [vk_lod_clusters](https://github.com/nvpro-samples/vk_lod_clusters)
 
 ## License
 
