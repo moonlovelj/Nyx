@@ -42,9 +42,6 @@ namespace GeometryStreaming
 
 	std::set<uint32_t> m_PagesToLoad;
 
-	ReadbackBuffer m_ReadbackRequestBuffer[kNumReadbackBuffers];
-	ByteAddressBuffer m_GPURequestBuffer;
-	StructuredBuffer m_GeometryStreamingStateGPU;
 	ByteAddressBuffer m_GeometryStreamingRequestMaskGPU;
 	ReadbackBuffer m_ReadbackRequestMaskBuffer[kNumReadbackBuffers];
 	uint64_t m_FenceValues[kNumReadbackBuffers] = {};
@@ -189,16 +186,11 @@ void GeometryStreaming::Initialize(const std::vector<Renderer::HierarchyNode>& n
 
 	m_PageTableCPU.assign(numPages, PageResidency{});
 
-	m_GPURequestBuffer.Create(L"GPU Request Buffer", MAX_STREAMING_REQUESTS + 64, sizeof(GeometryStreamingRequest));
-	Renderer::SetBindlessResourceDescriptor(UAV_GEOMETRY_STREAMING_REQUESTS_BUFFER, m_GPURequestBuffer.GetUAV());
-	m_GeometryStreamingStateGPU.Create(L"Geometry Streaming State", 1, sizeof(GeometryStreamingState));
-	Renderer::SetBindlessResourceDescriptor(UAV_GEOMETRY_STREAMING_STATE_BUFFER, m_GeometryStreamingStateGPU.GetUAV());
 	m_GeometryStreamingRequestMaskGPU.Create(L"Geometry Streaming Request Mask", (m_GroupCount + 31) / 32, sizeof(uint32_t));
 	Renderer::SetBindlessResourceDescriptor(UAV_GEOMETRY_STREAMING_REQUEST_MASK_BUFFER, m_GeometryStreamingRequestMaskGPU.GetUAV());
 
 	for (int i = 0; i < kNumReadbackBuffers; ++i)
 	{
-		m_ReadbackRequestBuffer[i].Create(L"Readback Request Buffer", MAX_STREAMING_REQUESTS + 64, sizeof(GeometryStreamingRequest));
 		m_ReadbackRequestMaskBuffer[i].Create(L"Readback Request Mask Buffer", (m_GroupCount + 31) / 32, sizeof(uint32_t));
 		m_FenceValues[i] = 0;
 	}
@@ -395,13 +387,9 @@ void GeometryStreaming::Shutdown()
 
 	//m_GroupDataLocationCPU.Destroy();
 	m_GroupDataLocationGPU.Destroy();
-
-	m_GPURequestBuffer.Destroy();
-	m_GeometryStreamingStateGPU.Destroy();
 	m_GeometryStreamingRequestMaskGPU.Destroy();
 	for (int i = 0; i < kNumReadbackBuffers; ++i)
 	{
-		m_ReadbackRequestBuffer[i].Destroy();
 		m_ReadbackRequestMaskBuffer[i].Destroy();
 	}
 }

@@ -402,9 +402,6 @@ void Renderer::DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlo
 	context.TransitionResource( DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource( DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource( DrawCommandManager::GetMeshletBatchGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	context.TransitionResource(GeometryStreaming::m_GeometryStreamingStateGPU, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	context.TransitionResource(GeometryStreaming::m_GPURequestBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	context.ClearBufferUAV(GeometryStreaming::m_GeometryStreamingStateGPU, 4, 0);
     context.TransitionResource(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());

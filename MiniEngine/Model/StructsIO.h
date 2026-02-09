@@ -21,8 +21,6 @@
 
 #define MAX_VISIBLE_MESHLETS 4 * 1024 * 1024
 
-#define MAX_STREAMING_REQUESTS 16384
-
 struct DrawItem
 {
 #ifdef __cplusplus

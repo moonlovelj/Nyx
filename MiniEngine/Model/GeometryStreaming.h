@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "../Core/GpuBuffer.h"
 #include "Renderer.h"
 #include "Model.h"
@@ -10,8 +10,6 @@ namespace GeometryStreaming
 	extern std::vector<ByteAddressBuffer> m_GeometryChunksGPU;
 	extern StructuredBuffer m_GroupDataLocationGPU;
 	extern std::vector<Renderer::GroupDataLocation> m_GroupDataLocations;
-	extern ByteAddressBuffer m_GPURequestBuffer;
-	extern StructuredBuffer m_GeometryStreamingStateGPU;
 	extern ByteAddressBuffer m_GeometryStreamingRequestMaskGPU;
 
 	void Initialize(const std::vector<Renderer::HierarchyNode>& nodes, uint32_t maxGroupSize, uint32_t numPages);

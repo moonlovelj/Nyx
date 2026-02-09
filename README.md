@@ -154,7 +154,6 @@ Arguments:
 
 - Page size: **256 KB**
 - Chunk size: **256 MB**
-- Max streaming requests/update: **16384**
 - GPU request mask readback + async page load + LZ4 decompress + upload
 
 ## Technical Snapshot
