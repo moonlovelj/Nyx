@@ -144,14 +144,14 @@ void Renderer::Initialize(void)
 	m_UberMeshPSO[0].SetRasterizerState(RasterizerTwoSided);
     m_UberMeshPSO[0].SetDepthStencilState(DepthStateDisabled);
 	m_UberMeshPSO[0].SetBlendState(BlendDisable);
-	DXGI_FORMAT RTVFormats[] = {
-		g_SceneColorBuffer.GetFormat(),
-		g_GBufferA.GetFormat(),
-		g_GBufferB.GetFormat(),
-		g_GBufferC.GetFormat(),
-		g_GBufferD.GetFormat()
-	};
-    m_UberMeshPSO[0].SetRenderTargetFormats(5, RTVFormats, g_SceneDepthBuffer.GetFormat());
+	//DXGI_FORMAT RTVFormats[] = {
+	//	g_SceneColorBuffer.GetFormat(),
+	//	g_GBufferA.GetFormat(),
+	//	g_GBufferB.GetFormat(),
+	//	g_GBufferC.GetFormat(),
+	//	g_GBufferD.GetFormat()
+	//};
+    m_UberMeshPSO[0].SetRenderTargetFormats(0, {}, g_SceneDepthBuffer.GetFormat());
 	m_UberMeshPSO[0].SetMeshShader(g_pUberMeshShaderPass0, sizeof(g_pUberMeshShaderPass0));
 	m_UberMeshPSO[0].SetPixelShader(g_pVBufferPS, sizeof(g_pVBufferPS));
 	m_UberMeshPSO[0].Finalize();
@@ -541,7 +541,7 @@ void MeshSorter::RenderMeshedInternal(
             context.SetPipelineState(m_UberMeshPSO[passIndex]);
             context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
             context.SetConstants(kCommandConstants, 0, 0, 0);
-            context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
+            context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
         }
 
@@ -574,7 +574,7 @@ void MeshSorter::RenderMeshedInternal(
             context.SetPipelineState(m_UberMeshPSO[passIndex]);
             context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
             context.SetConstants(kCommandConstants, 0, 0, 0);
-            context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
+            context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
         }
 
@@ -607,7 +607,7 @@ void MeshSorter::RenderMeshedInternal(
             context.SetPipelineState(m_UberMeshPSO[passIndex]);
             context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
             context.SetConstants(kCommandConstants, 0, 0, 0);
-            context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
+            context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
         }
 
@@ -629,7 +629,7 @@ void MeshSorter::RenderMeshedInternal(
             context.SetPipelineState(m_UberMeshPSO[passIndex]);
             context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
             context.SetConstants(kCommandConstants, 0, 0, 0);
-            context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
+            context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
         }
 
@@ -745,8 +745,6 @@ void MeshSorter::RenderMeshes(
 				break;
             case kVBuffer:
 				context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-				context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-				context.SetRenderTarget(g_VisibilityBuffer.GetRTV(), m_DSV->GetDSV());
                 break;
 			case kGBuffer:
 			    {

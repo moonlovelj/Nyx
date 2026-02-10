@@ -1,4 +1,4 @@
-﻿//
+//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -324,7 +324,7 @@ void MeshShaderPSO::Finalize()
 	streamDesc.SizeInBytes = sizeof(stream);
 	streamDesc.pPipelineStateSubobjectStream = &stream;
 
-    size_t HashCode = Utility::HashState(&streamDesc);
+    size_t HashCode = Utility::HashState(&stream);
 
     ID3D12PipelineState** PSORef = nullptr;
     bool firstCompile = false;
