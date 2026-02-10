@@ -31,10 +31,9 @@ using namespace TemporalEffects;
 
 namespace TemporalEffects
 {
-    //BoolVar EnableTAA("Graphics/AA/TAA/Enable", false);
-    bool EnableTAA = false;
+    BoolVar EnableTAA("Graphics/AA/TAA/Enable", false);
     NumVar Sharpness("Graphics/AA/TAA/Sharpness", 0.5f, 0.0f, 1.0f, 0.25f);
-    NumVar TemporalMaxLerp("Graphics/AA/TAA/Blend Factor", 1.0f, 0.0f, 1.0f, 0.01f);
+    NumVar TemporalMaxLerp("Graphics/AA/TAA/Blend Factor", 0.9f, 0.0f, 1.0f, 0.01f);
     ExpVar TemporalSpeedLimit("Graphics/AA/TAA/Speed Limit", 64.0f, 1.0f, 1024.0f, 1.0f);
     BoolVar TriggerReset("Graphics/AA/TAA/Reset", false);
     BoolVar EnableCBR("Graphics/CBR/Enable", false);

@@ -71,7 +71,7 @@ void main( uint3 Gid : SV_GroupID, uint3 GTid : SV_GroupThreadID, uint3 DTid : S
     // blur rather than sharpen those pixels.
     float TemporalWeight = gs_W[ldsIndex];
     float CenterWeight = TemporalWeight <= 0.5 ? 0.5 : WA;
-    float LateralWeight = TemporalWeight <= 0.5 ? 0.125 : WB;
+    float LateralWeight = TemporalWeight <= 0.5 ? 0.125 : -WB;
 
-    OutColor[DTid.xy] = exp2(max(0, WA * Center - WB * Neighbors)) - 1.0;
+    OutColor[DTid.xy] = exp2(max(0, CenterWeight * Center + LateralWeight * Neighbors)) - 1.0;
 }

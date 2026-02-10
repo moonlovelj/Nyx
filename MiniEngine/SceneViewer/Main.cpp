@@ -365,12 +365,12 @@ void SceneViewer::Startup( void )
     EnsureSceneViewerResourceRoot();
 
     // MotionBlur::Enable = true;
-    //TemporalEffects::EnableTAA = false;
-	FXAA::Enable = true;
+    TemporalEffects::EnableTAA = true;
+	FXAA::Enable = false;
 	//PostEffects::EnableHDR = false;
-    //SSAO::Enable = false;
-    //PostEffects::BloomEnable = false;
-    PostEffects::EnableAdaptation = false;
+    SSAO::Enable = false;
+    PostEffects::BloomEnable = true;
+    PostEffects::EnableAdaptation = true;
 
     g_SceneViewer = this;
     
@@ -596,7 +596,7 @@ void SceneViewer::RenderScene( void )
         //    sorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);
         //}
 
-        //SSAO::Render(gfxContext, m_Camera);
+        
 
         //if (!SSAO::DebugDraw)
         {
@@ -646,6 +646,8 @@ void SceneViewer::RenderScene( void )
 				Renderer::ResolveVBufferToGBuffer(gfxContext, globals);
             }
 
+            SSAO::Render(gfxContext, m_Camera);
+
             Lighting::RenderDeferredLighting(gfxContext, globals);
 
             Renderer::DrawSkybox(gfxContext, m_Camera, viewport, scissor);
@@ -657,12 +659,14 @@ void SceneViewer::RenderScene( void )
         }
     }
 
+    SSAO::LinearizeZ(gfxContext.GetComputeContext(), m_Camera, FrameIndex);
+
     // Some systems generate a per-pixel velocity buffer to better track dynamic and skinned meshes.  Everything
     // is static in our scene, so we generate velocity from camera motion and the depth buffer.  A velocity buffer
     // is necessary for all temporal effects (and motion blur).
     MotionBlur::GenerateCameraVelocityBuffer(gfxContext, m_Camera, true);
 
-    //TemporalEffects::ResolveImage(gfxContext);
+    TemporalEffects::ResolveImage(gfxContext);
 
     ParticleEffectManager::Render(gfxContext, m_Camera, g_SceneColorBuffer, g_SceneDepthBuffer,  g_LinearDepth[FrameIndex]);
 

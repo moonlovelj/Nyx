@@ -21,7 +21,7 @@ namespace TemporalEffects
 {
     // Temporal antialiasing involves jittering sample positions and accumulating color over time to 
     // effectively supersample the image.
-    //extern BoolVar EnableTAA;
+    extern BoolVar EnableTAA;
 
     void Initialize( void );
 
