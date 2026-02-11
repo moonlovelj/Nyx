@@ -8,6 +8,7 @@
 #include "DepthOfField.h"
 #include "PostEffects.h"
 #include "SSAO.h"
+#include "XeGTAO.h"
 #include "FXAA.h"
 #include "SystemTime.h"
 #include "TextRenderer.h"
@@ -20,7 +21,6 @@
 #include "ShadowCamera.h"
 #include "Display.h"
 #include "LightManager.h"
-#include "SponzaRenderer.h"
 #include "IBL.h"
 #include "TextureConvert.h"
 #include "ModelInstanceManager.h"
@@ -364,11 +364,11 @@ void SceneViewer::Startup( void )
 
     EnsureSceneViewerResourceRoot();
 
-    // MotionBlur::Enable = true;
+    MotionBlur::Enable = true;
     TemporalEffects::EnableTAA = true;
 	FXAA::Enable = false;
-	//PostEffects::EnableHDR = false;
-    SSAO::Enable = false;
+    PostEffects::EnableHDR = true;
+    XeGTAO::Enable = true;
     PostEffects::BloomEnable = true;
     PostEffects::EnableAdaptation = true;
 
@@ -591,36 +591,10 @@ void SceneViewer::RenderScene( void )
 
         sorter.Sort();
 
-        //{
-        //    ScopedTimer _prof(L"Depth Pre-Pass", gfxContext);
-        //    sorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);
-        //}
-
-        
-
-        //if (!SSAO::DebugDraw)
         {
             Lighting::FillLightGrid(gfxContext, m_Camera);
             
             ScopedTimer _outerprof(L"Main Render", gfxContext);
-
-    //        if (g_SunShadow)
-    //        {
-    //            ScopedTimer _prof(L"Sun Shadow Map", gfxContext);
-
-    //            MeshSorter shadowSorter(MeshSorter::kShadows);
-				//shadowSorter.SetCamera(m_SunShadowCamera);
-				//shadowSorter.SetDepthStencilTarget(g_ShadowBuffer);
-
-    //            ModelInstanceManager::Render(shadowSorter);
-
-    //            shadowSorter.Sort();
-    //            shadowSorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);
-    //        }
-
-    //        {
-    //            Lighting::RenderLightShadows(gfxContext, globals);
-    //        }
 
             gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
             gfxContext.ClearColor(g_SceneColorBuffer);
@@ -646,7 +620,7 @@ void SceneViewer::RenderScene( void )
 				Renderer::ResolveVBufferToGBuffer(gfxContext, globals);
             }
 
-            SSAO::Render(gfxContext, m_Camera);
+            XeGTAO::Render(gfxContext, m_Camera);
 
             Lighting::RenderDeferredLighting(gfxContext, globals);
 

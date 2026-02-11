@@ -4,9 +4,6 @@
     <ClCompile Include="ModelH3D.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="SponzaRenderer.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="Renderer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -125,9 +122,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="SponzaRenderer.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
     <ClInclude Include="Renderer.h">
       <Filter>Source Files</Filter>
     </ClInclude>

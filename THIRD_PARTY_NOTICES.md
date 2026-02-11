@@ -35,7 +35,17 @@ under their own licenses.
   - Local license file: `MiniEngine/ThirdParty/cgltf/LICENSE`
   - Upstream: https://github.com/jkuhlmann/cgltf
 
+## Algorithm References
+
+- XeGTAO
+  - Path: N/A (no upstream XeGTAO source files are included in this repository)
+  - Upstream: https://github.com/GameTechDev/XeGTAO
+  - Upstream license: MIT License
+  - Copyright: Intel Corporation
+  - Notes: Nyx includes a local implementation derived from the public XeGTAO project. Relevant local files include `MiniEngine/Core/XeGTAO.cpp`, `MiniEngine/Core/XeGTAO.h`, `MiniEngine/Core/Shaders/XeGTAO*.hlsl`, and `MiniEngine/Core/Shaders/XeGTAO*.hlsli`.
+
 ## Assets
 
 Scene assets and external datasets may have separate license and usage
 restrictions. Verify asset terms before redistribution.
+

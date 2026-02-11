@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
@@ -134,6 +134,7 @@
     <ClInclude Include="ShadowBuffer.h" />
     <ClInclude Include="ShadowCamera.h" />
     <ClInclude Include="SSAO.h" />
+    <ClInclude Include="XeGTAO.h" />
     <ClInclude Include="SystemTime.h" />
     <ClInclude Include="TemporalEffects.h" />
     <ClInclude Include="TextRenderer.h" />
@@ -197,6 +198,7 @@
     <ClCompile Include="ShadowBuffer.cpp" />
     <ClCompile Include="ShadowCamera.cpp" />
     <ClCompile Include="SSAO.cpp" />
+    <ClCompile Include="XeGTAO.cpp" />
     <ClCompile Include="SystemTime.cpp" />
     <ClCompile Include="TemporalEffects.cpp" />
     <ClCompile Include="TextRenderer.cpp" />
@@ -237,6 +239,10 @@
     <FxCompile Include="Shaders\AoPrepareDepthBuffers2CS.hlsl" />
     <FxCompile Include="Shaders\AoRender1CS.hlsl" />
     <FxCompile Include="Shaders\AoRender2CS.hlsl" />
+    <FxCompile Include="Shaders\XeGTAOPrefilterCS.hlsl" />
+    <FxCompile Include="Shaders\XeGTAOMainCS.hlsl" />
+    <FxCompile Include="Shaders\XeGTAODenoiseCS.hlsl" />
+    <FxCompile Include="Shaders\XeGTAOResolveCS.hlsl" />
     <FxCompile Include="Shaders\ApplyBloom2CS.hlsl" />
     <FxCompile Include="Shaders\ApplyBloomCS.hlsl" />
     <FxCompile Include="Shaders\AverageLumaCS.hlsl" />
@@ -482,6 +488,8 @@
     <FxCompile Include="Shaders\UpsampleAndBlurCS.hlsl" />
     <None Include="Shaders\PixelPacking.hlsli" />
     <None Include="Shaders\SSAORS.hlsli" />
+    <None Include="Shaders\XeGTAOCommon.hlsli" />
+    <None Include="Shaders\XeGTAORS.hlsli" />
     <None Include="Shaders\TextRS.hlsli" />
     <None Include="Shaders\BSDF.hlsli" />
     <None Include="Shaders\IBL.hlsli" />
@@ -523,3 +531,4 @@
     <Error Condition="!Exists('..\..\Packages\WinPixEventRuntime.1.0.240308001\build\WinPixEventRuntime.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\Packages\WinPixEventRuntime.1.0.240308001\build\WinPixEventRuntime.targets'))" />
   </Target>
 </Project>
+

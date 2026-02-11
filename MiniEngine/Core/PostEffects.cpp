@@ -426,11 +426,11 @@ void PostEffects::ProcessLDR(CommandContext& BaseContext)
 
     ComputeContext& Context = BaseContext.GetComputeContext();
 
-    bool bGenerateBloom = BloomEnable && !SSAO::DebugDraw;
+    bool bGenerateBloom = BloomEnable;
     if (bGenerateBloom)
         GenerateBloom(Context);
 
-    if (bGenerateBloom || FXAA::DebugDraw || SSAO::DebugDraw || !g_bTypedUAVLoadSupport_R11G11B10_FLOAT)
+    if (bGenerateBloom || FXAA::DebugDraw || !g_bTypedUAVLoadSupport_R11G11B10_FLOAT)
     {
         if (g_bTypedUAVLoadSupport_R11G11B10_FLOAT)
             Context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -484,7 +484,7 @@ void PostEffects::Render( void )
 
     Context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
-    if (EnableHDR && !SSAO::DebugDraw && !(DepthOfField::Enable && DepthOfField::DebugMode >= 3))
+    if (EnableHDR && !(DepthOfField::Enable && DepthOfField::DebugMode >= 3))
         ProcessHDR(Context);
     else
         ProcessLDR(Context);

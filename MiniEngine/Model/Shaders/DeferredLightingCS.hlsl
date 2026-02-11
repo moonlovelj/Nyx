@@ -1,4 +1,4 @@
-﻿
+
 #include "LightGrid.hlsli"
 #include "LightingCommon.hlsli"
 #include "Common.hlsli"
@@ -45,6 +45,7 @@ void main(
                 float3 normal = gBufferA[DTid].xyz;
                 float3 baseColor = gBufferB[DTid].xyz;
                 float3 metallicRoughnessOcclusion = gBufferC[DTid].xyz;
+                float ssao = GetSSAOSRV()[DTid];
 
                 SurfaceProperties Surface;
                 Surface.N = normal;
@@ -58,19 +59,16 @@ void main(
 
                 float4 shadowCoord = mul(SunShadowMatrix, float4(posW, 1.0));
                 shadowCoord.xyz *= rcp(shadowCoord.w);
-            // TODO: shadows have artifacts
+                // TODO: shadows have artifacts
                 float sunShadow = GetDirectionalShadow(ScreenUV, shadowCoord.xyz);
-            // TODO: specular aliasing, especially when roughness is near 0
+                // TODO: specular aliasing, especially when roughness is near 0
                 colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunIntensity);
 
                 ShadeLights(colorAccum.rgb, Surface, DTid, posW);
 
-            // TODO: SSAO has severe banding artifacts on spheres; needs fix
-            //float ssao = texSSAO[DTid];
-            
-            // Add IBL
-                colorAccum.rgb += EvaluateIBLDiffuse(Surface);
-                colorAccum.rgb += EvaluateIBLSpecular(Surface);
+                // Add IBL and modulate by runtime SSAO.
+                colorAccum.rgb += EvaluateIBLDiffuse(Surface) * ssao;
+                colorAccum.rgb += EvaluateIBLSpecular(Surface) * ssao;
 
                 sceneColor[DTid] = colorAccum;
             }

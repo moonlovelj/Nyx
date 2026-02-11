@@ -18,6 +18,7 @@
 #include "GpuTimeManager.h"
 #include "PostEffects.h"
 #include "SSAO.h"
+#include "XeGTAO.h"
 #include "TextRenderer.h"
 #include "ColorBuffer.h"
 #include "SystemTime.h"
@@ -414,6 +415,7 @@ void Graphics::Initialize(bool RequireDXRSupport)
     TemporalEffects::Initialize();
     PostEffects::Initialize();
     SSAO::Initialize();
+    XeGTAO::Initialize();
     // Legacy text/graph UI disabled in favor of ImGui.
     ParticleEffectManager::Initialize(3840, 2160);
 }
@@ -434,6 +436,7 @@ void Graphics::Shutdown( void )
     TemporalEffects::Shutdown();
     PostEffects::Shutdown();
     SSAO::Shutdown();
+    XeGTAO::Shutdown();
     // Legacy text/graph UI disabled in favor of ImGui.
     ParticleEffectManager::Shutdown();
     Display::Shutdown();

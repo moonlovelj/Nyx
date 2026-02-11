@@ -124,7 +124,6 @@
     <ClInclude Include="ModelH3D.h" />
     <ClInclude Include="ParticleEffects.h" />
     <ClInclude Include="Renderer.h" />
-    <ClInclude Include="SponzaRenderer.h" />
     <ClInclude Include="StructsIO.h" />
     <ClInclude Include="TextureConvert.h" />
   </ItemGroup>
@@ -164,7 +163,6 @@
     <ClCompile Include="ModelLoader.cpp" />
     <ClCompile Include="ParticleEffects.cpp" />
     <ClCompile Include="Renderer.cpp" />
-    <ClCompile Include="SponzaRenderer.cpp" />
     <ClCompile Include="TextureConvert.cpp" />
   </ItemGroup>
   <ItemGroup>

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <FxCompile Include="Shaders\AdaptExposureCS.hlsl">
@@ -493,6 +493,18 @@
     <FxCompile Include="Shaders\BufferClearCS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="Shaders\XeGTAOPrefilterCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\XeGTAOMainCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\XeGTAODenoiseCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\XeGTAOResolveCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BitonicSort.cpp" />
@@ -542,6 +554,7 @@
     <ClCompile Include="ShadowBuffer.cpp" />
     <ClCompile Include="ShadowCamera.cpp" />
     <ClCompile Include="SSAO.cpp" />
+    <ClCompile Include="XeGTAO.cpp" />
     <ClCompile Include="SystemTime.cpp" />
     <ClCompile Include="TemporalEffects.cpp" />
     <ClCompile Include="TextRenderer.cpp" />
@@ -625,6 +638,7 @@
     <ClInclude Include="ShadowBuffer.h" />
     <ClInclude Include="ShadowCamera.h" />
     <ClInclude Include="SSAO.h" />
+    <ClInclude Include="XeGTAO.h" />
     <ClInclude Include="SystemTime.h" />
     <ClInclude Include="TemporalEffects.h" />
     <ClInclude Include="TextRenderer.h" />
@@ -682,6 +696,12 @@
       <Filter>Shaders</Filter>
     </None>
     <None Include="Shaders\SSAORS.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="Shaders\XeGTAOCommon.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="Shaders\XeGTAORS.hlsli">
       <Filter>Shaders</Filter>
     </None>
     <None Include="Shaders\TextRS.hlsli">
@@ -742,3 +762,4 @@
     </Filter>
   </ItemGroup>
 </Project>
+
