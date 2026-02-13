@@ -88,6 +88,12 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
         ViewProjMatrix,
         GetCurrentSceneHZBSRV(FrameIndexMod2));
 #endif
+#ifdef DISABLE_HZB_CULL
+    bVisible = bVisible && EvaluateBoundsVisibility(
+        childNode.BBoxMin, childNode.BBoxMax,
+        meshInstance.WorldMatrix,
+        ViewProjMatrix);
+#endif
 
     bVisible = bVisible &&
         !TestForLod(meshInstance.WorldMatrix, ViewerPos, childNode.MaxParrentError, childNode.BoundSphere);
@@ -247,6 +253,13 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
         MeshConstant meshInstance = GetMeshConstantSRV(inst.MeshBufferIdx);
         bool bAlphaBlend = (meshletHeader.GetPSOFlags() & PSO_ALPHA_BLEND) != 0u;
 
+#ifdef DISABLE_HZB_CULL
+       bool bMeshletVisible = EvaluateBoundsVisibility(
+                meshletHeader.BBoxMin,
+                meshletHeader.BBoxMax,
+                meshInstance.WorldMatrix,
+                ViewProjMatrix); 
+#else
         bool bMeshletVisible = EvaluateBoundsVisibility(
             meshletHeader.BBoxMin,
             meshletHeader.BBoxMax,
@@ -261,6 +274,7 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
                 meshInstance.WorldMatrix,
                 ViewProjMatrix,
                 GetCurrentSceneHZBSRV(FrameIndexMod2));
+#endif
 #endif
         
         bMeshletVisible = bMeshletVisible && !bAlphaBlend;

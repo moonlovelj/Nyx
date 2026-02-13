@@ -188,7 +188,17 @@
     <FxCompile Include="Shaders\DAGCullCS.hlsl" />
     <FxCompile Include="Shaders\DAGCullPass0CS.hlsl" />
     <FxCompile Include="Shaders\DAGCullPass1CS.hlsl" />
+    <FxCompile Include="Shaders\DAGCullDepthOnlyPassCS.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compute</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">Compute</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compute</ShaderType>
+    </FxCompile>
     <FxCompile Include="Shaders\DeferredLightingCS.hlsl" />
+    <FxCompile Include="Shaders\DepthOnlyPS.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
+    </FxCompile>
     <FxCompile Include="Shaders\DepthViewerPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
@@ -208,6 +218,11 @@
     <FxCompile Include="Shaders\InstanceCullCS.hlsl" />
     <FxCompile Include="Shaders\InstanceCullPass0CS.hlsl" />
     <FxCompile Include="Shaders\InstanceCullPass1CS.hlsl" />
+    <FxCompile Include="Shaders\InstanceCullDepthOnlyPassCS.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compute</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">Compute</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compute</ShaderType>
+    </FxCompile>
     <FxCompile Include="Shaders\MeshBufferGenCS.hlsl" />
     <FxCompile Include="Shaders\ModelViewerPS.hlsl">
       <ShaderType>Pixel</ShaderType>
@@ -224,6 +239,11 @@
     </FxCompile>
     <FxCompile Include="Shaders\UberMeshShader.hlsl">
       <ShaderType>Mesh</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Shaders\UberMeshShaderDepthOnlyPass.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Mesh</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">Mesh</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Mesh</ShaderType>
     </FxCompile>
     <FxCompile Include="Shaders\UberMeshShaderPass0.hlsl">
       <ShaderType>Mesh</ShaderType>

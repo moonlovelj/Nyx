@@ -75,7 +75,7 @@ cbuffer GlobalConstants : register(b2)
 cbuffer CommandConstants : register(b3)
 {
     uint MaxCommands;
-    float ScreenErrorConstant; // Precomputed constant for project screen error
+    float LodErrorFactor;
     uint PsoIdx;
     uint CullingStage;
 };

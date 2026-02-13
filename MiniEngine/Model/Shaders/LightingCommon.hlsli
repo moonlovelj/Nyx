@@ -1,4 +1,4 @@
-﻿#ifndef __LIGHTING_COMMON_HLSLI__
+#ifndef __LIGHTING_COMMON_HLSLI__
 #define __LIGHTING_COMMON_HLSLI__
 
 #include "Common.hlsli"
@@ -9,7 +9,8 @@
 #include "PCSS.hlsli"
 #include "CommonResources.hlsli"
 
-#define PCSS_SHADOW     1
+//#define PCSS_SHADOW     0
+//#define SINGLE_SAMPLE 1
 
 static const float3 kDielectricSpecular = float3(0.04, 0.04, 0.04);
 
@@ -109,7 +110,7 @@ float GetDirectionalShadow(float2 ScreenUV, float3 ShadowCoord)
 {
     Texture2D<float> texShadow = GetShadowMapSRV();
 #ifdef SINGLE_SAMPLE
-    float result = texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy, ShadowCoord.z );
+    float result = texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy, ShadowCoord.z);
 #elif PCSS_SHADOW
     float result =  PCSS(texShadow, shadowSampler, pointSampler, ScreenUV, ShadowCoord, ShadowTexelSize);
     return result;

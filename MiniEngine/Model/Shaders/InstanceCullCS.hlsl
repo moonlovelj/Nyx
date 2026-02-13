@@ -34,6 +34,11 @@ void main(uint3 DTid : SV_DispatchThreadID)
             meshConstant.WorldMatrix, ViewProjMatrix, GetCurrentSceneHZBSRV(FrameIndexMod2));
 #endif
         
+#ifdef DISABLE_HZB_CULL
+        bVisible = EvaluateBoundsVisibility(instanceConstant.BBoxMin, instanceConstant.BBoxMax,
+            meshConstant.WorldMatrix, ViewProjMatrix);
+#endif
+        
         uint WaveVisibleCount = WaveActiveCountBits(bVisible);
         uint WaveBaseIndex = 0;
         if (WaveIsFirstLane() && WaveVisibleCount > 0)

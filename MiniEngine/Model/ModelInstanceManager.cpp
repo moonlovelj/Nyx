@@ -126,14 +126,6 @@ namespace ModelInstanceManager
 		GeometryStreaming::PinRootPages(sourceModel.get());
 	}
 
-	void Render(Renderer::MeshSorter& sorter)
-	{
-		for (auto& instance : s_ModelInstances)
-		{
-			instance.Render(sorter);
-		}
-	}
-
 	void Update(GraphicsContext& gfxContext, float deltaTime)
 	{
 		MeshConstants* meshConstantsCPU = (MeshConstants*)InstanceResourceManager::GetMeshConstantsCPU().Map();

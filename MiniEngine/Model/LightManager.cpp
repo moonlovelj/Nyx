@@ -402,12 +402,11 @@ void Lighting::RenderLightShadows(GraphicsContext& gfxContext, const GlobalConst
         {
             std::wstring passName = L"LightIndex: " + std::to_wstring(LightIndex);
             ScopedTimer _profShadow(passName, gfxContext);
-            MeshSorter shadowSorter(MeshSorter::kShadows);
+            MeshSorter shadowSorter(Renderer::kShadows);
             shadowSorter.SetCamera(m_LightCamera[LightIndex]);
             shadowSorter.SetDepthStencilTarget(m_LightShadowTempBuffer);
-            ModelInstanceManager::Render(shadowSorter);
             shadowSorter.Sort();
-            shadowSorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);
+            shadowSorter.RenderMeshes(Renderer::kZPass, gfxContext, globals);
             
             gfxContext.TransitionResource(m_LightShadowTempBuffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
             gfxContext.CopySubresource(m_LightShadowArray, LightIndex, m_LightShadowTempBuffer, 0);

@@ -143,14 +143,20 @@ bool TestForLod(float4x4 WorldMatrix, float3 CameraPos, float error, float4 sphe
     float3 axisY = float3(WorldMatrix._m01, WorldMatrix._m11, WorldMatrix._m21);
     float3 axisZ = float3(WorldMatrix._m02, WorldMatrix._m12, WorldMatrix._m22);
     float uniformScaleUpperBound = max(length(axisX), max(length(axisY), length(axisZ)));
-
     float4 sphereWS = float4(mul(WorldMatrix, float4(sphereLS.xyz, 1.0f)).xyz, uniformScaleUpperBound * sphereLS.w);
-    float allowedErrorWS = error * uniformScaleUpperBound;
+    float errorWS = error * uniformScaleUpperBound;
 
-    const float lodFactor = 1.0f;
-    float cameraToSphereSurface = max(0.0f, length(CameraPos - sphereWS.xyz) - sphereWS.w);
-    float projectedError = cameraToSphereSurface * ScreenErrorConstant;
-    return projectedError * lodFactor >= allowedErrorWS;
+    if (abs(ProjMatrix._m32) > 0)
+    {
+        // perspective projection
+        float cameraToSphereSurface = max(0.0f, length(CameraPos - sphereWS.xyz) - sphereWS.w);
+        float worldPerPixel = cameraToSphereSurface / abs(ProjMatrix._m11) * 2.0 * InvViewportHeight;
+        return worldPerPixel * LodErrorFactor >= errorWS;
+    }
+
+    // orthographic projection
+    float worldPerPixel = 2.0 * InvViewportHeight / abs(ProjMatrix._m11);
+    return worldPerPixel * LodErrorFactor >= errorWS;
 }
 
 bool EvaluateBoundsVisibility(
@@ -182,6 +188,36 @@ bool EvaluateBoundsVisibility(
     }
 
     return LargeEnough(clipMin, clipMax, 1.0f) && HZBVisible(hzbTexture, clipMin, clipMax);
+}
+
+bool EvaluateBoundsVisibility(
+    float3 bboxMin,
+    float3 bboxMax,
+    float4x4 worldMatrix,
+    float4x4 viewProjMatrix)
+{
+    float4 clipMin;
+    float4 clipMax;
+    bool clipValid = false;
+
+    bool inFrustum = BBoxIntersectFrustum(
+        bboxMin, bboxMax,
+        worldMatrix,
+        viewProjMatrix,
+        clipMin, clipMax,
+        clipValid);
+
+    if (!inFrustum)
+    {
+        return false;
+    }
+
+    if (!clipValid)
+    {
+        return true;
+    }
+
+    return LargeEnough(clipMin, clipMax, 1.0f);
 }
 
 #endif

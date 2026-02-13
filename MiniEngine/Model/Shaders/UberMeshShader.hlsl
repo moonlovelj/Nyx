@@ -13,6 +13,14 @@ groupshared uint s_PrimCount;
 groupshared uint s_PrimOutIndex[MAX_PRIMS];
 groupshared uint3 s_PrimIndices[MAX_PRIMS];
 
+#ifdef UBER_MESH_SHADER_DEPTH_ONLY_PASS
+struct VSOutput
+{
+    float4 position : SV_POSITION;
+    float2 uv0 : TEXCOORD0;
+    nointerpolation uint packedMaterialInfo : TEXCOORD1;
+};
+#else
 struct VSOutput
 {
     float4 position : SV_POSITION;
@@ -20,11 +28,14 @@ struct VSOutput
     nointerpolation uint commandIndex : TEXCOORD1;
     nointerpolation uint packedMaterialInfo : TEXCOORD2;
 };
+#endif
 
+#ifndef UBER_MESH_SHADER_DEPTH_ONLY_PASS
 struct PrimitiveAttributes
 {
     uint primitiveIndex : SV_PrimitiveID;
 };
+#endif
 
 inline float4 GetClipPosition(ByteAddressBuffer geometryChunksBuffer,
     uint vertexByteOffset,
@@ -80,8 +91,11 @@ void main(
     uint gtid : SV_GroupThreadID,
     uint gid : SV_GroupID,
     out vertices VSOutput verts[MAX_VERTS],
-    out indices uint3 outIndices[MAX_PRIMS],
-    out primitives PrimitiveAttributes sharedPrimitives[MAX_PRIMS])
+    out indices uint3 outIndices[MAX_PRIMS]
+#ifndef UBER_MESH_SHADER_DEPTH_ONLY_PASS
+    ,out primitives PrimitiveAttributes sharedPrimitives[MAX_PRIMS]
+#endif
+)
 {
 #ifdef UBER_MESH_SHADER_PASS1
     StructuredBuffer<QueueState> taskStateSRV = GetTaskQueueStateBufferSRV();
@@ -237,7 +251,9 @@ void main(
             float4 clipPos = mul(ViewProjMatrix, float4(worldPos, 1.0));
 
             verts[vertexID].position = clipPos;
+#ifndef UBER_MESH_SHADER_DEPTH_ONLY_PASS
             verts[vertexID].commandIndex = commandIndex;
+#endif
             uint packedMaterialInfo = (meshletHeader.GetMaterialBufferIndex() & 0xFFFF)
                                     | ((mat.flags & 0xFF) << 16);
 
@@ -260,7 +276,9 @@ void main(
             if (outIndex != 0xFFFFFFFFu)
             {
                 outIndices[outIndex] = s_PrimIndices[primitiveID];
+#ifndef UBER_MESH_SHADER_DEPTH_ONLY_PASS
                 sharedPrimitives[outIndex].primitiveIndex = primitiveID;
+#endif
             }
         }
     }

@@ -25,11 +25,13 @@
 #include "TextureConvert.h"
 #include "ModelInstanceManager.h"
 #include "GeometryStreaming.h"
+#include "Renderer.h"
 #include "imgui.h"
 #include <chrono>
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 #include <system_error>
 #include <wchar.h>
 
@@ -83,12 +85,15 @@ int wmain(int /*argc*/, wchar_t** /*argv*/)
     return GameCore::RunApplication(SceneViewer(), L"SceneViewer", GetModuleHandle(nullptr), SW_SHOWDEFAULT);
 }
 
-ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 1.0f, -5.0f, 20.0f, 0.1f); // unit: lx
+ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 6.0f, -5.0f, 20.0f, 0.1f); // unit: lx
 NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0f, 0.1f );
 NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f);
 //NumVar g_SunLightSize("Viewer/Lighting/Sun Light Size", 0.5f, 0.0f, 2.0f, 0.1f);
 //NumVar g_SunShadowBias("Viewer/Lighting/Sun Shadow Bias", 4.f, 1.0f, 20.0f, 1.f );
-//BoolVar g_SunShadow("Viewer/Lighting/Sun Shadow", false);
+NumVar g_SunShadowCoverageDepth("Viewer/Lighting/Sun Shadow Coverage Depth", 1000.0f, 10.0f, 5000.0f, 5.0f);
+NumVar g_SunShadowBoundsMin("Viewer/Lighting/Sun Shadow Bounds Min", 40.0f, 1.0f, 2000.0f, 1.0f);
+NumVar g_SunShadowBoundsMax("Viewer/Lighting/Sun Shadow Bounds Max", 500.0f, 10.0f, 10000.0f, 5.0f);
+BoolVar g_SunShadow("Viewer/Lighting/Sun Shadow", false);
 BoolVar g_UseglTFCamera("Camera/Use glTF Camera", false);
 
 void ChangeIBLSet(EngineVar::ActionType);
@@ -526,10 +531,103 @@ void SceneViewer::RenderScene( void )
         float sinphi = sinf(g_SunInclination * 3.14159f * 0.5f);
 
         Vector3 SunDirection = Normalize(Vector3( costheta * cosphi, sinphi, sintheta * cosphi ));
-        Vector3 ShadowBounds = Vector3(ModelInstanceManager::GetModelInstance(0).GetRadius());
-        //m_SunShadowCamera.UpdateMatrix(-SunDirection, m_ModelInst.GetCenter(), ShadowBounds,
-        m_SunShadowCamera.UpdateMatrix(-SunDirection, Vector3(0, -5.0f, 0), Vector3(50, 30, 30),
-            (uint32_t)g_ShadowBuffer.GetWidth(), (uint32_t)g_ShadowBuffer.GetHeight(), 16);
+
+        const Vector3 lightDir = Normalize(-SunDirection); // Direction of light travel.
+        const float sceneRadius = std::max(ModelInstanceManager::GetInstanceDistributionRadius(), 1.0f);
+        const Vector3 cameraPos = m_Camera.GetPosition();
+        const Vector3 cameraForward = Normalize(m_Camera.GetForwardVec());
+        const Vector3 cameraRight = Normalize(m_Camera.GetRightVec());
+        const Vector3 cameraUp = Normalize(m_Camera.GetUpVec());
+
+        const float cameraAspect = m_MainViewport.Width / std::max(m_MainViewport.Height, 1.0f);
+        const float nearDepth = std::max(m_Camera.GetNearClip(), 0.05f);
+        const float coverDepth = std::max(
+            nearDepth + 0.05f,
+            std::min(m_Camera.GetFarClip(), (float)g_SunShadowCoverageDepth));
+        const float tanHalfFov = tanf(0.5f * m_Camera.GetFOV());
+
+        const float nearHalfHeight = nearDepth * tanHalfFov;
+        const float nearHalfWidth = nearHalfHeight * cameraAspect;
+        const float farHalfHeight = coverDepth * tanHalfFov;
+        const float farHalfWidth = farHalfHeight * cameraAspect;
+
+        const Vector3 nearCenter = cameraPos + cameraForward * nearDepth;
+        const Vector3 farCenter = cameraPos + cameraForward * coverDepth;
+
+        Vector3 frustumCorners[8] =
+        {
+            nearCenter + cameraRight * nearHalfWidth + cameraUp * nearHalfHeight,
+            nearCenter + cameraRight * nearHalfWidth - cameraUp * nearHalfHeight,
+            nearCenter - cameraRight * nearHalfWidth + cameraUp * nearHalfHeight,
+            nearCenter - cameraRight * nearHalfWidth - cameraUp * nearHalfHeight,
+
+            farCenter + cameraRight * farHalfWidth + cameraUp * farHalfHeight,
+            farCenter + cameraRight * farHalfWidth - cameraUp * farHalfHeight,
+            farCenter - cameraRight * farHalfWidth + cameraUp * farHalfHeight,
+            farCenter - cameraRight * farHalfWidth - cameraUp * farHalfHeight
+        };
+
+        // Build a stable light-space basis for fitting camera-near coverage.
+        Vector3 upRef(0.0f, 0.0f, 1.0f);
+        if (std::abs((float)Dot(upRef, lightDir)) > 0.99f)
+        {
+            upRef = Vector3(0.0f, 1.0f, 0.0f);
+        }
+        const Vector3 lightAxisX = Normalize(Cross(upRef, lightDir));
+        const Vector3 lightAxisY = Normalize(Cross(lightDir, lightAxisX));
+
+        float minX = std::numeric_limits<float>::max();
+        float maxX = -std::numeric_limits<float>::max();
+        float minY = std::numeric_limits<float>::max();
+        float maxY = -std::numeric_limits<float>::max();
+
+        for (const Vector3& corner : frustumCorners)
+        {
+            const Vector3 rel = corner - cameraPos;
+            const float x = (float)Dot(rel, lightAxisX);
+            const float y = (float)Dot(rel, lightAxisY);
+            minX = std::min(minX, x);
+            maxX = std::max(maxX, x);
+            minY = std::min(minY, y);
+            maxY = std::max(maxY, y);
+        }
+
+        // Keep shadow focus around the near-eye camera frustum in light-space.
+        const Vector3 shadowBoxCenter =
+            cameraPos +
+            lightAxisX * (0.5f * (minX + maxX)) +
+            lightAxisY * (0.5f * (minY + maxY));
+
+        const float frustumBoundsX = std::max(maxX - minX, 1.0f);
+        const float frustumBoundsY = std::max(maxY - minY, 1.0f);
+        const float nearCoverageBounds = 1.05f * std::max(frustumBoundsX, frustumBoundsY);
+
+        const float minBoundsXY = (float)g_SunShadowBoundsMin;
+        const float maxBoundsXY = std::max((float)g_SunShadowBoundsMax, minBoundsXY);
+        const float boundsXY = std::clamp(nearCoverageBounds, minBoundsXY, maxBoundsXY);
+
+        float boundsX = boundsXY;
+        float boundsY = boundsXY;
+        float boundsZ = std::max(2.0f * sceneRadius, 10.0f);
+
+        const float shadowMapWidth = (float)g_ShadowBuffer.GetWidth();
+        const float shadowMapHeight = (float)g_ShadowBuffer.GetHeight();
+
+        // Enforce isotropic shadow texel density to avoid stretched shadow pixels.
+        const float worldPerTexel = std::max(boundsX / shadowMapWidth, boundsY / shadowMapHeight);
+        boundsX = worldPerTexel * shadowMapWidth;
+        boundsY = worldPerTexel * shadowMapHeight;
+
+        // ShadowCamera expects the center on the far plane of the represented shadow region.
+        const Vector3 shadowCenter = shadowBoxCenter + lightDir * (0.5f * boundsZ);
+
+        m_SunShadowCamera.UpdateMatrix(
+            lightDir,
+            shadowCenter,
+            Vector3(boundsX, boundsY, boundsZ),
+            (uint32_t)g_ShadowBuffer.GetWidth(),
+            (uint32_t)g_ShadowBuffer.GetHeight(),
+            32);
 
         GlobalConstants globals;
         globals.ViewProjMatrix = m_Camera.GetViewProjMatrix();
@@ -576,19 +674,40 @@ void SceneViewer::RenderScene( void )
 
 		globals.BindlessResourcesBaseIndex = Renderer::GetBindlessResourcesBaseOffset();
 
+        if (!Renderer::FreezeCull)
+        {
+            gfxContext.TransitionResource(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            gfxContext.ClearUAV(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, 0);
+        }
         // Begin rendering depth
         gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
         gfxContext.ClearDepth(g_SceneDepthBuffer);
 
-        MeshSorter sorter(MeshSorter::kDefault);
+        MeshSorter shadowSorter(Renderer::kShadows);
+        shadowSorter.SetCamera(m_SunShadowCamera);
+        shadowSorter.SetDepthStencilTarget(g_ShadowBuffer);
+        {
+            globals.ViewportWidth = g_ShadowBuffer.GetWidth();
+            globals.ViewportHeight = g_ShadowBuffer.GetHeight();
+            globals.InvViewportWidth = 1.0f / (float)g_ShadowBuffer.GetWidth();
+            globals.InvViewportHeight = 1.0f / (float)g_ShadowBuffer.GetHeight();
+
+            ScopedTimer _outerprof(L"Sun Shadow", gfxContext);
+            shadowSorter.RenderMeshes(Renderer::kZPass, gfxContext, globals);
+
+            globals.ViewportWidth = g_SceneColorBuffer.GetWidth();
+            globals.ViewportHeight = g_SceneColorBuffer.GetHeight();
+            globals.InvViewportWidth = 1.0f / (float)g_SceneColorBuffer.GetWidth();
+            globals.InvViewportHeight = 1.0f / (float)g_SceneColorBuffer.GetHeight();
+
+        }
+
+        MeshSorter sorter(Renderer::kDefault);
 		sorter.SetCamera(m_Camera);
 		sorter.SetViewport(viewport);
 		sorter.SetScissor(scissor);
 		sorter.SetDepthStencilTarget(g_SceneDepthBuffer);
 		sorter.AddRenderTarget(g_SceneColorBuffer);
-
-        ModelInstanceManager::Render(sorter);
-
         sorter.Sort();
 
         {
@@ -604,7 +723,7 @@ void SceneViewer::RenderScene( void )
 				gfxContext.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
                 gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_READ);
 				gfxContext.ClearColor(g_VisibilityBuffer);
-                sorter.RenderMeshes(MeshSorter::kVBuffer, gfxContext, globals);
+                sorter.RenderMeshes(Renderer::kVBuffer, gfxContext, globals);
             }
 
             {
@@ -628,7 +747,7 @@ void SceneViewer::RenderScene( void )
 
             {
                 ScopedTimer _prof(L"Draw Transparent", gfxContext);
-                sorter.RenderMeshes(MeshSorter::kTransparent, gfxContext, globals);
+                sorter.RenderMeshes(Renderer::kTransparent, gfxContext, globals);
             }
         }
     }

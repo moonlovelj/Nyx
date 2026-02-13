@@ -40,6 +40,21 @@ namespace Renderer
 {
     using namespace Math;
 
+    enum BatchType
+    {
+        kDefault,
+        kShadows
+    };
+    enum DrawPass
+    {
+        kZPass,
+        kOpaque,
+        kVBuffer,
+        kGBuffer,
+        kTransparent,
+        kNumPasses
+    };
+
     extern RootSignature m_RootSig;
     extern DescriptorHeap s_TextureHeap;
     extern DescriptorHeap s_SamplerHeap;
@@ -47,6 +62,8 @@ namespace Renderer
 
 	extern float s_SpecularIBLRange;
 	extern float s_SpecularIBLBias;
+
+    extern BoolVar FreezeCull;
 
 	struct DispatchMeshCommand
 	{
@@ -102,8 +119,8 @@ namespace Renderer
     void UpdateGlobalDescriptors(void);
     void DrawSkybox( GraphicsContext& gfxContext, const Camera& camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor );
 
-	void InstanceCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, uint32_t cullPassIdx);
-	void DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, const BaseCamera* camera,
+	void InstanceCull(DrawPass pass, GraphicsContext& gfxContext, const GlobalConstants& inGlobals, uint32_t cullPassIdx);
+    void DAGCull(DrawPass pass, GraphicsContext& gfxContext, const GlobalConstants& inGlobals, const BaseCamera* camera,
 		const D3D12_VIEWPORT& viewport, uint32_t cullPassIdx);
 
     uint32_t GetBindlessResourcesBaseOffset();
@@ -120,8 +137,6 @@ namespace Renderer
     class MeshSorter
     {
     public:
-		enum BatchType { kDefault, kShadows };
-        enum DrawPass { kZPass, kOpaque, kVBuffer, kGBuffer, kTransparent, kNumPasses };
 
 		MeshSorter(BatchType type)
 		{
@@ -167,8 +182,8 @@ namespace Renderer
         void RenderMeshes(DrawPass pass, GraphicsContext& context, const GlobalConstants& inGlobals);
 
     private:
-		void RenderMeshedInternal(GraphicsContext& context,
-			const GlobalConstants& inGlobals);
+        void RenderMeshedInternal(DrawPass pass, GraphicsContext& context,
+                                const GlobalConstants& inGlobals);
 
         struct SortKey
         {

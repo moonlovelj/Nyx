@@ -44,6 +44,10 @@
 #include "CompiledShaders/DAGCullPass1CS.h"
 #include "CompiledShaders/ExportDepthVS.h"
 #include "CompiledShaders/ExportDepthPS.h"
+#include "CompiledShaders/InstanceCullDepthOnlyPassCS.h"
+#include "CompiledShaders/DAGCullDepthOnlyPassCS.h"
+#include "CompiledShaders/DepthOnlyPS.h"
+#include "CompiledShaders/UberMeshShaderDepthOnlyPass.h"
 
 #pragma warning(disable:4319) // '~': zero extending 'uint32_t' to 'uint64_t' of greater size
 
@@ -99,6 +103,10 @@ namespace Renderer
 	};
 
     GraphicsPSO m_ExportDepthPSO(L"Renderer: Export Depth PSO");
+
+    ComputePSO m_InstanceCullDepthOnlyPSO(L"Renderer: Instance Cull Depth Only PSO");
+    ComputePSO m_DAGCullDepthOnlyPSO(L"Renderer: DAG Cull Depth Only PSO");
+    MeshShaderPSO m_DepthOnlyPSO(L"Renderer: Depth Only PSO");
 }
 
 void Renderer::Initialize(void)
@@ -144,13 +152,6 @@ void Renderer::Initialize(void)
 	m_UberMeshPSO[0].SetRasterizerState(RasterizerTwoSided);
     m_UberMeshPSO[0].SetDepthStencilState(DepthStateDisabled);
 	m_UberMeshPSO[0].SetBlendState(BlendDisable);
-	//DXGI_FORMAT RTVFormats[] = {
-	//	g_SceneColorBuffer.GetFormat(),
-	//	g_GBufferA.GetFormat(),
-	//	g_GBufferB.GetFormat(),
-	//	g_GBufferC.GetFormat(),
-	//	g_GBufferD.GetFormat()
-	//};
     m_UberMeshPSO[0].SetRenderTargetFormats(0, {}, g_SceneDepthBuffer.GetFormat());
 	m_UberMeshPSO[0].SetMeshShader(g_pUberMeshShaderPass0, sizeof(g_pUberMeshShaderPass0));
 	m_UberMeshPSO[0].SetPixelShader(g_pVBufferPS, sizeof(g_pVBufferPS));
@@ -229,6 +230,22 @@ void Renderer::Initialize(void)
 	m_ExportDepthPSO.SetPixelShader(g_pExportDepthPS, sizeof(g_pExportDepthPS));
 	m_ExportDepthPSO.Finalize();
 
+    m_InstanceCullDepthOnlyPSO.SetRootSignature(m_RootSig);
+    m_InstanceCullDepthOnlyPSO.SetComputeShader(g_pInstanceCullDepthOnlyPassCS, sizeof(g_pInstanceCullDepthOnlyPassCS));
+    m_InstanceCullDepthOnlyPSO.Finalize();
+
+    m_DAGCullDepthOnlyPSO.SetRootSignature(m_RootSig);
+    m_DAGCullDepthOnlyPSO.SetComputeShader(g_pDAGCullDepthOnlyPassCS, sizeof(g_pDAGCullDepthOnlyPassCS));
+    m_DAGCullDepthOnlyPSO.Finalize();
+
+    m_DepthOnlyPSO.SetRootSignature(m_RootSig);
+    m_DepthOnlyPSO.SetRasterizerState(RasterizerTwoSided);
+    m_DepthOnlyPSO.SetDepthStencilState(DepthStateReadWrite);
+    m_DepthOnlyPSO.SetBlendState(BlendDisable);
+    m_DepthOnlyPSO.SetRenderTargetFormats(0, {}, g_ShadowBuffer.GetFormat());
+    m_DepthOnlyPSO.SetMeshShader(g_pUberMeshShaderDepthOnlyPass, sizeof(g_pUberMeshShaderDepthOnlyPass));
+    m_DepthOnlyPSO.SetPixelShader(g_pDepthOnlyPS, sizeof(g_pDepthOnlyPS));
+    m_DepthOnlyPSO.Finalize();
 
     // Initialize bindless resource descriptor bindings
     {
@@ -348,7 +365,7 @@ void Renderer::DrawSkybox( GraphicsContext& gfxContext, const Camera& Camera, co
     gfxContext.Draw(3);
 }
 
-void Renderer::InstanceCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, uint32_t cullPassIdx)
+void Renderer::InstanceCull(DrawPass pass, GraphicsContext& gfxContext, const GlobalConstants& inGlobals, uint32_t cullPassIdx)
 {
     ScopedTimer _prof(L"Renderer::InstanceCull", gfxContext);
     ComputeContext& context = gfxContext.GetComputeContext();
@@ -360,7 +377,11 @@ void Renderer::InstanceCull(GraphicsContext& gfxContext, const GlobalConstants& 
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
 	context.SetRootSignature(m_RootSig);
 
-	context.SetPipelineState(m_InstanceCullPSO[cullPassIdx]);
+    if (pass == kZPass)
+        context.SetPipelineState(m_InstanceCullDepthOnlyPSO);
+    else
+	    context.SetPipelineState(m_InstanceCullPSO[cullPassIdx]);
+
 	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
 	context.SetConstants(kCommandConstants,  DrawCommandManager::GetNumPotentialDrawItems());
 
@@ -393,7 +414,7 @@ void Renderer::InstanceCull(GraphicsContext& gfxContext, const GlobalConstants& 
     return s_GroupCount;
 }
 
-void Renderer::DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, const BaseCamera* camera, 
+void Renderer::DAGCull(DrawPass pass, GraphicsContext& gfxContext, const GlobalConstants& inGlobals, const BaseCamera* camera, 
     const D3D12_VIEWPORT& viewport, uint32_t cullPassIdx)
 {
 	ScopedTimer _prof(L"Renderer::DAGCull", gfxContext);
@@ -408,17 +429,14 @@ void Renderer::DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlo
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
 	context.SetRootSignature(m_RootSig);
 
-	context.SetPipelineState(m_DAGCullPSO[cullPassIdx]);
+    if (pass == kZPass)
+        context.SetPipelineState(m_DAGCullDepthOnlyPSO);
+    else
+        context.SetPipelineState(m_DAGCullPSO[cullPassIdx]);
+
 	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
 
-	float screenErrorConstant = 1.f;
-	auto* cameraProj = static_cast<const Camera*>(camera);
-	if (cameraProj)
-	{
-		screenErrorConstant = std::tanf(0.5f * cameraProj->GetFOV()) * 2 / viewport.Height * PixelErrorThreshold;
-	}
-	context.SetConstants(kCommandConstants, 0,
-		screenErrorConstant);
+    context.SetConstants(kCommandConstants, 0, (float)PixelErrorThreshold);
 
     const uint32_t dagGroups = GetDAGCullGroupCount();
     context.Dispatch1D(dagGroups * DAG_CULL_GROUP_SIZE, DAG_CULL_GROUP_SIZE);
@@ -500,6 +518,7 @@ void MeshSorter::Sort()
 }
 
 void MeshSorter::RenderMeshedInternal(
+    DrawPass pass,
     GraphicsContext& context,
     const GlobalConstants& inGlobals)
 {
@@ -519,72 +538,101 @@ void MeshSorter::RenderMeshedInternal(
         context.TransitionResource( DrawCommandManager::GetMeshletBatchGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         context.ClearUAV( DrawCommandManager::GetMeshletBatchGPU(), 0);
         context.TransitionResource(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        context.ClearUAV(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, 0);
+        //context.ClearUAV(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, 0);
 
-        uint32_t passIndex = 0;
-        Renderer::InstanceCull(context, inGlobals, passIndex);
-        Renderer::DAGCull(context, inGlobals, m_Camera, m_Viewport, passIndex);
+        if (pass == DrawPass::kZPass)
         {
-            // mesh buffer gen
-            context.TransitionResource(DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
-            context.GetComputeContext().SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-            context.GetComputeContext().SetConstants(kCommandConstants, passIndex); // pass index
-            context.GetComputeContext().Dispatch1D(1, 1);
+            uint32_t passIndex = 0;
+            Renderer::InstanceCull(pass, context, inGlobals, passIndex);
+            Renderer::DAGCull(pass, context, inGlobals, m_Camera, m_Viewport, passIndex);
+            {
+                // mesh buffer gen
+                context.TransitionResource(DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
+                context.GetComputeContext().SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
+                context.GetComputeContext().SetConstants(kCommandConstants, passIndex); // pass index
+                context.GetComputeContext().Dispatch1D(1, 1);
+            }
+
+            {
+                ScopedTimer _prof(L"Dispatch Mesh Indirect Depth Only Pass", context);
+                context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+                context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                context.SetPipelineState(m_DepthOnlyPSO);
+                context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
+                context.SetConstants(kCommandConstants, 0, 0, 0);
+                context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
+            }
         }
-
+        else
         {
-            ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 0", context);
-            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-            context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.SetPipelineState(m_UberMeshPSO[passIndex]);
-            context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-            context.SetConstants(kCommandConstants, 0, 0, 0);
-            context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
-        }
 
-        {
-            ExportDepth(context, inGlobals, m_Viewport, m_Scissor);
-        }
+            uint32_t passIndex = 0;
+            Renderer::InstanceCull(pass, context, inGlobals, passIndex);
+            Renderer::DAGCull(pass, context, inGlobals, m_Camera, m_Viewport, passIndex);
+            {
+                // mesh buffer gen
+                context.TransitionResource(DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
+                context.GetComputeContext().SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
+                context.GetComputeContext().SetConstants(kCommandConstants, passIndex); // pass index
+                context.GetComputeContext().Dispatch1D(1, 1);
+            }
 
-        {
-            context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            Renderer::GetCurrentHZB().GenerateHZB(context, g_SceneDepthBuffer);
-        }
+            {
+                ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 0", context);
+                context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+                context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                context.SetPipelineState(m_UberMeshPSO[passIndex]);
+                context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
+                context.SetConstants(kCommandConstants, 0, 0, 0);
+                context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
+            }
 
-        passIndex = 1;
-        Renderer::InstanceCull(context, inGlobals, passIndex);
-        Renderer::DAGCull(context, inGlobals, m_Camera, m_Viewport, passIndex);
-        {
-            // mesh buffer gen
-            context.TransitionResource( DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
-            context.GetComputeContext().SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-            context.GetComputeContext().SetConstants(kCommandConstants, passIndex); // pass index
-            context.GetComputeContext().Dispatch1D(1, 1);
-        }
+            {
+                ExportDepth(context, inGlobals, m_Viewport, m_Scissor);
+            }
 
-        {
-            ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 1", context);
-            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-            context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.SetPipelineState(m_UberMeshPSO[passIndex]);
-            context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-            context.SetConstants(kCommandConstants, 0, 0, 0);
-            context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
-        }
+            {
+                context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                Renderer::GetCurrentHZB().GenerateHZB(context, g_SceneDepthBuffer);
+            }
 
-		{
-            ExportDepth(context, inGlobals, m_Viewport, m_Scissor);
-		}
+            passIndex = 1;
+            Renderer::InstanceCull(pass, context, inGlobals, passIndex);
+            Renderer::DAGCull(pass, context, inGlobals, m_Camera, m_Viewport, passIndex);
+            {
+                // mesh buffer gen
+                context.TransitionResource(DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
+                context.GetComputeContext().SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
+                context.GetComputeContext().SetConstants(kCommandConstants, passIndex); // pass index
+                context.GetComputeContext().Dispatch1D(1, 1);
+            }
 
-        {
-            context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            Renderer::GetCurrentHZB().GenerateHZB(context, g_SceneDepthBuffer);
+            {
+                ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 1", context);
+                context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+                context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                context.SetPipelineState(m_UberMeshPSO[passIndex]);
+                context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
+                context.SetConstants(kCommandConstants, 0, 0, 0);
+                context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
+            }
+
+            {
+                ExportDepth(context, inGlobals, m_Viewport, m_Scissor);
+            }
+
+            {
+                context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                Renderer::GetCurrentHZB().GenerateHZB(context, g_SceneDepthBuffer);
+            }
         }
     }
     else
@@ -658,6 +706,8 @@ void MeshSorter::RenderMeshes(
 	globals.ViewProjMatrix = m_Camera->GetViewProjMatrix();
     globals.ViewMatrix = m_Camera->GetViewMatrix();
 	globals.ViewerPos = m_Camera->GetPosition();
+    globals.ProjMatrix = m_Camera->GetProjMatrix();
+    globals.InverseViewProjMatrix = Invert(m_Camera->GetViewProjMatrix());
     const Frustum& frustum = m_Camera->GetViewSpaceFrustum();
 
     //kNearPlane, kFarPlane, kLeftPlane, kRightPlane, kTopPlane, kBottomPlane
@@ -784,10 +834,16 @@ void MeshSorter::RenderMeshes(
 		}
 		else
 		{
-			if (kVBuffer == pass)
+            //if (!FreezeCull)
+            //{
+            //    context.TransitionResource(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            //    context.ClearUAV(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, 0);
+            //}
+
+			if (kVBuffer == pass || kZPass == pass)
 			{
                 if (DrawCommandManager::GetNumPotentialDrawItems() > 0)
-                    RenderMeshedInternal(context, globals);
+                    RenderMeshedInternal(pass, context, globals);
 			}
         }
     }
