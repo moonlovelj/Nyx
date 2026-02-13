@@ -93,6 +93,7 @@ NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.
 NumVar g_SunShadowCoverageDepth("Viewer/Lighting/Sun Shadow Coverage Depth", 1000.0f, 10.0f, 5000.0f, 5.0f);
 NumVar g_SunShadowBoundsMin("Viewer/Lighting/Sun Shadow Bounds Min", 40.0f, 1.0f, 2000.0f, 1.0f);
 NumVar g_SunShadowBoundsMax("Viewer/Lighting/Sun Shadow Bounds Max", 500.0f, 10.0f, 10000.0f, 5.0f);
+NumVar g_SunShadowCasterDepthPadding("Viewer/Lighting/Sun Shadow Caster Depth Padding", 80.0f, 0.0f, 2000.0f, 5.0f);
 BoolVar g_SunShadow("Viewer/Lighting/Sun Shadow", false);
 BoolVar g_UseglTFCamera("Camera/Use glTF Camera", false);
 
@@ -533,7 +534,6 @@ void SceneViewer::RenderScene( void )
         Vector3 SunDirection = Normalize(Vector3( costheta * cosphi, sinphi, sintheta * cosphi ));
 
         const Vector3 lightDir = Normalize(-SunDirection); // Direction of light travel.
-        const float sceneRadius = std::max(ModelInstanceManager::GetInstanceDistributionRadius(), 1.0f);
         const Vector3 cameraPos = m_Camera.GetPosition();
         const Vector3 cameraForward = Normalize(m_Camera.GetForwardVec());
         const Vector3 cameraRight = Normalize(m_Camera.GetRightVec());
@@ -580,23 +580,32 @@ void SceneViewer::RenderScene( void )
         float maxX = -std::numeric_limits<float>::max();
         float minY = std::numeric_limits<float>::max();
         float maxY = -std::numeric_limits<float>::max();
+        float minL = std::numeric_limits<float>::max();
+        float maxL = -std::numeric_limits<float>::max();
 
         for (const Vector3& corner : frustumCorners)
         {
             const Vector3 rel = corner - cameraPos;
             const float x = (float)Dot(rel, lightAxisX);
             const float y = (float)Dot(rel, lightAxisY);
+            const float l = (float)Dot(rel, lightDir);
             minX = std::min(minX, x);
             maxX = std::max(maxX, x);
             minY = std::min(minY, y);
             maxY = std::max(maxY, y);
+            minL = std::min(minL, l);
+            maxL = std::max(maxL, l);
         }
 
         // Keep shadow focus around the near-eye camera frustum in light-space.
-        const Vector3 shadowBoxCenter =
+        const float centerX = 0.5f * (minX + maxX);
+        const float centerY = 0.5f * (minY + maxY);
+        const float farDepthAlongLight = maxL;
+        const Vector3 shadowCenter =
             cameraPos +
-            lightAxisX * (0.5f * (minX + maxX)) +
-            lightAxisY * (0.5f * (minY + maxY));
+            lightAxisX * centerX +
+            lightAxisY * centerY +
+            lightDir * farDepthAlongLight;
 
         const float frustumBoundsX = std::max(maxX - minX, 1.0f);
         const float frustumBoundsY = std::max(maxY - minY, 1.0f);
@@ -608,7 +617,9 @@ void SceneViewer::RenderScene( void )
 
         float boundsX = boundsXY;
         float boundsY = boundsXY;
-        float boundsZ = std::max(2.0f * sceneRadius, 10.0f);
+        const float nearDepthAlongLight = minL - (float)g_SunShadowCasterDepthPadding;
+        const float sceneRadius = std::max(ModelInstanceManager::GetInstanceDistributionRadius(), 1.0f);
+        float boundsZ = std::max(sceneRadius, 10.0f);
 
         const float shadowMapWidth = (float)g_ShadowBuffer.GetWidth();
         const float shadowMapHeight = (float)g_ShadowBuffer.GetHeight();
@@ -617,9 +628,6 @@ void SceneViewer::RenderScene( void )
         const float worldPerTexel = std::max(boundsX / shadowMapWidth, boundsY / shadowMapHeight);
         boundsX = worldPerTexel * shadowMapWidth;
         boundsY = worldPerTexel * shadowMapHeight;
-
-        // ShadowCamera expects the center on the far plane of the represented shadow region.
-        const Vector3 shadowCenter = shadowBoxCenter + lightDir * (0.5f * boundsZ);
 
         m_SunShadowCamera.UpdateMatrix(
             lightDir,
