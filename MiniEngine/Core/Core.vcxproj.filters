@@ -549,6 +549,7 @@
     <ClCompile Include="PostEffects.cpp" />
     <ClCompile Include="Display.cpp" />
     <ClCompile Include="ReadbackBuffer.cpp" />
+    <ClCompile Include="RenderGraph.cpp" />
     <ClCompile Include="RootSignature.cpp" />
     <ClCompile Include="SamplerManager.cpp" />
     <ClCompile Include="ShadowBuffer.cpp" />
@@ -633,6 +634,7 @@
     <ClInclude Include="EngineTuning.h" />
     <ClInclude Include="Display.h" />
     <ClInclude Include="ReadbackBuffer.h" />
+    <ClInclude Include="RenderGraph.h" />
     <ClInclude Include="RootSignature.h" />
     <ClInclude Include="SamplerManager.h" />
     <ClInclude Include="ShadowBuffer.h" />
