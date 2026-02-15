@@ -15,14 +15,19 @@ Test platform for the screenshots/video below: **i7-14700KF + RTX 4070 Ti SUPER*
 
 Demo video:
 
+<h2 align="center">🎬 Nyx – Nanite-Style Virtualized Geometry Renderer</h2>
+
 <p align="center">
-  <a href="https://www.youtube.com/watch?v=qyV6u7DOglQ&t=9s">
-    <img src="Images/Zorah_Shading.png" width="900" alt="Nyx Zorah demo"/>
+  <a href="https://www.youtube.com/watch?v=mBEIvRWloCw">
+    <img src="https://img.youtube.com/vi/mBEIvRWloCw/maxresdefault.jpg" width="1000">
   </a>
 </p>
 
 
-> 18.9G triangles, Nanite-style pipeline, GPU-driven culling, mesh shader rendering, real-time streaming
+<p align="center">
+  4K • 144Hz • 18.9B Instanced Triangles • RTX 4070 Ti SUPER
+</p>
+
 
 Screenshots:
 
