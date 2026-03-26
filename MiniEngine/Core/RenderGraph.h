@@ -9,6 +9,7 @@
 #include <vector>
 
 class GraphicsContext;
+class ComputeContext;
 class ColorBuffer;
 class DepthBuffer;
 
@@ -36,16 +37,6 @@ namespace RenderGraph
         Present
     };
 
-    struct TextureDesc
-    {
-        uint32_t Width = 1;
-        uint32_t Height = 1;
-        uint32_t NumMips = 1;
-        DXGI_FORMAT Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        uint32_t TemporalLayers = 1;
-        bool IsDepth = false;
-    };
-
     struct CompileOptions
     {
         bool EnablePassCulling = true;
@@ -62,8 +53,6 @@ namespace RenderGraph
     {
         int32_t FirstPass = -1;
         int32_t LastPass = -1;
-        bool IsTransient = false;
-        bool IsTemporal = false;
     };
 
     struct PassInfo
@@ -86,12 +75,13 @@ namespace RenderGraph
         }
 
         GraphicsContext& GetGraphicsContext() { return m_Context; }
+        ComputeContext& GetComputeContext();
         uint32_t GetFrameIndex() const { return m_FrameIndex; }
         uint32_t GetPassIndex() const { return m_PassIndex; }
 
-        GpuResource& GetResource(ResourceHandle handle, int32_t temporalLayerOffset = 0);
-        ColorBuffer& GetColor(ResourceHandle handle, int32_t temporalLayerOffset = 0);
-        DepthBuffer& GetDepth(ResourceHandle handle, int32_t temporalLayerOffset = 0);
+        GpuResource& GetResource(ResourceHandle handle);
+        ColorBuffer& GetColor(ResourceHandle handle);
+        DepthBuffer& GetDepth(ResourceHandle handle);
 
     private:
         Graph& m_Graph;
@@ -114,8 +104,6 @@ namespace RenderGraph
         Graph& operator=(Graph&&) = default;
 
         ResourceHandle Import(const std::string& name, GpuResource& resource);
-        ResourceHandle CreateTexture(const std::string& name, const TextureDesc& desc);
-
         void Export(ResourceHandle handle);
 
         template<class SetupFn, class ExecuteFn>
@@ -138,7 +126,6 @@ namespace RenderGraph
         struct BarrierOp
         {
             uint32_t ResourceIndex = 0;
-            int32_t TemporalLayerOffset = 0;
             D3D12_RESOURCE_STATES State = D3D12_RESOURCE_STATE_COMMON;
         };
 
@@ -153,7 +140,6 @@ namespace RenderGraph
         {
             ResourceHandle Handle;
             AccessType Access = AccessType::ReadSrv;
-            int32_t TemporalLayerOffset = 0;
         };
 
         struct WriteDecl
@@ -161,7 +147,6 @@ namespace RenderGraph
             ResourceHandle SourceHandle;
             ResourceHandle TargetHandle;
             AccessType Access = AccessType::WriteUav;
-            int32_t TemporalLayerOffset = 0;
         };
 
         struct PassNode
@@ -179,33 +164,20 @@ namespace RenderGraph
             int32_t WriterPass = -1;
         };
 
-        struct TransientSlice
-        {
-            std::unique_ptr<ColorBuffer> Color;
-            std::unique_ptr<DepthBuffer> Depth;
-
-            bool IsAllocated() const { return Color != nullptr || Depth != nullptr; }
-            GpuResource* GetResource();
-            void Destroy();
-        };
-
         struct ResourceNode
         {
             std::string Name;
             bool Imported = false;
-            bool IsDepth = false;
-            TextureDesc Desc = {};
             GpuResource* ImportedResource = nullptr;
             uint32_t LatestVersion = 0;
             std::vector<VersionNode> Versions;
-            std::vector<TransientSlice> TemporalSlices;
         };
 
         uint32_t BeginPass(const std::string& name);
         void EndPass(uint32_t passIndex, ExecuteCallback&& callback);
 
-        ResourceHandle RegisterRead(uint32_t passIndex, ResourceHandle handle, AccessType access, int32_t temporalLayerOffset);
-        ResourceHandle RegisterWrite(uint32_t passIndex, ResourceHandle handle, AccessType access, int32_t temporalLayerOffset);
+        ResourceHandle RegisterRead(uint32_t passIndex, ResourceHandle handle, AccessType access);
+        ResourceHandle RegisterWrite(uint32_t passIndex, ResourceHandle handle, AccessType access);
         void MarkPassSideEffect(uint32_t passIndex);
 
         bool BuildDependencies(const CompileOptions& options);
@@ -215,11 +187,7 @@ namespace RenderGraph
         void DumpGraph(const CompileOptions& options) const;
 
         bool ValidateHandle(ResourceHandle handle, uint32_t passIndex, const char* operation, bool requireLatest);
-        bool ValidateTemporalOffset(const ResourceNode& resource, int32_t temporalLayerOffset, uint32_t passIndex, const char* operation);
-
-        bool EnsureTransientSliceAllocated(uint32_t resourceIndex, uint32_t frameIndex, int32_t temporalLayerOffset);
-        void ReleaseTransientIfNeeded(uint32_t resourceIndex, uint32_t activePassOrdinal, uint32_t frameIndex);
-        GpuResource* ResolveResource(uint32_t resourceIndex, uint32_t frameIndex, int32_t temporalLayerOffset);
+        GpuResource* ResolveResource(uint32_t resourceIndex);
 
     private:
         std::vector<ResourceNode> m_Resources;
@@ -243,19 +211,14 @@ namespace RenderGraph
     public:
         PassBuilder(Graph& graph, uint32_t passIndex) : m_Graph(graph), m_PassIndex(passIndex) {}
 
-        ResourceHandle Read(ResourceHandle handle, AccessType access = AccessType::ReadSrv, int32_t temporalLayerOffset = 0)
+        ResourceHandle Read(ResourceHandle handle, AccessType access = AccessType::ReadSrv)
         {
-            return m_Graph.RegisterRead(m_PassIndex, handle, access, temporalLayerOffset);
+            return m_Graph.RegisterRead(m_PassIndex, handle, access);
         }
 
-        ResourceHandle Write(ResourceHandle handle, AccessType access = AccessType::WriteUav, int32_t temporalLayerOffset = 0)
+        ResourceHandle Write(ResourceHandle handle, AccessType access = AccessType::WriteUav)
         {
-            return m_Graph.RegisterWrite(m_PassIndex, handle, access, temporalLayerOffset);
-        }
-
-        ResourceHandle CreateTexture(const std::string& name, const TextureDesc& desc)
-        {
-            return m_Graph.CreateTexture(name, desc);
+            return m_Graph.RegisterWrite(m_PassIndex, handle, access);
         }
 
         ResourceHandle Import(const std::string& name, GpuResource& resource)

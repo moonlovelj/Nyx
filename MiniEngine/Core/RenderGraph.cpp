@@ -17,20 +17,6 @@ namespace RenderGraph
 {
     namespace
     {
-        bool IsDepthFormat(DXGI_FORMAT format)
-        {
-            switch (format)
-            {
-            case DXGI_FORMAT_D16_UNORM:
-            case DXGI_FORMAT_D24_UNORM_S8_UINT:
-            case DXGI_FORMAT_D32_FLOAT:
-            case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
-                return true;
-            default:
-                return false;
-            }
-        }
-
         bool IsWriteAccess(AccessType access)
         {
             return access == AccessType::WriteRenderTarget
@@ -123,25 +109,6 @@ namespace RenderGraph
         }
     } // namespace
 
-    GpuResource* Graph::TransientSlice::GetResource()
-    {
-        if (Color)
-            return Color.get();
-        if (Depth)
-            return Depth.get();
-        return nullptr;
-    }
-
-    void Graph::TransientSlice::Destroy()
-    {
-        if (Color)
-            Color->Destroy();
-        if (Depth)
-            Depth->Destroy();
-        Color.reset();
-        Depth.reset();
-    }
-
     Graph::~Graph()
     {
         Reset();
@@ -153,31 +120,8 @@ namespace RenderGraph
         node.Name = name;
         node.Imported = true;
         node.ImportedResource = &resource;
-        node.IsDepth = dynamic_cast<DepthBuffer*>(&resource) != nullptr;
-        node.Desc.IsDepth = node.IsDepth;
-        node.Desc.TemporalLayers = 1;
         node.LatestVersion = 0;
         node.Versions.push_back({});
-
-        const uint32_t index = static_cast<uint32_t>(m_Resources.size());
-        m_Resources.push_back(std::move(node));
-        m_IsCompiled = false;
-        return ResourceHandle{ index, 0u };
-    }
-
-    ResourceHandle Graph::CreateTexture(const std::string& name, const TextureDesc& desc)
-    {
-        ResourceNode node;
-        node.Name = name;
-        node.Imported = false;
-        node.IsDepth = desc.IsDepth || IsDepthFormat(desc.Format);
-        node.Desc = desc;
-        node.Desc.IsDepth = node.IsDepth;
-        node.Desc.NumMips = std::max(1u, node.Desc.NumMips);
-        node.Desc.TemporalLayers = std::max(1u, node.Desc.TemporalLayers);
-        node.LatestVersion = 0;
-        node.Versions.push_back({});
-        node.TemporalSlices.resize(node.Desc.TemporalLayers);
 
         const uint32_t index = static_cast<uint32_t>(m_Resources.size());
         m_Resources.push_back(std::move(node));
@@ -248,20 +192,7 @@ namespace RenderGraph
         return true;
     }
 
-    bool Graph::ValidateTemporalOffset(const ResourceNode& resource, int32_t temporalLayerOffset, uint32_t passIndex, const char* operation)
-    {
-        if (temporalLayerOffset != 0 && resource.Desc.TemporalLayers <= 1)
-        {
-            m_HasBuilderError = true;
-            m_LastCompileError =
-                "RenderGraph: temporal offset used on non-temporal resource '" + resource.Name +
-                "' in pass " + std::to_string(passIndex) + " operation " + operation;
-            return false;
-        }
-        return true;
-    }
-
-    ResourceHandle Graph::RegisterRead(uint32_t passIndex, ResourceHandle handle, AccessType access, int32_t temporalLayerOffset)
+    ResourceHandle Graph::RegisterRead(uint32_t passIndex, ResourceHandle handle, AccessType access)
     {
         if (!ValidateHandle(handle, passIndex, "Read", true))
             return {};
@@ -273,15 +204,11 @@ namespace RenderGraph
             return {};
         }
 
-        const ResourceNode& resource = m_Resources[handle.Index];
-        if (!ValidateTemporalOffset(resource, temporalLayerOffset, passIndex, "Read"))
-            return {};
-
-        m_Passes[passIndex].Reads.push_back(ReadDecl{ handle, access, temporalLayerOffset });
+        m_Passes[passIndex].Reads.push_back(ReadDecl{ handle, access });
         return handle;
     }
 
-    ResourceHandle Graph::RegisterWrite(uint32_t passIndex, ResourceHandle handle, AccessType access, int32_t temporalLayerOffset)
+    ResourceHandle Graph::RegisterWrite(uint32_t passIndex, ResourceHandle handle, AccessType access)
     {
         if (!ValidateHandle(handle, passIndex, "Write", true))
             return {};
@@ -301,15 +228,13 @@ namespace RenderGraph
         }
 
         ResourceNode& resource = m_Resources[handle.Index];
-        if (!ValidateTemporalOffset(resource, temporalLayerOffset, passIndex, "Write"))
-            return {};
 
         const uint32_t newVersion = resource.LatestVersion + 1;
         resource.LatestVersion = newVersion;
         resource.Versions.push_back(VersionNode{ static_cast<int32_t>(passIndex) });
 
         const ResourceHandle targetHandle{ handle.Index, newVersion };
-        m_Passes[passIndex].Writes.push_back(WriteDecl{ handle, targetHandle, access, temporalLayerOffset });
+        m_Passes[passIndex].Writes.push_back(WriteDecl{ handle, targetHandle, access });
         return targetHandle;
     }
 
@@ -499,13 +424,6 @@ namespace RenderGraph
                 touch(write.TargetHandle.Index);
         }
 
-        for (uint32_t resourceIndex = 0; resourceIndex < m_Resources.size(); ++resourceIndex)
-        {
-            const ResourceNode& resource = m_Resources[resourceIndex];
-            ResourceLifetimeInfo& lifetime = m_ResourceLifetimes[resourceIndex];
-            lifetime.IsTransient = !resource.Imported;
-            lifetime.IsTemporal = resource.Desc.TemporalLayers > 1;
-        }
     }
 
     void Graph::BuildBarriers()
@@ -518,14 +436,14 @@ namespace RenderGraph
             const PassNode& pass = m_Passes[m_ActivePasses[ordinal]];
             std::map<uint64_t, BarrierOp> deduped;
 
-            auto addBarrier = [&](uint32_t resourceIndex, int32_t temporalLayerOffset, AccessType access)
+            auto addBarrier = [&](uint32_t resourceIndex, AccessType access)
             {
                 const D3D12_RESOURCE_STATES state = AccessToState(access);
-                const uint64_t key = (uint64_t(resourceIndex) << 32ull) | uint32_t(temporalLayerOffset);
+                const uint64_t key = uint64_t(resourceIndex);
                 auto iter = deduped.find(key);
                 if (iter == deduped.end())
                 {
-                    deduped.emplace(key, BarrierOp{ resourceIndex, temporalLayerOffset, state });
+                    deduped.emplace(key, BarrierOp{ resourceIndex, state });
                     return;
                 }
 
@@ -540,9 +458,9 @@ namespace RenderGraph
             };
 
             for (const ReadDecl& read : pass.Reads)
-                addBarrier(read.Handle.Index, read.TemporalLayerOffset, read.Access);
+                addBarrier(read.Handle.Index, read.Access);
             for (const WriteDecl& write : pass.Writes)
-                addBarrier(write.TargetHandle.Index, write.TemporalLayerOffset, write.Access);
+                addBarrier(write.TargetHandle.Index, write.Access);
 
             std::vector<BarrierOp>& batch = m_BarrierBatches[ordinal];
             batch.reserve(deduped.size());
@@ -578,97 +496,13 @@ namespace RenderGraph
         return true;
     }
 
-    bool Graph::EnsureTransientSliceAllocated(uint32_t resourceIndex, uint32_t frameIndex, int32_t temporalLayerOffset)
-    {
-        if (resourceIndex >= m_Resources.size())
-            return false;
-
-        ResourceNode& resource = m_Resources[resourceIndex];
-        if (resource.Imported)
-            return true;
-
-        const uint32_t layerCount = std::max(1u, resource.Desc.TemporalLayers);
-        if (resource.TemporalSlices.size() != layerCount)
-            resource.TemporalSlices.resize(layerCount);
-
-        auto createSlice = [&](uint32_t layerIndex) -> bool
-        {
-            TransientSlice& slice = resource.TemporalSlices[layerIndex];
-            if (slice.IsAllocated())
-                return true;
-
-            const std::wstring resourceName = ToWide(resource.Name + "_L" + std::to_string(layerIndex));
-            if (resource.IsDepth)
-            {
-                auto depth = std::make_unique<DepthBuffer>();
-                depth->Create(resourceName,
-                    resource.Desc.Width,
-                    resource.Desc.Height,
-                    resource.Desc.Format);
-                slice.Depth = std::move(depth);
-            }
-            else
-            {
-                auto color = std::make_unique<ColorBuffer>();
-                color->Create(resourceName,
-                    resource.Desc.Width,
-                    resource.Desc.Height,
-                    resource.Desc.NumMips,
-                    resource.Desc.Format);
-                slice.Color = std::move(color);
-            }
-            return true;
-        };
-
-        if (layerCount > 1)
-        {
-            // Temporal resources keep all slices alive to preserve history.
-            for (uint32_t layer = 0; layer < layerCount; ++layer)
-            {
-                if (!createSlice(layer))
-                    return false;
-            }
-            return true;
-        }
-
-        const uint32_t targetLayer = static_cast<uint32_t>((int64_t(frameIndex) + temporalLayerOffset + layerCount * 1024ll) % layerCount);
-        return createSlice(targetLayer);
-    }
-
-    GpuResource* Graph::ResolveResource(uint32_t resourceIndex, uint32_t frameIndex, int32_t temporalLayerOffset)
+    GpuResource* Graph::ResolveResource(uint32_t resourceIndex)
     {
         if (resourceIndex >= m_Resources.size())
             return nullptr;
 
         ResourceNode& resource = m_Resources[resourceIndex];
-        if (resource.Imported)
-            return resource.ImportedResource;
-
-        const uint32_t layerCount = std::max(1u, resource.Desc.TemporalLayers);
-        if (resource.TemporalSlices.empty())
-            return nullptr;
-
-        const uint32_t targetLayer = static_cast<uint32_t>((int64_t(frameIndex) + temporalLayerOffset + layerCount * 1024ll) % layerCount);
-        return resource.TemporalSlices[targetLayer].GetResource();
-    }
-
-    void Graph::ReleaseTransientIfNeeded(uint32_t resourceIndex, uint32_t activePassOrdinal, uint32_t frameIndex)
-    {
-        (frameIndex);
-        if (resourceIndex >= m_Resources.size() || resourceIndex >= m_ResourceLifetimes.size())
-            return;
-
-        ResourceNode& resource = m_Resources[resourceIndex];
-        const ResourceLifetimeInfo& lifetime = m_ResourceLifetimes[resourceIndex];
-        if (!lifetime.IsTransient || lifetime.LastPass != static_cast<int32_t>(activePassOrdinal))
-            return;
-
-        // Keep temporal slices alive across frames.
-        if (resource.Desc.TemporalLayers > 1)
-            return;
-
-        if (!resource.TemporalSlices.empty())
-            resource.TemporalSlices[0].Destroy();
+        return resource.ImportedResource;
     }
 
     void Graph::Execute(GraphicsContext& context, const ExecuteOptions& options)
@@ -681,20 +515,9 @@ namespace RenderGraph
             const uint32_t passIndex = m_ActivePasses[ordinal];
             const PassNode& pass = m_Passes[passIndex];
 
-            // First-use creation for transient resources.
-            for (uint32_t resourceIndex = 0; resourceIndex < m_ResourceLifetimes.size(); ++resourceIndex)
-            {
-                const ResourceLifetimeInfo& lifetime = m_ResourceLifetimes[resourceIndex];
-                if (!lifetime.IsTransient || lifetime.FirstPass != static_cast<int32_t>(ordinal))
-                    continue;
-
-                EnsureTransientSliceAllocated(resourceIndex, options.FrameIndex, 0);
-            }
-
             for (const BarrierOp& barrier : m_BarrierBatches[ordinal])
             {
-                EnsureTransientSliceAllocated(barrier.ResourceIndex, options.FrameIndex, barrier.TemporalLayerOffset);
-                GpuResource* resource = ResolveResource(barrier.ResourceIndex, options.FrameIndex, barrier.TemporalLayerOffset);
+                GpuResource* resource = ResolveResource(barrier.ResourceIndex);
                 if (resource != nullptr)
                     context.TransitionResource(*resource, barrier.State);
             }
@@ -708,20 +531,11 @@ namespace RenderGraph
             }
             context.PIXEndEvent();
 
-            // Last-use release for non-temporal transient resources.
-            for (uint32_t resourceIndex = 0; resourceIndex < m_ResourceLifetimes.size(); ++resourceIndex)
-                ReleaseTransientIfNeeded(resourceIndex, ordinal, options.FrameIndex);
         }
     }
 
     void Graph::Reset()
     {
-        for (ResourceNode& resource : m_Resources)
-        {
-            for (TransientSlice& slice : resource.TemporalSlices)
-                slice.Destroy();
-        }
-
         m_Resources.clear();
         m_Passes.clear();
         m_ExportedHandles.clear();
@@ -861,8 +675,7 @@ namespace RenderGraph
                     const ResourceNode& resource = m_Resources[read.Handle.Index];
                     json << "{"
                          << "\"resource\":\"" << EscapeJson(resource.Name) << "\","
-                         << "\"version\":" << read.Handle.Version << ","
-                         << "\"temporalOffset\":" << read.TemporalLayerOffset
+                         << "\"version\":" << read.Handle.Version
                          << "}";
                     if (i + 1 < pass.Reads.size())
                         json << ",";
@@ -877,8 +690,7 @@ namespace RenderGraph
                     json << "{"
                          << "\"resource\":\"" << EscapeJson(resource.Name) << "\","
                          << "\"sourceVersion\":" << write.SourceHandle.Version << ","
-                         << "\"targetVersion\":" << write.TargetHandle.Version << ","
-                         << "\"temporalOffset\":" << write.TemporalLayerOffset
+                         << "\"targetVersion\":" << write.TargetHandle.Version
                          << "}";
                     if (i + 1 < pass.Writes.size())
                         json << ",";
@@ -901,7 +713,6 @@ namespace RenderGraph
                 json << "      \"index\": " << resourceIndex << ",\n";
                 json << "      \"name\": \"" << EscapeJson(resource.Name) << "\",\n";
                 json << "      \"imported\": " << (resource.Imported ? "true" : "false") << ",\n";
-                json << "      \"temporalLayers\": " << std::max(1u, resource.Desc.TemporalLayers) << ",\n";
                 json << "      \"firstPass\": " << lifetime.FirstPass << ",\n";
                 json << "      \"lastPass\": " << lifetime.LastPass << "\n";
                 json << "    }";
@@ -914,24 +725,29 @@ namespace RenderGraph
         }
     }
 
-    GpuResource& PassExecutionContext::GetResource(ResourceHandle handle, int32_t temporalLayerOffset)
+    GpuResource& PassExecutionContext::GetResource(ResourceHandle handle)
     {
-        GpuResource* resource = m_Graph.ResolveResource(handle.Index, m_FrameIndex, temporalLayerOffset);
+        GpuResource* resource = m_Graph.ResolveResource(handle.Index);
         ASSERT(resource != nullptr, "RenderGraph: requested resource is null in pass context");
         return *resource;
     }
 
-    ColorBuffer& PassExecutionContext::GetColor(ResourceHandle handle, int32_t temporalLayerOffset)
+    ComputeContext& PassExecutionContext::GetComputeContext()
     {
-        GpuResource& resource = GetResource(handle, temporalLayerOffset);
+        return m_Context.GetComputeContext();
+    }
+
+    ColorBuffer& PassExecutionContext::GetColor(ResourceHandle handle)
+    {
+        GpuResource& resource = GetResource(handle);
         auto* color = dynamic_cast<ColorBuffer*>(&resource);
         ASSERT(color != nullptr, "RenderGraph: requested color resource is not a ColorBuffer");
         return *color;
     }
 
-    DepthBuffer& PassExecutionContext::GetDepth(ResourceHandle handle, int32_t temporalLayerOffset)
+    DepthBuffer& PassExecutionContext::GetDepth(ResourceHandle handle)
     {
-        GpuResource& resource = GetResource(handle, temporalLayerOffset);
+        GpuResource& resource = GetResource(handle);
         auto* depth = dynamic_cast<DepthBuffer*>(&resource);
         ASSERT(depth != nullptr, "RenderGraph: requested depth resource is not a DepthBuffer");
         return *depth;
