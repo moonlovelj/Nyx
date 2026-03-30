@@ -442,17 +442,20 @@ void Renderer::ExportDepth(GraphicsContext& gfxContext, const GlobalConstants& i
 	gfxContext.Draw(3);
 }
 
-void Renderer::ResolveVBufferToGBuffer(GraphicsContext& gfxContext, const GlobalConstants& inGlobals)
+void Renderer::ResolveVBufferToGBuffer(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, bool performTransitions)
 {
 	ScopedTimer _prof(L"Renderer::ResolveVBufferToGBuffer", gfxContext);
 	ComputeContext& context = gfxContext.GetComputeContext();
 
-	context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-	context.TransitionResource(g_GBufferA, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	context.TransitionResource(g_GBufferB, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	context.TransitionResource(g_GBufferC, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	context.TransitionResource(g_GBufferD, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	if (performTransitions)
+	{
+		context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+		context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+		context.TransitionResource(g_GBufferA, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		context.TransitionResource(g_GBufferB, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		context.TransitionResource(g_GBufferC, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		context.TransitionResource(g_GBufferD, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	}
 
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());

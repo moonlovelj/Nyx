@@ -111,7 +111,7 @@ namespace Renderer
 
 	void ExportDepth(GraphicsContext& gfxContext, const GlobalConstants& inGlobals,
 		const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor);
-	void ResolveVBufferToGBuffer(GraphicsContext& gfxContext, const GlobalConstants& inGlobals);
+	void ResolveVBufferToGBuffer(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, bool performTransitions = true);
 
 	HierarchicalDepthBuffer& GetPrevHZB();
 	HierarchicalDepthBuffer& GetCurrentHZB();

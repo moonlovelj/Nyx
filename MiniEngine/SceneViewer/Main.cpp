@@ -3,6 +3,7 @@
 #include "BufferManager.h"
 #include "Camera.h"
 #include "CommandContext.h"
+#include "RenderGraph.h"
 #include "TemporalEffects.h"
 #include "MotionBlur.h"
 #include "DepthOfField.h"
@@ -90,6 +91,7 @@ NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.
 //NumVar g_SunShadowBias("Viewer/Lighting/Sun Shadow Bias", 4.f, 1.0f, 20.0f, 1.f );
 //BoolVar g_SunShadow("Viewer/Lighting/Sun Shadow", false);
 BoolVar g_UseglTFCamera("Camera/Use glTF Camera", false);
+BoolVar g_EnableM0RenderGraph("Viewer/RenderGraph/Enable M0 Graph", true);
 
 void ChangeIBLSet(EngineVar::ActionType);
 void ChangeIBLBias(EngineVar::ActionType);
@@ -608,16 +610,95 @@ void SceneViewer::RenderScene( void )
             }
 
             {
-				gfxContext.TransitionResource(g_GBufferA, D3D12_RESOURCE_STATE_RENDER_TARGET);
-				gfxContext.TransitionResource(g_GBufferB, D3D12_RESOURCE_STATE_RENDER_TARGET);
-				gfxContext.TransitionResource(g_GBufferC, D3D12_RESOURCE_STATE_RENDER_TARGET);
-				gfxContext.TransitionResource(g_GBufferD, D3D12_RESOURCE_STATE_RENDER_TARGET);
-				gfxContext.ClearColor(g_GBufferA);
-				gfxContext.ClearColor(g_GBufferB);
-				gfxContext.ClearColor(g_GBufferC);
-				gfxContext.ClearColor(g_GBufferD);
+                if (g_EnableM0RenderGraph)
+                {
+                    RenderGraph::Graph graph;
+                    auto visibilityBuffer = graph.ImportColor("VisibilityBuffer", g_VisibilityBuffer);
+                    auto visibleMeshletBuffer = graph.ImportBuffer("VisibleMeshletBuffer", DrawCommandManager::GetVisibleMeshletBufferGPU());
+                    auto gBufferA = graph.ImportColor("GBufferA", g_GBufferA);
+                    auto gBufferB = graph.ImportColor("GBufferB", g_GBufferB);
+                    auto gBufferC = graph.ImportColor("GBufferC", g_GBufferC);
+                    auto gBufferD = graph.ImportColor("GBufferD", g_GBufferD);
 
-				Renderer::ResolveVBufferToGBuffer(gfxContext, globals);
+                    graph.AddPass(
+                        "M0_ClearGBuffer",
+                        [&](RenderGraph::PassBuilder& builder)
+                        {
+                            gBufferA = builder.Write(gBufferA, RenderGraph::AccessType::WriteRenderTarget);
+                            gBufferB = builder.Write(gBufferB, RenderGraph::AccessType::WriteRenderTarget);
+                            gBufferC = builder.Write(gBufferC, RenderGraph::AccessType::WriteRenderTarget);
+                            gBufferD = builder.Write(gBufferD, RenderGraph::AccessType::WriteRenderTarget);
+                        },
+                        [&](RenderGraph::PassExecutionContext& passContext)
+                        {
+                            GraphicsContext& passGfx = passContext.GetGraphicsContext();
+                            passGfx.ClearColor(g_GBufferA);
+                            passGfx.ClearColor(g_GBufferB);
+                            passGfx.ClearColor(g_GBufferC);
+                            passGfx.ClearColor(g_GBufferD);
+                        });
+
+                    graph.AddPass(
+                        "M0_ResolveVBufferToGBuffer",
+                        [&](RenderGraph::PassBuilder& builder)
+                        {
+                            builder.Read(visibilityBuffer, RenderGraph::AccessType::ReadSrv);
+                            builder.Read(visibleMeshletBuffer, RenderGraph::AccessType::ReadSrv);
+                            gBufferA = builder.Write(gBufferA, RenderGraph::AccessType::WriteUav);
+                            gBufferB = builder.Write(gBufferB, RenderGraph::AccessType::WriteUav);
+                            gBufferC = builder.Write(gBufferC, RenderGraph::AccessType::WriteUav);
+                            gBufferD = builder.Write(gBufferD, RenderGraph::AccessType::WriteUav);
+                            builder.SetSideEffect();
+                        },
+                        [&](RenderGraph::PassExecutionContext& passContext)
+                        {
+                            Renderer::ResolveVBufferToGBuffer(passContext.GetGraphicsContext(), globals, false);
+                        });
+
+                    graph.Export(gBufferA);
+                    graph.Export(gBufferB);
+                    graph.Export(gBufferC);
+                    graph.Export(gBufferD);
+
+                    RenderGraph::CompileOptions compileOptions;
+                    compileOptions.EnablePassCulling = true;
+                    compileOptions.DumpPathPrefix = "RenderGraphDumps/SceneViewer_M0";
+                    static bool s_DumpedRenderGraph = false;
+                    compileOptions.DumpGraph = !s_DumpedRenderGraph;
+
+                    if (graph.Compile(compileOptions))
+                    {
+                        s_DumpedRenderGraph = true;
+                        RenderGraph::ExecuteOptions executeOptions;
+                        executeOptions.FrameIndex = TemporalEffects::GetFrameIndex();
+                        graph.Execute(gfxContext, executeOptions);
+                    }
+                    else
+                    {
+                        Utility::Printf("RenderGraph compile failed, fallback to manual path: %s\n", graph.GetLastCompileError().c_str());
+                        gfxContext.TransitionResource(g_GBufferA, D3D12_RESOURCE_STATE_RENDER_TARGET);
+                        gfxContext.TransitionResource(g_GBufferB, D3D12_RESOURCE_STATE_RENDER_TARGET);
+                        gfxContext.TransitionResource(g_GBufferC, D3D12_RESOURCE_STATE_RENDER_TARGET);
+                        gfxContext.TransitionResource(g_GBufferD, D3D12_RESOURCE_STATE_RENDER_TARGET);
+                        gfxContext.ClearColor(g_GBufferA);
+                        gfxContext.ClearColor(g_GBufferB);
+                        gfxContext.ClearColor(g_GBufferC);
+                        gfxContext.ClearColor(g_GBufferD);
+                        Renderer::ResolveVBufferToGBuffer(gfxContext, globals, true);
+                    }
+                }
+                else
+                {
+                    gfxContext.TransitionResource(g_GBufferA, D3D12_RESOURCE_STATE_RENDER_TARGET);
+                    gfxContext.TransitionResource(g_GBufferB, D3D12_RESOURCE_STATE_RENDER_TARGET);
+                    gfxContext.TransitionResource(g_GBufferC, D3D12_RESOURCE_STATE_RENDER_TARGET);
+                    gfxContext.TransitionResource(g_GBufferD, D3D12_RESOURCE_STATE_RENDER_TARGET);
+                    gfxContext.ClearColor(g_GBufferA);
+                    gfxContext.ClearColor(g_GBufferB);
+                    gfxContext.ClearColor(g_GBufferC);
+                    gfxContext.ClearColor(g_GBufferD);
+                    Renderer::ResolveVBufferToGBuffer(gfxContext, globals, true);
+                }
             }
 
             XeGTAO::Render(gfxContext, m_Camera);

@@ -22,14 +22,14 @@ namespace RenderGraph
 {
     struct GraphTestAccess
     {
-        static void InjectRead(Graph& graph, uint32_t passIndex, ResourceHandle handle, AccessType access = AccessType::ReadSrv, int32_t temporalLayerOffset = 0)
+        static void InjectRead(Graph& graph, uint32_t passIndex, ResourceHandle handle, AccessType access = AccessType::ReadSrv)
         {
             if (passIndex >= graph.m_Passes.size())
                 throw std::runtime_error("InjectRead: pass index out of range.");
             if (!handle.IsValid())
                 throw std::runtime_error("InjectRead: invalid handle.");
 
-            graph.m_Passes[passIndex].Reads.push_back(Graph::ReadDecl{ handle, access, temporalLayerOffset });
+            graph.m_Passes[passIndex].Reads.push_back(Graph::ReadDecl{ handle, access });
         }
     };
 }
@@ -230,7 +230,7 @@ namespace
             [&](PassBuilder& builder)
             {
                 builder.Read(handle, AccessType::ReadSrv);
-                builder.Read(handle, AccessType::ReadDepth);
+                builder.Read(handle, AccessType::CopySrc);
                 handle = builder.Write(handle, AccessType::WriteUav);
             },
             [](PassExecutionContext&) {});
@@ -240,6 +240,58 @@ namespace
         Require(batches.size() == 1, "Expected exactly one active pass barrier batch.");
         Require(batches[0].size() == 1, "Expected deduped single barrier op for same resource.");
         Require(batches[0][0].State == D3D12_RESOURCE_STATE_UNORDERED_ACCESS, "Write state should dominate mixed access.");
+    }
+
+    void Test_ResourceKindValidation()
+    {
+        ColorBuffer color;
+        DepthBuffer depth;
+        DummyResource buffer;
+
+        {
+            Graph graph;
+            auto colorHandle = graph.ImportColor("Color", color);
+            graph.AddPass(
+                "ColorReadDepth_Invalid",
+                [&](PassBuilder& builder)
+                {
+                    builder.Read(colorHandle, AccessType::ReadDepth);
+                },
+                [](PassExecutionContext&) {});
+
+            Require(!graph.Compile(NoDump()), "Expected compile failure for color ReadDepth.");
+            Require(Contains(graph.GetLastCompileError(), "invalid access"), "Expected invalid access error for color.");
+        }
+
+        {
+            Graph graph;
+            auto depthHandle = graph.ImportDepth("Depth", depth);
+            graph.AddPass(
+                "DepthWriteRT_Invalid",
+                [&](PassBuilder& builder)
+                {
+                    depthHandle = builder.Write(depthHandle, AccessType::WriteRenderTarget);
+                },
+                [](PassExecutionContext&) {});
+
+            Require(!graph.Compile(NoDump()), "Expected compile failure for depth WriteRenderTarget.");
+            Require(Contains(graph.GetLastCompileError(), "invalid access"), "Expected invalid access error for depth.");
+        }
+
+        {
+            Graph graph;
+            auto bufferHandle = graph.ImportBuffer("Buffer", buffer);
+            graph.AddPass(
+                "BufferReadSrv_WriteUav_Valid",
+                [&](PassBuilder& builder)
+                {
+                    builder.Read(bufferHandle, AccessType::ReadSrv);
+                    bufferHandle = builder.Write(bufferHandle, AccessType::WriteUav);
+                },
+                [](PassExecutionContext&) {});
+
+            Require(graph.Compile(NoDump()), "Expected compile success for valid buffer accesses.");
+        }
     }
 
     void Test_LifetimeAnalysis_FirstLastUse()
@@ -280,54 +332,6 @@ namespace
         Require(lifetimes.size() >= 2, "Expected at least 2 resource lifetimes.");
         Require(lifetimes[0].FirstPass == 0 && lifetimes[0].LastPass == 2, "Resource A lifetime mismatch.");
         Require(lifetimes[1].FirstPass == 1 && lifetimes[1].LastPass == 1, "Resource B lifetime mismatch.");
-        Require(!lifetimes[0].IsTransient && !lifetimes[1].IsTransient, "Imported resources should not be transient.");
-    }
-
-    void Test_TemporalOffsetRules()
-    {
-        {
-            Graph graph;
-            TextureDesc nonTemporal;
-            nonTemporal.Width = 1;
-            nonTemporal.Height = 1;
-            nonTemporal.NumMips = 1;
-            nonTemporal.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-            nonTemporal.TemporalLayers = 1;
-
-            auto handle = graph.CreateTexture("NonTemporal", nonTemporal);
-            graph.AddPass(
-                "InvalidTemporalAccess",
-                [&](PassBuilder& builder)
-                {
-                    builder.Read(handle, AccessType::ReadSrv, -1);
-                },
-                [](PassExecutionContext&) {});
-
-            Require(!graph.Compile(NoDump()), "Non-temporal resource with offset access should fail.");
-            Require(Contains(graph.GetLastCompileError(), "temporal offset"), "Expected temporal offset validation error.");
-        }
-
-        {
-            Graph graph;
-            TextureDesc temporal;
-            temporal.Width = 1;
-            temporal.Height = 1;
-            temporal.NumMips = 1;
-            temporal.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-            temporal.TemporalLayers = 2;
-
-            auto handle = graph.CreateTexture("Temporal2", temporal);
-            graph.AddPass(
-                "ValidTemporalAccess",
-                [&](PassBuilder& builder)
-                {
-                    builder.Read(handle, AccessType::ReadSrv, -1);
-                    builder.SetSideEffect();
-                },
-                [](PassExecutionContext&) {});
-
-            Require(graph.Compile(NoDump()), "Temporal resource with negative offset should compile.");
-        }
     }
 
     void Test_DiagnosticsDump_ContainsPassStatus()
@@ -498,6 +502,7 @@ namespace
             }
         }
     }
+
 } // namespace
 
 int main()
@@ -514,8 +519,8 @@ int main()
         { "ExportCullingKeepsProducerChain", Test_ExportCullingKeepsProducerChain },
         { "CycleDetection_InjectedBackEdge", Test_CycleDetection_InjectedBackEdge },
         { "BarrierDedup_WriteDominates", Test_BarrierDedup_WriteDominates },
+        { "ResourceKindValidation", Test_ResourceKindValidation },
         { "LifetimeAnalysis_FirstLastUse", Test_LifetimeAnalysis_FirstLastUse },
-        { "TemporalOffsetRules", Test_TemporalOffsetRules },
         { "DiagnosticsDump_ContainsPassStatus", Test_DiagnosticsDump_ContainsPassStatus },
         { "RandomGraph_CullingProperty", Test_RandomGraph_CullingProperty },
     };

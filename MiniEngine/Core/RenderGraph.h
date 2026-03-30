@@ -37,6 +37,13 @@ namespace RenderGraph
         Present
     };
 
+    enum class ResourceKind : uint8_t
+    {
+        TextureColor,
+        TextureDepth,
+        Buffer
+    };
+
     struct CompileOptions
     {
         bool EnablePassCulling = true;
@@ -104,6 +111,9 @@ namespace RenderGraph
         Graph& operator=(Graph&&) = default;
 
         ResourceHandle Import(const std::string& name, GpuResource& resource);
+        ResourceHandle ImportColor(const std::string& name, ColorBuffer& resource);
+        ResourceHandle ImportDepth(const std::string& name, DepthBuffer& resource);
+        ResourceHandle ImportBuffer(const std::string& name, GpuResource& resource);
         void Export(ResourceHandle handle);
 
         template<class SetupFn, class ExecuteFn>
@@ -167,6 +177,7 @@ namespace RenderGraph
         struct ResourceNode
         {
             std::string Name;
+            ResourceKind Kind = ResourceKind::Buffer;
             bool Imported = false;
             GpuResource* ImportedResource = nullptr;
             uint32_t LatestVersion = 0;
@@ -187,6 +198,8 @@ namespace RenderGraph
         void DumpGraph(const CompileOptions& options) const;
 
         bool ValidateHandle(ResourceHandle handle, uint32_t passIndex, const char* operation, bool requireLatest);
+        bool ValidateAccessCompatibility(ResourceKind kind, AccessType access, const char* operation, const std::string& resourceName);
+        ResourceHandle ImportInternal(const std::string& name, GpuResource& resource, ResourceKind kind);
         GpuResource* ResolveResource(uint32_t resourceIndex);
 
     private:
@@ -223,7 +236,22 @@ namespace RenderGraph
 
         ResourceHandle Import(const std::string& name, GpuResource& resource)
         {
-            return m_Graph.Import(name, resource);
+            return m_Graph.ImportBuffer(name, resource);
+        }
+
+        ResourceHandle ImportColor(const std::string& name, ColorBuffer& resource)
+        {
+            return m_Graph.ImportColor(name, resource);
+        }
+
+        ResourceHandle ImportDepth(const std::string& name, DepthBuffer& resource)
+        {
+            return m_Graph.ImportDepth(name, resource);
+        }
+
+        ResourceHandle ImportBuffer(const std::string& name, GpuResource& resource)
+        {
+            return m_Graph.ImportBuffer(name, resource);
         }
 
         void SetSideEffect(bool enabled = true)

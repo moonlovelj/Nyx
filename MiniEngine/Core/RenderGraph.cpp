@@ -107,6 +107,47 @@ namespace RenderGraph
             default: return "Unknown";
             }
         }
+
+        const char* ResourceKindToString(ResourceKind kind)
+        {
+            switch (kind)
+            {
+            case ResourceKind::TextureColor: return "TextureColor";
+            case ResourceKind::TextureDepth: return "TextureDepth";
+            case ResourceKind::Buffer: return "Buffer";
+            default: return "Unknown";
+            }
+        }
+
+        bool IsAccessAllowedForKind(ResourceKind kind, AccessType access)
+        {
+            switch (kind)
+            {
+            case ResourceKind::TextureColor:
+                return access == AccessType::ReadSrv
+                    || access == AccessType::WriteRenderTarget
+                    || access == AccessType::WriteUav
+                    || access == AccessType::CopySrc
+                    || access == AccessType::CopyDst
+                    || access == AccessType::Present;
+
+            case ResourceKind::TextureDepth:
+                return access == AccessType::ReadSrv
+                    || access == AccessType::ReadDepth
+                    || access == AccessType::WriteDepth
+                    || access == AccessType::CopySrc
+                    || access == AccessType::CopyDst;
+
+            case ResourceKind::Buffer:
+                return access == AccessType::ReadSrv
+                    || access == AccessType::WriteUav
+                    || access == AccessType::CopySrc
+                    || access == AccessType::CopyDst;
+
+            default:
+                return false;
+            }
+        }
     } // namespace
 
     Graph::~Graph()
@@ -116,8 +157,29 @@ namespace RenderGraph
 
     ResourceHandle Graph::Import(const std::string& name, GpuResource& resource)
     {
+        return ImportBuffer(name, resource);
+    }
+
+    ResourceHandle Graph::ImportColor(const std::string& name, ColorBuffer& resource)
+    {
+        return ImportInternal(name, resource, ResourceKind::TextureColor);
+    }
+
+    ResourceHandle Graph::ImportDepth(const std::string& name, DepthBuffer& resource)
+    {
+        return ImportInternal(name, resource, ResourceKind::TextureDepth);
+    }
+
+    ResourceHandle Graph::ImportBuffer(const std::string& name, GpuResource& resource)
+    {
+        return ImportInternal(name, resource, ResourceKind::Buffer);
+    }
+
+    ResourceHandle Graph::ImportInternal(const std::string& name, GpuResource& resource, ResourceKind kind)
+    {
         ResourceNode node;
         node.Name = name;
+        node.Kind = kind;
         node.Imported = true;
         node.ImportedResource = &resource;
         node.LatestVersion = 0;
@@ -192,10 +254,30 @@ namespace RenderGraph
         return true;
     }
 
+    bool Graph::ValidateAccessCompatibility(ResourceKind kind, AccessType access, const char* operation, const std::string& resourceName)
+    {
+        if (IsAccessAllowedForKind(kind, access))
+            return true;
+
+        m_HasBuilderError = true;
+        m_LastCompileError =
+            "RenderGraph: invalid access '" + std::string(AccessTypeToString(access)) +
+            "' for resource '" + resourceName + "' of kind '" + ResourceKindToString(kind) +
+            "' in operation " + operation;
+        return false;
+    }
+
     ResourceHandle Graph::RegisterRead(uint32_t passIndex, ResourceHandle handle, AccessType access)
     {
         if (!ValidateHandle(handle, passIndex, "Read", true))
             return {};
+
+        if (IsWriteAccess(access))
+        {
+            m_HasBuilderError = true;
+            m_LastCompileError = "RenderGraph: read declared with write access type";
+            return {};
+        }
 
         if (passIndex >= m_Passes.size())
         {
@@ -203,6 +285,10 @@ namespace RenderGraph
             m_LastCompileError = "RenderGraph: read pass index out of range";
             return {};
         }
+
+        const ResourceNode& resource = m_Resources[handle.Index];
+        if (!ValidateAccessCompatibility(resource.Kind, access, "Read", resource.Name))
+            return {};
 
         m_Passes[passIndex].Reads.push_back(ReadDecl{ handle, access });
         return handle;
@@ -228,6 +314,8 @@ namespace RenderGraph
         }
 
         ResourceNode& resource = m_Resources[handle.Index];
+        if (!ValidateAccessCompatibility(resource.Kind, access, "Write", resource.Name))
+            return {};
 
         const uint32_t newVersion = resource.LatestVersion + 1;
         resource.LatestVersion = newVersion;
@@ -712,6 +800,7 @@ namespace RenderGraph
                 json << "    {\n";
                 json << "      \"index\": " << resourceIndex << ",\n";
                 json << "      \"name\": \"" << EscapeJson(resource.Name) << "\",\n";
+                json << "      \"kind\": \"" << ResourceKindToString(resource.Kind) << "\",\n";
                 json << "      \"imported\": " << (resource.Imported ? "true" : "false") << ",\n";
                 json << "      \"firstPass\": " << lifetime.FirstPass << ",\n";
                 json << "      \"lastPass\": " << lifetime.LastPass << "\n";
@@ -739,17 +828,19 @@ namespace RenderGraph
 
     ColorBuffer& PassExecutionContext::GetColor(ResourceHandle handle)
     {
-        GpuResource& resource = GetResource(handle);
-        auto* color = dynamic_cast<ColorBuffer*>(&resource);
-        ASSERT(color != nullptr, "RenderGraph: requested color resource is not a ColorBuffer");
-        return *color;
+        ASSERT(handle.IsValid() && handle.Index < m_Graph.m_Resources.size(), "RenderGraph: invalid handle in GetColor");
+        const Graph::ResourceNode& node = m_Graph.m_Resources[handle.Index];
+        ASSERT(node.Kind == ResourceKind::TextureColor, "RenderGraph: requested color resource has non-color kind");
+        ASSERT(node.ImportedResource != nullptr, "RenderGraph: requested color resource is null");
+        return static_cast<ColorBuffer&>(*node.ImportedResource);
     }
 
     DepthBuffer& PassExecutionContext::GetDepth(ResourceHandle handle)
     {
-        GpuResource& resource = GetResource(handle);
-        auto* depth = dynamic_cast<DepthBuffer*>(&resource);
-        ASSERT(depth != nullptr, "RenderGraph: requested depth resource is not a DepthBuffer");
-        return *depth;
+        ASSERT(handle.IsValid() && handle.Index < m_Graph.m_Resources.size(), "RenderGraph: invalid handle in GetDepth");
+        const Graph::ResourceNode& node = m_Graph.m_Resources[handle.Index];
+        ASSERT(node.Kind == ResourceKind::TextureDepth, "RenderGraph: requested depth resource has non-depth kind");
+        ASSERT(node.ImportedResource != nullptr, "RenderGraph: requested depth resource is null");
+        return static_cast<DepthBuffer&>(*node.ImportedResource);
     }
 } // namespace RenderGraph
