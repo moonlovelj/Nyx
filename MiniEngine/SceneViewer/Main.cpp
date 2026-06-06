@@ -326,6 +326,10 @@ void SceneViewer::ReloadModel(const std::wstring& filePath, bool useOrbit, uint3
     const Vector3 sceneCenter = ModelInstanceManager::GetInstanceDistributionCenter();
     const Vector3 sceneHalfExtents = ModelInstanceManager::GetInstanceDistributionHalfExtents();
     const float sceneRadius = std::max(ModelInstanceManager::GetInstanceDistributionRadius() * 0.1f, 0.01f);
+    //const float lightExtent = std::max(ModelInstanceManager::GetInstanceDistributionRadius() * 0.25f, 5.0f);
+    //const Vector3 lightHalfExtents = Max(sceneHalfExtents, Vector3(lightExtent));
+    //Lighting::CreateRandomLights(sceneCenter - lightHalfExtents, sceneCenter + lightHalfExtents);
+
     const float halfX = std::max(static_cast<float>(sceneHalfExtents.GetX()), 5.f);
     const float halfZ = std::max(static_cast<float>(sceneHalfExtents.GetZ()), 5.f);
     const Vector3 cornerCenter = sceneCenter + Vector3(halfX, 0.0f, halfZ);
@@ -531,7 +535,7 @@ void SceneViewer::RenderScene( void )
         m_SunShadowCamera.UpdateMatrix(-SunDirection, Vector3(0, -5.0f, 0), Vector3(50, 30, 30),
             (uint32_t)g_ShadowBuffer.GetWidth(), (uint32_t)g_ShadowBuffer.GetHeight(), 16);
 
-        GlobalConstants globals;
+        GlobalConstants globals = {};
         globals.ViewProjMatrix = m_Camera.GetViewProjMatrix();
 		globals.ProjMatrix = m_Camera.GetProjMatrix();
 		globals.InverseViewProjMatrix = Invert(m_Camera.GetViewProjMatrix());

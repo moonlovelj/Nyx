@@ -33,6 +33,21 @@ function Resolve-PathFromBase {
   return [IO.Path]::GetFullPath((Join-Path $Base $Path))
 }
 
+function Copy-DirectoryContents {
+  param(
+    [Parameter(Mandatory = $true)][string]$Source,
+    [Parameter(Mandatory = $true)][string]$Destination
+  )
+
+  if (-not (Test-Path -LiteralPath $Source -PathType Container)) {
+    throw "Required directory not found: $Source"
+  }
+
+  New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+  Get-ChildItem -LiteralPath $Source -Force |
+    Copy-Item -Destination $Destination -Recurse -Force
+}
+
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $sourcePath = Resolve-PathFromBase -Path $SourceDir -Base $repoRoot
 $distPath = Resolve-PathFromBase -Path $DistDir -Base $repoRoot
@@ -73,6 +88,51 @@ New-Item -ItemType Directory -Path $payloadRoot -Force | Out-Null
 Write-Host "Collecting files from: $sourcePath"
 Get-ChildItem -LiteralPath $sourcePath -Force | Copy-Item -Destination $payloadRoot -Recurse -Force
 
+# Runtime Slang compilation needs source files and their original relative include layout.
+$shaderTrees = @(
+  @{
+    Source = Join-Path $repoRoot "MiniEngine\Model\Shaders"
+    Destination = Join-Path $payloadRoot "MiniEngine\Model\Shaders"
+  },
+  @{
+    Source = Join-Path $repoRoot "MiniEngine\Core\Shaders"
+    Destination = Join-Path $payloadRoot "MiniEngine\Core\Shaders"
+  }
+)
+
+foreach ($shaderTree in $shaderTrees) {
+  Write-Host "Including shader tree: $($shaderTree.Source)"
+  Copy-DirectoryContents -Source $shaderTree.Source -Destination $shaderTree.Destination
+}
+
+$modelShaderHeaders = @("StructsIO.h", "MeshletStructs.h")
+$modelPackageRoot = Join-Path $payloadRoot "MiniEngine\Model"
+New-Item -ItemType Directory -Path $modelPackageRoot -Force | Out-Null
+foreach ($headerName in $modelShaderHeaders) {
+  $headerSource = Join-Path (Join-Path $repoRoot "MiniEngine\Model") $headerName
+  if (-not (Test-Path -LiteralPath $headerSource -PathType Leaf)) {
+    throw "Required shader header not found: $headerSource"
+  }
+  Copy-Item -LiteralPath $headerSource -Destination (Join-Path $modelPackageRoot $headerName) -Force
+}
+
+# Package the source HDR files. SceneViewer generates the DDS cache on first use.
+$hdriSourceRoot = Join-Path $repoRoot "MiniEngine\SceneViewer\Textures\HDRIs"
+$hdriDestRoot = Join-Path $payloadRoot "Textures\HDRIs"
+if (-not (Test-Path -LiteralPath $hdriSourceRoot -PathType Container)) {
+  throw "Required HDRI directory not found: $hdriSourceRoot"
+}
+
+$sourceHdriFiles = @(Get-ChildItem -LiteralPath $hdriSourceRoot -File -Filter "*.hdr")
+if ($sourceHdriFiles.Count -eq 0) {
+  throw "No source HDRI files found under: $hdriSourceRoot"
+}
+
+New-Item -ItemType Directory -Path $hdriDestRoot -Force | Out-Null
+foreach ($hdriFile in $sourceHdriFiles) {
+  Copy-Item -LiteralPath $hdriFile.FullName -Destination $hdriDestRoot -Force
+}
+
 # Always include selected sample assets from the repo asset source.
 $assetSourceRoot = Join-Path $repoRoot "MiniEngine\SceneViewer\Assets"
 $assetDestRoot = Join-Path $payloadRoot "Assets"
@@ -99,6 +159,29 @@ foreach ($name in $extraFiles) {
   $src = Join-Path $repoRoot $name
   if (Test-Path -LiteralPath $src) {
     Copy-Item -LiteralPath $src -Destination (Join-Path $payloadRoot $name) -Force
+  }
+}
+
+$requiredPackagePaths = @(
+  "SceneViewer.exe",
+  "slang.dll",
+  "slang-compiler.dll",
+  "slang-rt.dll",
+  "slang-standard-module-2026.10",
+  "dxcompiler.dll",
+  "dxil.dll",
+  "MiniEngine\Model\Shaders\VBufferMesh.slang",
+  "MiniEngine\Model\StructsIO.h",
+  "MiniEngine\Model\MeshletStructs.h",
+  "MiniEngine\Core\Shaders\Math.hlsli",
+  "Textures\HDRIs",
+  "Assets\bunny"
+)
+
+foreach ($relativePath in $requiredPackagePaths) {
+  $requiredPath = Join-Path $payloadRoot $relativePath
+  if (-not (Test-Path -LiteralPath $requiredPath)) {
+    throw "Required package content missing: $relativePath"
   }
 }
 

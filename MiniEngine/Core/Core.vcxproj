@@ -54,7 +54,7 @@
     <ClCompile>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..\ThirdParty\imgui;$(MSBuildThisFileDirectory)..\ThirdParty\imgui\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..\ThirdParty\imgui;$(MSBuildThisFileDirectory)..\ThirdParty\imgui\backends;$(MSBuildThisFileDirectory)..\ThirdParty\slang-2026.10\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
     </ClCompile>
   </ItemDefinitionGroup>
@@ -126,6 +126,12 @@
     <ClInclude Include="PipelineState.h" />
     <ClInclude Include="PixelBuffer.h" />
     <ClInclude Include="PostEffects.h" />
+    <ClInclude Include="Program.h" />
+    <ClInclude Include="ProgramBinder.h" />
+    <ClInclude Include="ProgramDesc.h" />
+    <ClInclude Include="ProgramManager.h" />
+    <ClInclude Include="ProgramReflection.h" />
+    <ClInclude Include="ProgramUtils.h" />
     <ClInclude Include="EngineTuning.h" />
     <ClInclude Include="Display.h" />
     <ClInclude Include="ReadbackBuffer.h" />
@@ -191,6 +197,10 @@
     <ClCompile Include="PipelineState.cpp" />
     <ClCompile Include="PixelBuffer.cpp" />
     <ClCompile Include="PostEffects.cpp" />
+    <ClCompile Include="ProgramBinder.cpp" />
+    <ClCompile Include="ProgramManager.cpp" />
+    <ClCompile Include="ProgramReflection.cpp" />
+    <ClCompile Include="ProgramUtils.cpp" />
     <ClCompile Include="Display.cpp" />
     <ClCompile Include="ReadbackBuffer.cpp" />
     <ClCompile Include="RootSignature.cpp" />
@@ -531,4 +541,3 @@
     <Error Condition="!Exists('..\..\Packages\WinPixEventRuntime.1.0.240308001\build\WinPixEventRuntime.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\Packages\WinPixEventRuntime.1.0.240308001\build\WinPixEventRuntime.targets'))" />
   </Target>
 </Project>
-

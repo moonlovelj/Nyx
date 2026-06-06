@@ -1,6 +1,8 @@
 # Normalize text files and enforce lf for VS-visible sources/projects.
 * text=auto
 
+.gitattributes text eol=lf
+
 *.sln text eol=lf
 *.vcxproj text eol=lf
 *.vcxproj.filters text eol=lf
@@ -22,3 +24,6 @@
 *.bat text eol=lf
 *.cmd text eol=lf
 *.ps1 text eol=lf
+
+# Preserve vendored toolchain packages exactly as shipped.
+MiniEngine/ThirdParty/** -text -eol

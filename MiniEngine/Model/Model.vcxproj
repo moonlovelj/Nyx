@@ -167,73 +167,25 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
-    <None Include="Shaders\BindlessIndices.hlsli" />
-    <None Include="Shaders\Common.hlsli" />
-    <None Include="Shaders\CullCommon.hlsli" />
-    <None Include="Shaders\DataCodec.hlsli" />
-    <None Include="Shaders\FillLightGridCS.hlsli" />
-    <None Include="Shaders\CommonResources.hlsli" />
-    <None Include="Shaders\GeometryCommon.hlsli" />
-    <None Include="Shaders\LightGrid.hlsli" />
-    <None Include="Shaders\Lighting.hlsli" />
-    <None Include="Shaders\LightingCommon.hlsli" />
-    <None Include="Shaders\MaterialCommon.hlsli" />
-    <None Include="Shaders\PCSS.hlsli" />
-    <None Include="Shaders\SharedHeader.hlsli" />
-    <None Include="Shaders\ViewMode.hlsli" />
-    <None Include="Shaders\VSToPSCommon.hlsli" />
-    <None Include="Shaders\WaveUtil.hlsli" />
-  </ItemGroup>
-  <ItemGroup>
-    <FxCompile Include="Shaders\DAGCullCS.hlsl" />
-    <FxCompile Include="Shaders\DAGCullPass0CS.hlsl" />
-    <FxCompile Include="Shaders\DAGCullPass1CS.hlsl" />
-    <FxCompile Include="Shaders\DeferredLightingCS.hlsl" />
-    <FxCompile Include="Shaders\DepthViewerPS.hlsl">
-      <ShaderType>Pixel</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\DepthViewerVS.hlsl">
-      <ShaderType>Vertex</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\ExportDepthPS.hlsl">
-      <ShaderType>Pixel</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\ExportDepthVS.hlsl">
-      <ShaderType>Vertex</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\FillLightGridCS_16.hlsl" />
-    <FxCompile Include="Shaders\FillLightGridCS_24.hlsl" />
-    <FxCompile Include="Shaders\FillLightGridCS_32.hlsl" />
-    <FxCompile Include="Shaders\FillLightGridCS_8.hlsl" />
-    <FxCompile Include="Shaders\InstanceCullCS.hlsl" />
-    <FxCompile Include="Shaders\InstanceCullPass0CS.hlsl" />
-    <FxCompile Include="Shaders\InstanceCullPass1CS.hlsl" />
-    <FxCompile Include="Shaders\MeshBufferGenCS.hlsl" />
-    <FxCompile Include="Shaders\ModelViewerPS.hlsl">
-      <ShaderType>Pixel</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\ModelViewerVS.hlsl">
-      <ShaderType>Vertex</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\ResolveVBufferToGBufferCS.hlsl" />
-    <FxCompile Include="Shaders\SkyboxPS.hlsl">
-      <ShaderType>Pixel</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\SkyboxVS.hlsl">
-      <ShaderType>Vertex</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\UberMeshShader.hlsl">
-      <ShaderType>Mesh</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\UberMeshShaderPass0.hlsl">
-      <ShaderType>Mesh</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\UberMeshShaderPass1.hlsl">
-      <ShaderType>Mesh</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\VBufferPS.hlsl">
-      <ShaderType>Pixel</ShaderType>
-    </FxCompile>
+    <None Include="Shaders\BindlessIndices.h.slang" />
+    <None Include="Shaders\CullCommon.slang" />
+    <None Include="Shaders\DataCodec.h.slang" />
+    <None Include="Shaders\FillLightGrid.slang" />
+    <None Include="Shaders\CommonResources.slang" />
+    <None Include="Shaders\DAGCull.slang" />
+    <None Include="Shaders\DeferredLighting.slang" />
+    <None Include="Shaders\GeometryCommon.slang" />
+    <None Include="Shaders\InstanceCull.slang" />
+    <None Include="Shaders\LightGrid.h.slang" />
+    <None Include="Shaders\LightingCommon.h.slang" />
+    <None Include="Shaders\MeshBufferGen.slang" />
+    <None Include="Shaders\PCSS.h.slang" />
+    <None Include="Shaders\ExportDepth.slang" />
+    <None Include="Shaders\ResolveVBufferToGBuffer.slang" />
+    <None Include="Shaders\Skybox.slang" />
+    <None Include="Shaders\VBufferMesh.slang" />
+    <None Include="Shaders\ViewMode.h.slang" />
+    <None Include="Shaders\WaveUtil.h.slang" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

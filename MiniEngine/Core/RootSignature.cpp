@@ -33,7 +33,8 @@ void RootSignature::DestroyAll(void)
 void RootSignature::InitStaticSampler(
     UINT Register,
     const D3D12_SAMPLER_DESC& NonStaticSamplerDesc,
-    D3D12_SHADER_VISIBILITY Visibility )
+    D3D12_SHADER_VISIBILITY Visibility,
+    UINT Space )
 {
     ASSERT(m_NumInitializedStaticSamplers < m_NumSamplers);
     D3D12_STATIC_SAMPLER_DESC& StaticSamplerDesc = m_SamplerArray[m_NumInitializedStaticSamplers++];
@@ -49,7 +50,7 @@ void RootSignature::InitStaticSampler(
     StaticSamplerDesc.MinLOD = NonStaticSamplerDesc.MinLOD;
     StaticSamplerDesc.MaxLOD = NonStaticSamplerDesc.MaxLOD;
     StaticSamplerDesc.ShaderRegister = Register;
-    StaticSamplerDesc.RegisterSpace = 0;
+    StaticSamplerDesc.RegisterSpace = Space;
     StaticSamplerDesc.ShaderVisibility = Visibility;
 
     if (StaticSamplerDesc.AddressU == D3D12_TEXTURE_ADDRESS_MODE_BORDER ||
@@ -163,6 +164,14 @@ void RootSignature::Finalize(const std::wstring& name, D3D12_ROOT_SIGNATURE_FLAG
                 std::string msg(ptr, ptr + len);
                 if (msg.empty() || msg.back() != '\0') msg.push_back('\0');
                 OutputDebugStringA(msg.c_str());
+                Utility::Printf("[RootSignature] Serialization failed for '%ls':\n%s\n", name.c_str(), msg.c_str());
+            }
+            else
+            {
+                Utility::Printf(
+                    "[RootSignature] Serialization failed for '%ls' with HRESULT 0x%08X.\n",
+                    name.c_str(),
+                    static_cast<unsigned int>(hr));
             }
 
             ASSERT_SUCCEEDED(hr);

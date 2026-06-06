@@ -1,0 +1,33 @@
+//
+// Copyright (c) Microsoft. All rights reserved.
+// This code is licensed under the MIT License (MIT).
+// THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
+// ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING ANY
+// IMPLIED WARRANTIES OF FITNESS FOR A PARTICULAR
+// PURPOSE, MERCHANTABILITY, OR NON-INFRINGEMENT.
+//
+// Developed by Minigraph
+//
+// Author(s):	Alex Nankervis
+//
+
+#ifndef __LIGHT_GRID_H_SLANG__
+#define __LIGHT_GRID_H_SLANG__
+// keep in sync with C code
+#define MAX_LIGHTS 128
+#define TILE_SIZE (4 + MAX_LIGHTS * 4)
+
+uint2 GetTilePos(float2 pos, float2 invTileDim)
+{
+    return uint2(pos * invTileDim);
+}
+uint GetTileIndex(uint2 tilePos, uint tileCountX)
+{
+    return tilePos.y * tileCountX + tilePos.x;
+}
+uint GetTileOffset(uint tileIndex)
+{
+    return tileIndex * TILE_SIZE;
+}
+
+#endif

@@ -1,4 +1,4 @@
-﻿#ifndef MESHLET_STRUCTS_H
+#ifndef MESHLET_STRUCTS_H
 #define MESHLET_STRUCTS_H
 
 #ifdef __cplusplus
@@ -39,7 +39,7 @@ namespace Renderer
 		float MaxParrentError;
 		uint NodeData;
 
-		void Init()
+		[mutating] void Init()
 		{
 			BoundSphere = float4(0.0f, 0.0f, 0.0f, 0.0f);
 			BBoxMin = float3(0.0f, 0.0f, 0.0f);

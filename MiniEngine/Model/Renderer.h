@@ -21,8 +21,9 @@
 #include "../Core/TextureManager.h"
 #include "../Core/HierarchicalDepthBuffer.h"
 #include "CommandBucketer.h"
-#include "Shaders/BindlessIndices.hlsli"
+#include "Shaders/BindlessIndices.h.slang"
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include <d3d12.h>
@@ -40,7 +41,7 @@ namespace Renderer
 {
     using namespace Math;
 
-    extern RootSignature m_RootSig;
+    //extern RootSignature m_RootSig;
     extern DescriptorHeap s_TextureHeap;
     extern DescriptorHeap s_SamplerHeap;
     extern DescriptorHandle m_BindlessResources;
@@ -55,39 +56,6 @@ namespace Renderer
 
 	extern CommandSignature GPUDrivenDrawIndirectCommandSignature;
 
-    enum RootBindings
-    {
-        kMeshConstants,
-        kMaterialConstants,
-		kCommonCBV,
-		kCommandConstants,
-		kViewModeConstants,
-        kStandbyCBV,
-        kNumRootBindings
-    };
-
-	enum BindlessSRVsOffsets
-	{
-		kArgsVisibleFlagsBufferSRV = 0,
-		kCullingResultArgsBufferSRV = 64
-	};
-
-    enum BindlessUAVsOffsets
-    {
-        kArgsVisibleFlagsBufferUAV = 0,
-        kCullingResultArgsBufferUAV = 64,
-        kSceneColorUAV = 128,
-	};
-
-	enum CullingStage
-	{
-		kNoCulled = 0,
-		kFrustrumCulled = 1,
-		kOcclusionPass1Culled = 2,
-		kOcclusionPass2Culled = 3,
-		kFreezeCulled = 4
-	};
-
 	inline UINT AlignForUavCounter(UINT bufferSize)
 	{
 		const UINT alignment = D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT;
@@ -96,6 +64,8 @@ namespace Renderer
 
     void Initialize(void);
     void Shutdown(void);
+
+    std::string GetModelShaderPath(const char* shaderFileName);
 
     void SetIBLTextures();
     void SetIBLBias(float LODBias);

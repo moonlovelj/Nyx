@@ -4,7 +4,7 @@ Nanite-style virtualized geometry renderer on DirectX 12 (built on Microsoft Min
 
 Nyx is a personal research project focused on extreme-scale geometry rendering: continuous LOD, GPU-driven culling, mesh-shader dispatch, and demand-driven geometry streaming.
 
-The current stress test scene is [Zorah](http://developer.download.nvidia.com/ProGraphics/nvpro-samples/zorah_main_public.gltf.7z) (NVIDIA), with:
+The current stress test scene is [Zorah](https://developer.download.nvidia.com/ProGraphics/nvpro-samples/zorah_main_public.v2.gltf.7z) (NVIDIA), with:
 
 - **1,639,668,228 unique triangles**
 - **18,949,504,889 instanced triangles**
@@ -59,6 +59,7 @@ Screenshots:
 - Visibility buffer pipeline, then resolve to deferred GBuffer
 - Dynamic geometry streaming with residency/address table updates
 - Async page IO + LZ4-compressed geometry pages
+- Runtime Slang shader compilation and reflection-driven root signatures/bindings
 - Runtime debug/tuning UI (pixel error, culling freeze, debug modes)
 
 ## Quick Start
@@ -66,9 +67,11 @@ Screenshots:
 ### Requirements
 
 - Windows 10/11
-- Visual Studio 2022
+- Visual Studio 2022 with the Desktop development with C++ workload
 - DX12 GPU with Mesh Shader support
 - NuGet package restore enabled
+
+Slang and DXC are included under `MiniEngine/ThirdParty`; no separate shader compiler installation is required.
 
 Recommended for large scenes:
 
@@ -83,9 +86,17 @@ Recommended for large scenes:
 2. Select `Release | x64`
 3. Build and run `SceneViewer`
 
+The build automatically copies the Slang runtime, Slang standard module, `dxcompiler.dll`, and `dxil.dll` to the application output directory.
+
 By default, SceneViewer loads:
 
 - `Assets/bunny/bunny.gltf`
+
+### Shader Toolchain
+
+Nyx uses the bundled **Slang** and **DXC** toolchain to compile Shader Model 6.6 DXIL at runtime. Slang reflection is used to generate root signatures and bind shader parameters by name.
+
+Packaged builds load shaders and includes from their bundled `MiniEngine` tree. Local builds fall back to the repository source tree.
 
 ### Zorah Quick Start (Prebuilt Cache)
 
@@ -165,6 +176,8 @@ Arguments:
 
 - Language: **C++20**
 - Graphics API: **DirectX 12**
+- Shader language/compiler frontend: **Slang 2026.10**
+- DXIL compiler backend: **DXC 2026-05-27**
 - Shader Model: **6.6**
 - Agility SDK package: `Microsoft.Direct3D.D3D12 1.616.1`
 - Meshlet defaults: max vertices **128**, max triangles **128**, group size **32**, BVH node children **8**
@@ -190,6 +203,8 @@ Arguments:
 - [lz4](https://github.com/lz4/lz4)
 - [cgltf](https://github.com/jkuhlmann/cgltf)
 - [imgui](https://github.com/ocornut/imgui)
+- [Slang](https://github.com/shader-slang/slang)
+- [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler)
 - Inspiration references: [nanite-webgpu](https://github.com/Scthe/nanite-webgpu), [vk_lod_clusters](https://github.com/nvpro-samples/vk_lod_clusters)
 
 ## License
@@ -201,6 +216,3 @@ Arguments:
 ## Contact
 
 - `love.jingjing.forever.1314@gmail.com`
-
-
-

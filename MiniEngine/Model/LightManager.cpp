@@ -24,16 +24,44 @@
 #include "ConstantBuffers.h"
 #include "IBL.h"
 #include "ModelInstanceManager.h"
-
-#include "CompiledShaders/FillLightGridCS_8.h"
-#include "CompiledShaders/FillLightGridCS_16.h"
-#include "CompiledShaders/FillLightGridCS_24.h"
-#include "CompiledShaders/FillLightGridCS_32.h"
-
-#include "CompiledShaders/DeferredLightingCS.h"
+#include "../Core/GraphicsCommon.h"
+#include "../Core/ProgramBinder.h"
+#include "../Core/ProgramUtils.h"
 
 using namespace Math;
 using namespace Graphics;
+
+namespace
+{
+    void SetCommonResources(ProgramBinder& binder, uint32_t frameIndexMod2)
+    {
+        ProgramVar commonResources = binder["g_CommonResources"];
+        commonResources["BindlessResourcesBaseIndex"].Set(Renderer::GetBindlessResourcesBaseOffset());
+        commonResources["FrameIndexMod2"].Set(frameIndexMod2);
+    }
+
+    bool InitializeFillLightGridProgram(
+        ComputePSO& pso,
+        std::shared_ptr<Program>& program,
+        uint32_t lightGridDim,
+        const char* debugName)
+    {
+        ProgramDesc desc = ProgramUtils::MakeComputeDesc(
+            Renderer::GetModelShaderPath("FillLightGrid.slang"),
+            "computeMain",
+            ProgramUtils::BindlessMode::ResourceHeap);
+        desc.AddDefine("WORK_GROUP_SIZE_X", std::to_string(lightGridDim));
+        desc.AddDefine("WORK_GROUP_SIZE_Y", std::to_string(lightGridDim));
+
+        program = ProgramUtils::GetProgram(desc, debugName);
+        if (!program)
+            return false;
+
+        ProgramUtils::SetProgram(pso, *program);
+        pso.Finalize();
+        return true;
+    }
+}
 
 // must keep in sync with HLSL
 struct LightData
@@ -59,6 +87,10 @@ namespace Lighting
     ComputePSO m_FillLightGridCS_16(L"Fill Light Grid 16 CS");
     ComputePSO m_FillLightGridCS_24(L"Fill Light Grid 24 CS");
     ComputePSO m_FillLightGridCS_32(L"Fill Light Grid 32 CS");
+    std::shared_ptr<Program> m_FillLightGridProgram_8;
+    std::shared_ptr<Program> m_FillLightGridProgram_16;
+    std::shared_ptr<Program> m_FillLightGridProgram_24;
+    std::shared_ptr<Program> m_FillLightGridProgram_32;
 
     LightData m_LightData[MaxLights];
     StructuredBuffer m_LightBuffer;
@@ -75,6 +107,7 @@ namespace Lighting
     Math::Camera m_LightCamera[MaxLights];
 
     ComputePSO m_DeferredLightingPSO(L"Deferred Lighting PSO");
+    std::shared_ptr<Program> m_DeferredLightingProgram;
 
     void InitializeResources(void);
     void CreateRandomLights(const Vector3 minBound, const Vector3 maxBound);
@@ -84,21 +117,14 @@ namespace Lighting
 
 void Lighting::InitializeResources( void )
 {
-    m_FillLightGridCS_8.SetRootSignature(Renderer::m_RootSig);
-    m_FillLightGridCS_8.SetComputeShader(g_pFillLightGridCS_8, sizeof(g_pFillLightGridCS_8));
-    m_FillLightGridCS_8.Finalize();
-
-    m_FillLightGridCS_16.SetRootSignature(Renderer::m_RootSig);
-    m_FillLightGridCS_16.SetComputeShader(g_pFillLightGridCS_16, sizeof(g_pFillLightGridCS_16));
-    m_FillLightGridCS_16.Finalize();
-
-    m_FillLightGridCS_24.SetRootSignature(Renderer::m_RootSig);
-    m_FillLightGridCS_24.SetComputeShader(g_pFillLightGridCS_24, sizeof(g_pFillLightGridCS_24));
-    m_FillLightGridCS_24.Finalize();
-
-    m_FillLightGridCS_32.SetRootSignature(Renderer::m_RootSig);
-    m_FillLightGridCS_32.SetComputeShader(g_pFillLightGridCS_32, sizeof(g_pFillLightGridCS_32));
-    m_FillLightGridCS_32.Finalize();
+    if (!InitializeFillLightGridProgram(m_FillLightGridCS_8, m_FillLightGridProgram_8, 8, "Lighting: FillLightGrid 8"))
+        return;
+    if (!InitializeFillLightGridProgram(m_FillLightGridCS_16, m_FillLightGridProgram_16, 16, "Lighting: FillLightGrid 16"))
+        return;
+    if (!InitializeFillLightGridProgram(m_FillLightGridCS_24, m_FillLightGridProgram_24, 24, "Lighting: FillLightGrid 24"))
+        return;
+    if (!InitializeFillLightGridProgram(m_FillLightGridCS_32, m_FillLightGridProgram_32, 32, "Lighting: FillLightGrid 32"))
+        return;
 
     // Assumes max resolution of 3840x2160
     uint32_t lightGridCells = Math::DivideByMultiple(3840, kMinLightGridDim) * Math::DivideByMultiple(2160, kMinLightGridDim);
@@ -113,8 +139,34 @@ void Lighting::InitializeResources( void )
 
     m_LightBuffer.Create(L"m_LightBuffer", MaxLights, sizeof(LightData));
     
-	m_DeferredLightingPSO.SetRootSignature(Renderer::m_RootSig);
-    m_DeferredLightingPSO.SetComputeShader(g_pDeferredLightingCS, sizeof(g_pDeferredLightingCS));
+    ProgramDesc deferredLightingDesc = ProgramUtils::MakeComputeDesc(
+        Renderer::GetModelShaderPath("DeferredLighting.slang"),
+        "computeMain",
+        ProgramUtils::BindlessMode::ResourceHeap);
+
+    SamplerDesc cubeMapSamplerDesc;
+    cubeMapSamplerDesc.MaxAnisotropy = 8;
+
+    SamplerDesc linearSamplerDesc;
+    linearSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    linearSamplerDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+
+    SamplerDesc pointSamplerDesc;
+    pointSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+    pointSamplerDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+
+    deferredLightingDesc.AddStaticSampler("shadowSampler", SamplerShadowDesc);
+    deferredLightingDesc.AddStaticSampler("cubeMapSampler", cubeMapSamplerDesc);
+    deferredLightingDesc.AddStaticSampler("linearSampler", linearSamplerDesc);
+    deferredLightingDesc.AddStaticSampler("pointSampler", pointSamplerDesc);
+
+    m_DeferredLightingProgram = ProgramUtils::GetProgram(
+        deferredLightingDesc,
+        "Lighting: DeferredLighting");
+    if (!m_DeferredLightingProgram)
+        return;
+
+    ProgramUtils::SetProgram(m_DeferredLightingPSO, *m_DeferredLightingProgram);
     m_DeferredLightingPSO.Finalize();
     
     {
@@ -295,16 +347,26 @@ void Lighting::FillLightGrid(GraphicsContext& gfxContext, const Camera& camera)
 
 	Context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Renderer::s_TextureHeap.GetHeapPointer());
     Context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
-    Context.SetRootSignature(Renderer::m_RootSig);
 
+    ComputePSO* pso = nullptr;
+    std::shared_ptr<Program>* program = nullptr;
     switch ((int)LightGridDim)
     {
-    case  8: Context.SetPipelineState(m_FillLightGridCS_8 ); break;
-    case 16: Context.SetPipelineState(m_FillLightGridCS_16); break;
-    case 24: Context.SetPipelineState(m_FillLightGridCS_24); break;
-    case 32: Context.SetPipelineState(m_FillLightGridCS_32); break;
+    case  8: pso = &m_FillLightGridCS_8;  program = &m_FillLightGridProgram_8;  break;
+    case 16: pso = &m_FillLightGridCS_16; program = &m_FillLightGridProgram_16; break;
+    case 24: pso = &m_FillLightGridCS_24; program = &m_FillLightGridProgram_24; break;
+    case 32: pso = &m_FillLightGridCS_32; program = &m_FillLightGridProgram_32; break;
     default: ASSERT(false); break;
     }
+
+    ASSERT(pso != nullptr);
+    ASSERT(program != nullptr && *program != nullptr);
+    if (pso == nullptr || program == nullptr || !*program)
+        return;
+
+    ProgramBinder binder(**program, Context);
+    binder.SetRootSignature();
+    Context.SetPipelineState(*pso);
 
     ColorBuffer& LinearDepth = g_LinearDepth[ TemporalEffects::GetFrameIndexMod2() ];
 
@@ -322,24 +384,16 @@ void Lighting::FillLightGrid(GraphicsContext& gfxContext, const Camera& camera)
     float NearClipDist = camera.GetNearClip();
     const float RcpZMagic = NearClipDist / (FarClipDist - NearClipDist);
 
-    struct CSConstants
-    {
-        uint32_t ViewportWidth, ViewportHeight;
-        float InvTileDim;
-        float RcpZMagic;
-        uint32_t TileCount;
-        uint32_t BindlessResourcesBaseIndex;
-        Matrix4 ViewProjMatrix;
-    } csConstants;
     // todo: assumes 1920x1080 resolution
-    csConstants.ViewportWidth = g_SceneColorBuffer.GetWidth();
-    csConstants.ViewportHeight = g_SceneColorBuffer.GetHeight();
-    csConstants.InvTileDim = 1.0f / LightGridDim;
-    csConstants.RcpZMagic = RcpZMagic;
-    csConstants.TileCount = tileCountX;
-	csConstants.BindlessResourcesBaseIndex = Renderer::GetBindlessResourcesBaseOffset();
-    csConstants.ViewProjMatrix = camera.GetViewProjMatrix();
-    Context.SetDynamicConstantBufferView(Renderer::kStandbyCBV, sizeof(CSConstants), &csConstants);
+    ProgramVar constants = binder["g_FillLightGrid"];
+    constants["ViewWidth"].Set(g_SceneColorBuffer.GetWidth());
+    constants["ViewHeight"].Set(g_SceneColorBuffer.GetHeight());
+    constants["InvTileDimf32"].Set(1.0f / LightGridDim);
+    constants["RcpZMagic"].Set(RcpZMagic);
+    constants["TileCountX"].Set(tileCountX);
+    constants["ViewProjMatrix"].Set(camera.GetViewProjMatrix());
+    SetCommonResources(binder, TemporalEffects::GetFrameIndexMod2());
+    binder.Apply();
 
     Context.Dispatch(tileCountX, tileCountY, 1);
 
@@ -353,11 +407,17 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
 {
     ScopedTimer _prof(L"DeferredLighting", gfxContext);
 
+    ASSERT(m_DeferredLightingProgram != nullptr);
+    if (!m_DeferredLightingProgram)
+        return;
+
     ComputeContext& Context = gfxContext.GetComputeContext();
 
     Context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Renderer::s_TextureHeap.GetHeapPointer());
     Context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
-    Context.SetRootSignature(Renderer::m_RootSig);
+
+    ProgramBinder binder(*m_DeferredLightingProgram, Context);
+    binder.SetRootSignature();
 
     Context.SetPipelineState(m_DeferredLightingPSO);
 
@@ -381,7 +441,28 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
     Context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
    
-    Context.SetDynamicConstantBufferView(Renderer::kCommonCBV, sizeof(GlobalConstants), &globals);
+    ProgramVar constants = binder["g_DeferredLighting"];
+    constants["InverseViewProjMatrix"].Set(globals.InverseViewProjMatrix);
+    constants["SunShadowMatrix"].Set(globals.SunShadowMatrix);
+    constants["ViewerPos"].Set(globals.ViewerPos);
+    constants["SunDirection"].Set(globals.SunDirection);
+    constants["SunIntensity"].Set(globals.SunIntensity);
+    constants["ShadowTexelSize"].Set(DirectX::XMFLOAT4(
+        globals.ShadowTexelSize[0],
+        globals.ShadowTexelSize[1],
+        globals.ShadowTexelSize[2],
+        globals.ShadowTexelSize[3]));
+    constants["InvTileDim"].Set(DirectX::XMFLOAT4(
+        globals.InvTileDim[0],
+        globals.InvTileDim[1],
+        globals.InvTileDim[2],
+        globals.InvTileDim[3]));
+    constants["ViewportWidth"].Set(globals.ViewportWidth);
+    constants["ViewportHeight"].Set(globals.ViewportHeight);
+    constants["TileCountX"].Set(globals.TileCount[0]);
+    constants["IBLSpecularLDMapMipCount"].Set(globals.IBLSpecularLDMapMipCount);
+    SetCommonResources(binder, globals.FrameIndexMod2);
+    binder.Apply();
 
     uint32_t groupCountX = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), 8);
     uint32_t groupCountY = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), 8);

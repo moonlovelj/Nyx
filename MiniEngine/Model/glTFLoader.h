@@ -46,6 +46,9 @@ namespace glTF
 		GltfAsset(const std::wstring& filePath);
 		~GltfAsset();
 
+		GltfAsset(const GltfAsset&) = delete;
+		GltfAsset& operator=(const GltfAsset&) = delete;
+
 		bool IsValid() const { return m_Data != nullptr; }
 
 		cgltf_data* m_Data = nullptr;
@@ -55,5 +58,11 @@ namespace glTF
 		static uint16_t MapComponentType(cgltf_component_type type);
 		static uint16_t MapType(cgltf_type type);
 		static Accessor MakeAccessor(const cgltf_accessor* src);
+
+	private:
+		bool DecodeMeshoptBufferViews();
+		void ClearDecodedMeshoptBufferViews();
+
+		std::vector<std::vector<uint8_t>> m_DecodedBufferViews;
 	};
 }

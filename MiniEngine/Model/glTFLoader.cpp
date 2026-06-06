@@ -7,6 +7,8 @@
 #include "glTFLoader.h"
 #include "../Core/Utility.h"
 
+#include "meshoptimizer.h"
+
 namespace
 {
 	// Use memory-mapped file I/O to avoid heap allocation
@@ -68,12 +70,158 @@ namespace glTF
 		{
 			cgltf_free(m_Data);
 			m_Data = nullptr;
+			return;
+		}
+
+		if (!DecodeMeshoptBufferViews())
+		{
+			ClearDecodedMeshoptBufferViews();
+			cgltf_free(m_Data);
+			m_Data = nullptr;
 		}
 	}
 
 	GltfAsset::~GltfAsset()
 	{
-		if (m_Data) cgltf_free(m_Data);
+		if (m_Data)
+		{
+			ClearDecodedMeshoptBufferViews();
+			cgltf_free(m_Data);
+		}
+	}
+
+	bool GltfAsset::DecodeMeshoptBufferViews()
+	{
+		if (m_Data == nullptr)
+			return false;
+
+		m_DecodedBufferViews.clear();
+		m_DecodedBufferViews.resize(m_Data->buffer_views_count);
+
+		for (cgltf_size bufferViewIndex = 0; bufferViewIndex < m_Data->buffer_views_count; ++bufferViewIndex)
+		{
+			cgltf_buffer_view& bufferView = m_Data->buffer_views[bufferViewIndex];
+			if (!bufferView.has_meshopt_compression)
+				continue;
+
+			const cgltf_meshopt_compression& compression = bufferView.meshopt_compression;
+			if (compression.buffer == nullptr || compression.buffer->data == nullptr)
+			{
+				Utility::Printf("Error: EXT_meshopt_compression buffer is not loaded.\n");
+				return false;
+			}
+
+			if (compression.offset > compression.buffer->size ||
+				compression.size > compression.buffer->size - compression.offset)
+			{
+				Utility::Printf("Error: EXT_meshopt_compression source range is out of bounds.\n");
+				return false;
+			}
+
+			if (compression.count == 0 || compression.stride == 0)
+			{
+				Utility::Printf("Error: EXT_meshopt_compression has invalid count or stride.\n");
+				return false;
+			}
+
+			const size_t decodedSize =
+				static_cast<size_t>(compression.count) * static_cast<size_t>(compression.stride);
+			if (decodedSize != static_cast<size_t>(bufferView.size))
+			{
+				Utility::Printf("Error: EXT_meshopt_compression decoded size does not match bufferView size.\n");
+				return false;
+			}
+
+			std::vector<uint8_t>& decodedBuffer = m_DecodedBufferViews[bufferViewIndex];
+			decodedBuffer.resize(decodedSize);
+
+			const unsigned char* source = static_cast<const unsigned char*>(compression.buffer->data) + compression.offset;
+			const size_t sourceSize = static_cast<size_t>(compression.size);
+			int decodeResult = -1;
+
+			switch (compression.mode)
+			{
+			case cgltf_meshopt_compression_mode_attributes:
+				decodeResult = meshopt_decodeVertexBuffer(
+					decodedBuffer.data(),
+					static_cast<size_t>(compression.count),
+					static_cast<size_t>(compression.stride),
+					source,
+					sourceSize);
+				break;
+			case cgltf_meshopt_compression_mode_triangles:
+				decodeResult = meshopt_decodeIndexBuffer(
+					decodedBuffer.data(),
+					static_cast<size_t>(compression.count),
+					static_cast<size_t>(compression.stride),
+					source,
+					sourceSize);
+				break;
+			case cgltf_meshopt_compression_mode_indices:
+				decodeResult = meshopt_decodeIndexSequence(
+					decodedBuffer.data(),
+					static_cast<size_t>(compression.count),
+					static_cast<size_t>(compression.stride),
+					source,
+					sourceSize);
+				break;
+			default:
+				Utility::Printf("Error: unsupported EXT_meshopt_compression mode.\n");
+				return false;
+			}
+
+			if (decodeResult != 0)
+			{
+				Utility::Printf("Error: EXT_meshopt_compression decode failed.\n");
+				return false;
+			}
+
+			switch (compression.filter)
+			{
+			case cgltf_meshopt_compression_filter_none:
+				break;
+			case cgltf_meshopt_compression_filter_octahedral:
+				meshopt_decodeFilterOct(
+					decodedBuffer.data(),
+					static_cast<size_t>(compression.count),
+					static_cast<size_t>(compression.stride));
+				break;
+			case cgltf_meshopt_compression_filter_quaternion:
+				meshopt_decodeFilterQuat(
+					decodedBuffer.data(),
+					static_cast<size_t>(compression.count),
+					static_cast<size_t>(compression.stride));
+				break;
+			case cgltf_meshopt_compression_filter_exponential:
+				meshopt_decodeFilterExp(
+					decodedBuffer.data(),
+					static_cast<size_t>(compression.count),
+					static_cast<size_t>(compression.stride));
+				break;
+			default:
+				Utility::Printf("Error: unsupported EXT_meshopt_compression filter.\n");
+				return false;
+			}
+
+			bufferView.data = decodedBuffer.data();
+		}
+
+		return true;
+	}
+
+	void GltfAsset::ClearDecodedMeshoptBufferViews()
+	{
+		if (m_Data != nullptr)
+		{
+			for (cgltf_size bufferViewIndex = 0; bufferViewIndex < m_Data->buffer_views_count; ++bufferViewIndex)
+			{
+				cgltf_buffer_view& bufferView = m_Data->buffer_views[bufferViewIndex];
+				if (bufferView.has_meshopt_compression)
+					bufferView.data = nullptr;
+			}
+		}
+
+		m_DecodedBufferViews.clear();
 	}
 
 	uint16_t GltfAsset::MapComponentType(cgltf_component_type type)
@@ -108,8 +256,10 @@ namespace glTF
 	Accessor GltfAsset::MakeAccessor(const cgltf_accessor* src)
 	{
 		Accessor dst = {};
-		if (!src) return dst;
-		dst.dataPtr = (const uint8_t*)src->buffer_view->buffer->data + src->offset + src->buffer_view->offset;
+		if (!src || !src->buffer_view) return dst;
+		const uint8_t* bufferViewData = cgltf_buffer_view_data(src->buffer_view);
+		if (bufferViewData == nullptr) return dst;
+		dst.dataPtr = bufferViewData + src->offset;
 		dst.stride = (uint32_t)src->stride;
 		dst.count = (uint32_t)src->count;
 		dst.componentType = MapComponentType(src->component_type);

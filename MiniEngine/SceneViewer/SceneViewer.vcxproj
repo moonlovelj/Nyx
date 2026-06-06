@@ -49,7 +49,9 @@
     <Import Project="..\PropertySheets\Build.props" />
     <Import Project="..\PropertySheets\Desktop.props" />
   </ImportGroup>
-  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Label="UserMacros">
+    <DxcRuntimeDir>$(ProjectDir)..\ThirdParty\dxc_2026_05_27\bin\$(Platform)\</DxcRuntimeDir>
+  </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
@@ -89,9 +91,15 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ItemDefinitionGroup>
     <Link>
-      <AdditionalLibraryDirectories>..\..\Packages\zlib-msvc-x64.1.2.11.8900\build\native\lib_release;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>zlibstatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\ThirdParty\slang-2026.10\lib;..\..\Packages\zlib-msvc-x64.1.2.11.8900\build\native\lib_release;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>slang.lib;zlibstatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>copy /Y "$(ProjectDir)..\ThirdParty\slang-2026.10\bin\slang.dll" "$(OutDir)"
+copy /Y "$(ProjectDir)..\ThirdParty\slang-2026.10\bin\slang-compiler.dll" "$(OutDir)"
+copy /Y "$(ProjectDir)..\ThirdParty\slang-2026.10\bin\slang-rt.dll" "$(OutDir)"
+xcopy /Y /D /E /I "$(ProjectDir)..\ThirdParty\slang-2026.10\bin\slang-standard-module-2026.10" "$(OutDir)slang-standard-module-2026.10"</Command>
+    </PostBuildEvent>
     <ClCompile>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">stdcpp20</LanguageStandard>
       <OpenMPSupport Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">true</OpenMPSupport>
@@ -118,6 +126,14 @@
     <Import Project="..\..\Packages\WinPixEventRuntime.1.0.210209001\build\WinPixEventRuntime.targets" Condition="Exists('..\..\Packages\WinPixEventRuntime.1.0.210209001\build\WinPixEventRuntime.targets')" />
     <Import Project="..\..\Packages\Microsoft.Direct3D.D3D12.1.616.1\build\native\Microsoft.Direct3D.D3D12.targets" Condition="Exists('..\..\Packages\Microsoft.Direct3D.D3D12.1.616.1\build\native\Microsoft.Direct3D.D3D12.targets')" />
   </ImportGroup>
+  <Target Name="CopyDxcRuntimeDependencies" AfterTargets="Build">
+    <ItemGroup>
+      <DxcRuntimeDependency Include="$(DxcRuntimeDir)dxcompiler.dll" />
+      <DxcRuntimeDependency Include="$(DxcRuntimeDir)dxil.dll" />
+    </ItemGroup>
+    <Error Text="DXC runtime DLLs were not found in $(DxcRuntimeDir). Slang DXIL emission requires dxcompiler.dll and dxil.dll." Condition="!Exists('$(DxcRuntimeDir)dxcompiler.dll') Or !Exists('$(DxcRuntimeDir)dxil.dll')" />
+    <Copy SourceFiles="@(DxcRuntimeDependency)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>

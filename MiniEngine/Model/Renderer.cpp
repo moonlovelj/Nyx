@@ -23,33 +23,100 @@
 #include "../Core/BufferManager.h"
 #include "../Core/ShadowCamera.h"
 #include "../Core/TemporalEffects.h"
+#include "../Core/ProgramBinder.h"
+#include "../Core/ProgramUtils.h"
+#include "../Core/Utility.h"
 
 #include "CommandBucketer.h"
 #include "GeometryStreaming.h"
 
-#include "Shaders/SharedHeader.hlsli"
-
-
-#include "CompiledShaders/SkyboxVS.h"
-#include "CompiledShaders/SkyboxPS.h"
-#include "CompiledShaders/UberMeshShader.h"
-#include "CompiledShaders/UberMeshShaderPass0.h"
-#include "CompiledShaders/UberMeshShaderPass1.h"
-#include "CompiledShaders/MeshBufferGenCS.h"
-#include "CompiledShaders/VBufferPS.h"
-#include "CompiledShaders/ResolveVBufferToGBufferCS.h"
-#include "CompiledShaders/InstanceCullPass0CS.h"
-#include "CompiledShaders/InstanceCullPass1CS.h"
-#include "CompiledShaders/DAGCullPass0CS.h"
-#include "CompiledShaders/DAGCullPass1CS.h"
-#include "CompiledShaders/ExportDepthVS.h"
-#include "CompiledShaders/ExportDepthPS.h"
+#include <filesystem>
 
 #pragma warning(disable:4319) // '~': zero extending 'uint32_t' to 'uint64_t' of greater size
 
 using namespace Math;
 using namespace Graphics;
 using namespace Renderer;
+
+namespace
+{
+    std::filesystem::path GetExecutableDirectory()
+    {
+        std::wstring modulePath(MAX_PATH, L'\0');
+        for (;;)
+        {
+            const DWORD length = GetModuleFileNameW(
+                nullptr,
+                modulePath.data(),
+                static_cast<DWORD>(modulePath.size()));
+            if (length == 0)
+                return {};
+
+            if (static_cast<size_t>(length) < modulePath.size())
+            {
+                modulePath.resize(length);
+                return std::filesystem::path(modulePath).parent_path();
+            }
+
+            modulePath.resize(modulePath.size() * 2);
+        }
+    }
+
+    void SetCommonResources(ProgramBinder& binder, uint32_t frameIndexMod2 = 0)
+    {
+        ProgramVar commonResources = binder["g_CommonResources"];
+        commonResources["BindlessResourcesBaseIndex"].Set(Renderer::GetBindlessResourcesBaseOffset());
+        commonResources["FrameIndexMod2"].Set(frameIndexMod2);
+    }
+
+    bool BindVBufferMeshPass(
+        GraphicsContext& context,
+        const std::shared_ptr<Program>& program,
+        const MeshShaderPSO& pso,
+        const GlobalConstants& inGlobals)
+    {
+        ASSERT(program != nullptr);
+        if (!program)
+            return false;
+
+        ProgramBinder binder(*program, context);
+        binder.SetRootSignature();
+        context.SetPipelineState(pso);
+
+        ProgramVar constants = binder["g_VBufferMesh"];
+        constants["ViewProjMatrix"].Set(inGlobals.ViewProjMatrix);
+        constants["ViewportWidth"].Set(inGlobals.ViewportWidth);
+        constants["ViewportHeight"].Set(inGlobals.ViewportHeight);
+        SetCommonResources(binder, inGlobals.FrameIndexMod2);
+        binder.Apply();
+        return true;
+    }
+
+    bool BindMeshBufferGenPass(
+        GraphicsContext& context,
+        const std::shared_ptr<Program>& program,
+        const ComputePSO& pso,
+        uint32_t passIndex)
+    {
+        ASSERT(program != nullptr);
+        if (!program)
+            return false;
+
+        ComputeContext& computeContext = context.GetComputeContext();
+        computeContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+        computeContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
+
+        ProgramBinder binder(*program, computeContext);
+        binder.SetRootSignature();
+        computeContext.SetPipelineState(pso);
+
+        ProgramVar constants = binder["g_MeshBufferGen"];
+        constants["PassIndex"].Set(passIndex);
+        SetCommonResources(binder);
+        binder.Apply();
+        return true;
+    }
+}
 
 namespace Renderer
 {
@@ -73,32 +140,69 @@ namespace Renderer
     uint32_t g_SSAOFullScreenID;
     uint32_t g_ShadowBufferID;
 
-    RootSignature m_RootSig;
+    //RootSignature m_RootSig;
     GraphicsPSO m_SkyboxPSO(L"Renderer: Skybox PSO");
+    std::shared_ptr<Program> m_SkyboxProgram;
     GraphicsPSO m_DefaultPSO(L"Renderer: Default PSO"); // Not finalized.  Used as a template.
 
     DescriptorHandle m_BindlessResources;
 
 	ComputePSO m_MeshBufferGenPSO(L"Renderer: Mesh Buffer Gen PSO");
+    std::shared_ptr<Program> m_MeshBufferGenProgram;
 
-    MeshShaderPSO m_UberMeshPSO[2] = {
-        MeshShaderPSO(L"Renderer: Uber Mesh PSO Pass 0"),
-        MeshShaderPSO(L"Renderer: Uber Mesh PSO Pass 1")
+    MeshShaderPSO m_VBufferMeshPSO[2] = {
+        MeshShaderPSO(L"Renderer: VBuffer Mesh PSO Pass 0"),
+        MeshShaderPSO(L"Renderer: VBuffer Mesh PSO Pass 1")
 	};
+    std::shared_ptr<Program> m_VBufferMeshProgram[2];
 
 	ComputePSO m_ResolveVBufferToGBufferPSO(L"Renderer: Resolve VBuffer To GBuffer PSO");
+    std::shared_ptr<Program> m_ResolveVBufferToGBufferProgram;
 
 	ComputePSO m_InstanceCullPSO[2] = {
         ComputePSO(L"Renderer: Instance Cull Pass 0 PSO"),
         ComputePSO(L"Renderer: Instance Cull Pass 1 PSO")
 	};
+    std::shared_ptr<Program> m_InstanceCullProgram[2];
 
     ComputePSO m_DAGCullPSO[2] = {
         ComputePSO(L"Renderer: DAG Cull Pass 0 PSO"),
         ComputePSO(L"Renderer: DAG Cull Pass 1 PSO")
 	};
+    std::shared_ptr<Program> m_DAGCullProgram[2];
 
     GraphicsPSO m_ExportDepthPSO(L"Renderer: Export Depth PSO");
+    std::shared_ptr<Program> m_ExportDepthProgram;
+}
+
+std::string Renderer::GetModelShaderPath(const char* shaderFileName)
+{
+    ASSERT(shaderFileName != nullptr && shaderFileName[0] != '\0');
+    if (shaderFileName == nullptr || shaderFileName[0] == '\0')
+        return {};
+
+    const std::filesystem::path shaderRelativePath =
+        std::filesystem::path(L"MiniEngine") / L"Model" / L"Shaders" / shaderFileName;
+    const std::filesystem::path executableDirectory = GetExecutableDirectory();
+    const std::filesystem::path packagedPath =
+        executableDirectory.empty() ? std::filesystem::path() : executableDirectory / shaderRelativePath;
+
+    std::error_code error;
+    if (!packagedPath.empty() && std::filesystem::is_regular_file(packagedPath, error))
+        return Utility::WideStringToUTF8(packagedPath.lexically_normal().wstring());
+
+    const std::filesystem::path sourcePath =
+        std::filesystem::path(__FILE__).parent_path() / L"Shaders" / shaderFileName;
+    error.clear();
+    if (std::filesystem::is_regular_file(sourcePath, error))
+        return Utility::WideStringToUTF8(sourcePath.lexically_normal().wstring());
+
+    const std::string message =
+        "Model shader not found. packaged='" + Utility::WideStringToUTF8(packagedPath.wstring()) +
+        "', source='" + Utility::WideStringToUTF8(sourcePath.wstring()) + "'\n";
+    Utility::Print(message.c_str());
+    return Utility::WideStringToUTF8(
+        (packagedPath.empty() ? sourcePath : packagedPath).lexically_normal().wstring());
 }
 
 void Renderer::Initialize(void)
@@ -120,56 +224,85 @@ void Renderer::Initialize(void)
     PointSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
     PointSamplerDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
 
-    m_RootSig.Reset(kNumRootBindings, 5);
-    m_RootSig.InitStaticSampler(10, DefaultSamplerDesc);
-    m_RootSig.InitStaticSampler(11, SamplerShadowDesc);
-    m_RootSig.InitStaticSampler(12, CubeMapSamplerDesc);
-    m_RootSig.InitStaticSampler(13, LinearSamplerDesc);
-    m_RootSig.InitStaticSampler(14, PointSamplerDesc);
-    m_RootSig[kMeshConstants].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_ALL);
-    m_RootSig[kMaterialConstants].InitAsConstantBuffer(1, D3D12_SHADER_VISIBILITY_ALL);
-	m_RootSig[kCommonCBV].InitAsConstantBuffer(2);
-	m_RootSig[kCommandConstants].InitAsConstants(3, 4);
-	m_RootSig[kViewModeConstants].InitAsConstants(5, 4);
-    m_RootSig[kStandbyCBV].InitAsConstantBuffer(6);
-    m_RootSig.Finalize(L"RootSig", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT 
-        | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED
-        | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED);
+ //   m_RootSig.Reset(kNumRootBindings, 5);
+ //   m_RootSig.InitStaticSampler(10, DefaultSamplerDesc);
+ //   m_RootSig.InitStaticSampler(11, SamplerShadowDesc);
+ //   m_RootSig.InitStaticSampler(12, CubeMapSamplerDesc);
+ //   m_RootSig.InitStaticSampler(13, LinearSamplerDesc);
+ //   m_RootSig.InitStaticSampler(14, PointSamplerDesc);
+ //   m_RootSig[kMeshConstants].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_ALL);
+ //   m_RootSig[kMaterialConstants].InitAsConstantBuffer(1, D3D12_SHADER_VISIBILITY_ALL);
+	//m_RootSig[kCommonCBV].InitAsConstantBuffer(2);
+	//m_RootSig[kCommandConstants].InitAsConstants(3, 4);
+	//m_RootSig[kViewModeConstants].InitAsConstants(5, 4);
+ //   m_RootSig[kStandbyCBV].InitAsConstantBuffer(6);
+ //   m_RootSig.Finalize(L"RootSig", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT 
+ //       | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED
+ //       | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED);
 
     DXGI_FORMAT ColorFormat = g_SceneColorBuffer.GetFormat();
     DXGI_FORMAT DepthFormat = g_SceneDepthBuffer.GetFormat();
 
     // Mesh shader PSO
-    m_UberMeshPSO[0].SetRootSignature(m_RootSig);
-	m_UberMeshPSO[0].SetRasterizerState(RasterizerTwoSided);
-    m_UberMeshPSO[0].SetDepthStencilState(DepthStateDisabled);
-	m_UberMeshPSO[0].SetBlendState(BlendDisable);
-	//DXGI_FORMAT RTVFormats[] = {
-	//	g_SceneColorBuffer.GetFormat(),
-	//	g_GBufferA.GetFormat(),
-	//	g_GBufferB.GetFormat(),
-	//	g_GBufferC.GetFormat(),
-	//	g_GBufferD.GetFormat()
-	//};
-    m_UberMeshPSO[0].SetRenderTargetFormats(0, {}, g_SceneDepthBuffer.GetFormat());
-	m_UberMeshPSO[0].SetMeshShader(g_pUberMeshShaderPass0, sizeof(g_pUberMeshShaderPass0));
-	m_UberMeshPSO[0].SetPixelShader(g_pVBufferPS, sizeof(g_pVBufferPS));
-	m_UberMeshPSO[0].Finalize();
+    for (uint32_t passIndex = 0; passIndex < 2; ++passIndex)
+    {
+        ProgramDesc vBufferMeshDesc = ProgramUtils::MakeGraphicsDesc(
+            GetModelShaderPath("VBufferMesh.slang"),
+            "",
+            "pixelMain",
+            "meshMain",
+            ProgramUtils::BindlessMode::ResourceAndSamplerHeap);
+        vBufferMeshDesc.AddDefine("VBUFFER_MESH_PASS_INDEX", std::to_string(passIndex));
 
-    m_UberMeshPSO[1] = m_UberMeshPSO[0];
-    m_UberMeshPSO[1].SetMeshShader(g_pUberMeshShaderPass1, sizeof(g_pUberMeshShaderPass1));
-    m_UberMeshPSO[1].Finalize();
+        m_VBufferMeshProgram[passIndex] = ProgramUtils::GetProgram(
+            vBufferMeshDesc,
+            passIndex == 0 ? "Renderer: VBuffer Mesh Pass 0" : "Renderer: VBuffer Mesh Pass 1");
+        if (!m_VBufferMeshProgram[passIndex])
+            return;
 
-    m_MeshBufferGenPSO.SetRootSignature(m_RootSig);
-    m_MeshBufferGenPSO.SetComputeShader(g_pMeshBufferGenCS, sizeof(g_pMeshBufferGenCS));
+	    m_VBufferMeshPSO[passIndex].SetRasterizerState(RasterizerTwoSided);
+        m_VBufferMeshPSO[passIndex].SetDepthStencilState(DepthStateDisabled);
+	    m_VBufferMeshPSO[passIndex].SetBlendState(BlendDisable);
+	    //DXGI_FORMAT RTVFormats[] = {
+	    //	g_SceneColorBuffer.GetFormat(),
+	    //	g_GBufferA.GetFormat(),
+	    //	g_GBufferB.GetFormat(),
+	    //	g_GBufferC.GetFormat(),
+	    //	g_GBufferD.GetFormat()
+	    //};
+        m_VBufferMeshPSO[passIndex].SetRenderTargetFormats(0, {}, g_SceneDepthBuffer.GetFormat());
+        ProgramUtils::SetProgram(m_VBufferMeshPSO[passIndex], *m_VBufferMeshProgram[passIndex]);
+	    m_VBufferMeshPSO[passIndex].Finalize();
+    }
+
+    ProgramDesc meshBufferGenDesc = ProgramUtils::MakeComputeDesc(
+        GetModelShaderPath("MeshBufferGen.slang"),
+        "computeMain",
+        ProgramUtils::BindlessMode::ResourceHeap);
+    m_MeshBufferGenProgram = ProgramUtils::GetProgram(
+        meshBufferGenDesc,
+        "Renderer: MeshBufferGen");
+    if (!m_MeshBufferGenProgram)
+        return;
+
+    ProgramUtils::SetProgram(m_MeshBufferGenPSO, *m_MeshBufferGenProgram);
     m_MeshBufferGenPSO.Finalize();
 
-    m_ResolveVBufferToGBufferPSO.SetRootSignature(m_RootSig);
-    m_ResolveVBufferToGBufferPSO.SetComputeShader(g_pResolveVBufferToGBufferCS, sizeof(g_pResolveVBufferToGBufferCS));
+    ProgramDesc resolveVBufferToGBufferDesc = ProgramUtils::MakeComputeDesc(
+        GetModelShaderPath("ResolveVBufferToGBuffer.slang"),
+        "computeMain",
+        ProgramUtils::BindlessMode::ResourceAndSamplerHeap);
+    m_ResolveVBufferToGBufferProgram = ProgramUtils::GetProgram(
+        resolveVBufferToGBufferDesc,
+        "Renderer: ResolveVBufferToGBuffer");
+    if (!m_ResolveVBufferToGBufferProgram)
+        return;
+
+    ProgramUtils::SetProgram(m_ResolveVBufferToGBufferPSO, *m_ResolveVBufferToGBufferProgram);
     m_ResolveVBufferToGBufferPSO.Finalize();
 
     // Default PSO
-    m_DefaultPSO.SetRootSignature(m_RootSig);
+    //m_DefaultPSO.SetRootSignature(m_RootSig);
     m_DefaultPSO.SetRasterizerState(RasterizerDefault);
     m_DefaultPSO.SetBlendState(BlendDisable);
     m_DefaultPSO.SetDepthStencilState(DepthStateReadWrite);
@@ -184,8 +317,21 @@ void Renderer::Initialize(void)
     m_SkyboxPSO = m_DefaultPSO;
     m_SkyboxPSO.SetDepthStencilState(DepthStateReadOnly);
     m_SkyboxPSO.SetInputLayout(0, nullptr);
-    m_SkyboxPSO.SetVertexShader(g_pSkyboxVS, sizeof(g_pSkyboxVS));
-    m_SkyboxPSO.SetPixelShader(g_pSkyboxPS, sizeof(g_pSkyboxPS));
+
+    ProgramDesc skyboxDesc = ProgramUtils::MakeGraphicsDesc(
+        GetModelShaderPath("Skybox.slang"),
+        "vertexMain",
+        "pixelMain",
+        ProgramUtils::BindlessMode::ResourceHeap);
+    skyboxDesc.AddStaticSampler(
+        "g_SkyboxSampler",
+        DefaultSamplerDesc,
+        D3D12_SHADER_VISIBILITY_PIXEL);
+    m_SkyboxProgram = ProgramUtils::GetProgram(skyboxDesc, "Renderer: Skybox");
+    if (!m_SkyboxProgram)
+        return;
+
+    ProgramUtils::SetProgram(m_SkyboxPSO, *m_SkyboxProgram);
     m_SkyboxPSO.Finalize();
 
     TextureManager::Initialize(L"");
@@ -203,30 +349,65 @@ void Renderer::Initialize(void)
 
 	GPUDrivenDrawIndirectCommandSignature.Reset(1);
 	GPUDrivenDrawIndirectCommandSignature[0].DispatchMesh();
-	GPUDrivenDrawIndirectCommandSignature.Finalize(&m_RootSig, sizeof(DispatchMeshCommand));
+	GPUDrivenDrawIndirectCommandSignature.Finalize(nullptr, sizeof(DispatchMeshCommand));
 
-    m_InstanceCullPSO[0].SetRootSignature(m_RootSig);
-	m_InstanceCullPSO[0].SetComputeShader(g_pInstanceCullPass0CS, sizeof(g_pInstanceCullPass0CS));
-	m_InstanceCullPSO[0].Finalize();
+    for (uint32_t passIndex = 0; passIndex < 2; ++passIndex)
+    {
+        ProgramDesc instanceCullDesc = ProgramUtils::MakeComputeDesc(
+            GetModelShaderPath("InstanceCull.slang"),
+            "computeMain",
+            ProgramUtils::BindlessMode::ResourceHeap);
+        instanceCullDesc.AddDefine("INSTANCE_CULL_PASS_INDEX", std::to_string(passIndex));
+        instanceCullDesc.AddStaticSampler("g_HZBSampler", PointSamplerDesc);
 
-	m_InstanceCullPSO[1].SetRootSignature(m_RootSig);
-	m_InstanceCullPSO[1].SetComputeShader(g_pInstanceCullPass1CS, sizeof(g_pInstanceCullPass1CS));
-	m_InstanceCullPSO[1].Finalize();
+        m_InstanceCullProgram[passIndex] = ProgramUtils::GetProgram(
+            instanceCullDesc,
+            passIndex == 0 ? "Renderer: InstanceCull Pass 0" : "Renderer: InstanceCull Pass 1");
+        if (!m_InstanceCullProgram[passIndex])
+            return;
 
-    m_DAGCullPSO[0].SetRootSignature(m_RootSig);
-	m_DAGCullPSO[0].SetComputeShader(g_pDAGCullPass0CS, sizeof(g_pDAGCullPass0CS));
-	m_DAGCullPSO[0].Finalize();
+        ProgramUtils::SetProgram(m_InstanceCullPSO[passIndex], *m_InstanceCullProgram[passIndex]);
+        m_InstanceCullPSO[passIndex].Finalize();
+    }
 
-	m_DAGCullPSO[1].SetRootSignature(m_RootSig);
-	m_DAGCullPSO[1].SetComputeShader(g_pDAGCullPass1CS, sizeof(g_pDAGCullPass1CS));
-	m_DAGCullPSO[1].Finalize();
+    for (uint32_t passIndex = 0; passIndex < 2; ++passIndex)
+    {
+        ProgramDesc dagCullDesc = ProgramUtils::MakeComputeDesc(
+            GetModelShaderPath("DAGCull.slang"),
+            "computeMain",
+            ProgramUtils::BindlessMode::ResourceHeap);
+        dagCullDesc.AddDefine("DAG_CULL_PASS_INDEX", std::to_string(passIndex));
+        dagCullDesc.AddStaticSampler("g_HZBSampler", PointSamplerDesc);
+        dagCullDesc.AddRootBufferUAV("g_TaskQueueStateUAV");
+        dagCullDesc.AddRootBufferUAV("g_TaskQueueUAV");
+        dagCullDesc.AddRootBufferUAV("g_MeshletBatchUAV");
+        dagCullDesc.AddRootBufferUAV("g_CandidateMeshletUAV");
+
+        m_DAGCullProgram[passIndex] = ProgramUtils::GetProgram(
+            dagCullDesc,
+            passIndex == 0 ? "Renderer: DAGCull Pass 0" : "Renderer: DAGCull Pass 1");
+        if (!m_DAGCullProgram[passIndex])
+            return;
+
+        ProgramUtils::SetProgram(m_DAGCullPSO[passIndex], *m_DAGCullProgram[passIndex]);
+        m_DAGCullPSO[passIndex].Finalize();
+    }
 
 	m_ExportDepthPSO = m_DefaultPSO;
 	m_ExportDepthPSO.SetRasterizerState(RasterizerTwoSided);
 	m_ExportDepthPSO.SetDepthStencilState(DepthStateReadWrite);
 	m_ExportDepthPSO.SetInputLayout(0, nullptr);
-	m_ExportDepthPSO.SetVertexShader(g_pExportDepthVS, sizeof(g_pExportDepthVS));
-	m_ExportDepthPSO.SetPixelShader(g_pExportDepthPS, sizeof(g_pExportDepthPS));
+
+    ProgramDesc exportDepthDesc = ProgramUtils::MakeGraphicsDesc(
+        GetModelShaderPath("ExportDepth.slang"),
+        "vertexMain",
+        "pixelMain",
+        ProgramUtils::BindlessMode::ResourceHeap);
+    m_ExportDepthProgram = ProgramUtils::GetProgram(exportDepthDesc, "Renderer: ExportDepth");
+    if (!m_ExportDepthProgram)
+        return;
+
+    ProgramUtils::SetProgram(m_ExportDepthPSO, *m_ExportDepthProgram);
 	m_ExportDepthPSO.Finalize();
 
 
@@ -316,25 +497,18 @@ void Renderer::DrawSkybox( GraphicsContext& gfxContext, const Camera& Camera, co
 {
     ScopedTimer _prof(L"Draw Skybox", gfxContext);
 
-    __declspec(align(16)) struct SkyboxVSCB
-    {
-        Matrix4 ProjInverse;
-        Matrix3 ViewInverse;
-    } skyVSCB;
-    skyVSCB.ProjInverse = Invert(Camera.GetProjMatrix());
-    skyVSCB.ViewInverse = Invert(Camera.GetViewMatrix()).Get3x3();
+    ASSERT(m_SkyboxProgram != nullptr);
+    if (!m_SkyboxProgram)
+        return;
 
-    __declspec(align(16)) struct SkyboxPSCB
-    {
-        float TextureLevel;
-        uint32_t BindlessResourcesBaseIndex;
-    } skyPSCB;
-    skyPSCB.TextureLevel = s_SpecularIBLBias;
-    skyPSCB.BindlessResourcesBaseIndex = GetBindlessResourcesBaseOffset();
+    const Matrix4 projInverse = Invert(Camera.GetProjMatrix());
+    const Matrix3 viewInverse = Invert(Camera.GetViewMatrix()).Get3x3();
 
     gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
     gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
-    gfxContext.SetRootSignature(m_RootSig);
+
+    ProgramBinder binder(*m_SkyboxProgram, gfxContext);
+    binder.SetRootSignature();
     gfxContext.SetPipelineState(m_SkyboxPSO);
 
     gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_READ);
@@ -342,29 +516,52 @@ void Renderer::DrawSkybox( GraphicsContext& gfxContext, const Camera& Camera, co
     gfxContext.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV_DepthReadOnly());
     gfxContext.SetViewportAndScissor(viewport, scissor);
 
-   
-    gfxContext.SetDynamicConstantBufferView(kMeshConstants, sizeof(SkyboxVSCB), &skyVSCB);
-    gfxContext.SetDynamicConstantBufferView(kMaterialConstants, sizeof(SkyboxPSCB), &skyPSCB);
+    binder["g_SkyboxVS"]["ProjInverse"].Set(projInverse);
+    binder["g_SkyboxVS"]["ViewInverse"].Set(viewInverse);
+    SetCommonResources(binder);
+    binder.Apply();
+
     gfxContext.Draw(3);
 }
 
 void Renderer::InstanceCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, uint32_t cullPassIdx)
 {
     ScopedTimer _prof(L"Renderer::InstanceCull", gfxContext);
-    ComputeContext& context = gfxContext.GetComputeContext();
+    ASSERT(cullPassIdx < 2);
+    if (cullPassIdx >= 2)
+        return;
+
+    ASSERT(m_InstanceCullProgram[cullPassIdx] != nullptr);
+    if (!m_InstanceCullProgram[cullPassIdx])
+        return;
+
+	ComputeContext& context = gfxContext.GetComputeContext();
 
 	context.TransitionResource( DrawCommandManager::GetPotentialDrawItemsGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 	context.TransitionResource( DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
-	context.SetRootSignature(m_RootSig);
 
+    ProgramBinder binder(*m_InstanceCullProgram[cullPassIdx], context);
+    binder.SetRootSignature();
 	context.SetPipelineState(m_InstanceCullPSO[cullPassIdx]);
-	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-	context.SetConstants(kCommandConstants,  DrawCommandManager::GetNumPotentialDrawItems());
 
-    context.Dispatch1D( DrawCommandManager::GetNumPotentialDrawItems());
+    ProgramVar constants = binder["g_InstanceCull"];
+    constants["ViewProjMatrix"].Set(inGlobals.ViewProjMatrix);
+    constants["PrevViewProjMatrix"].Set(inGlobals.PrevViewProjMatrix);
+    constants["HZBSizeAndInv"].Set(DirectX::XMFLOAT4(
+        inGlobals.HZBSizeAndInv[0],
+        inGlobals.HZBSizeAndInv[1],
+        inGlobals.HZBSizeAndInv[2],
+        inGlobals.HZBSizeAndInv[3]));
+    constants["ViewportWidth"].Set(inGlobals.ViewportWidth);
+    constants["ViewportHeight"].Set(inGlobals.ViewportHeight);
+    constants["MaxCommands"].Set(DrawCommandManager::GetNumPotentialDrawItems());
+    SetCommonResources(binder, inGlobals.FrameIndexMod2);
+    binder.Apply();
+
+	context.Dispatch1D( DrawCommandManager::GetNumPotentialDrawItems());
 }
 
  static uint32_t GetDAGCullGroupCount()
@@ -397,19 +594,28 @@ void Renderer::DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlo
     const D3D12_VIEWPORT& viewport, uint32_t cullPassIdx)
 {
 	ScopedTimer _prof(L"Renderer::DAGCull", gfxContext);
+    ASSERT(cullPassIdx < 2);
+    if (cullPassIdx >= 2)
+        return;
+
+    ASSERT(m_DAGCullProgram[cullPassIdx] != nullptr);
+    if (!m_DAGCullProgram[cullPassIdx])
+        return;
+
 	ComputeContext& context = gfxContext.GetComputeContext();
 	context.TransitionResource( DrawCommandManager::GetTaskQueueGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 	context.TransitionResource( DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource( DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource( DrawCommandManager::GetMeshletBatchGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    context.TransitionResource( DrawCommandManager::GetCandidateMeshletGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
-	context.SetRootSignature(m_RootSig);
 
+    ProgramBinder binder(*m_DAGCullProgram[cullPassIdx], context);
+    binder.SetRootSignature();
 	context.SetPipelineState(m_DAGCullPSO[cullPassIdx]);
-	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
 
 	float screenErrorConstant = 1.f;
 	auto* cameraProj = static_cast<const Camera*>(camera);
@@ -417,8 +623,25 @@ void Renderer::DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlo
 	{
 		screenErrorConstant = std::tanf(0.5f * cameraProj->GetFOV()) * 2 / viewport.Height * PixelErrorThreshold;
 	}
-	context.SetConstants(kCommandConstants, 0,
-		screenErrorConstant);
+
+    ProgramVar constants = binder["g_DAGCull"];
+    constants["ViewProjMatrix"].Set(inGlobals.ViewProjMatrix);
+    constants["PrevViewProjMatrix"].Set(inGlobals.PrevViewProjMatrix);
+    constants["HZBSizeAndInv"].Set(DirectX::XMFLOAT4(
+        inGlobals.HZBSizeAndInv[0],
+        inGlobals.HZBSizeAndInv[1],
+        inGlobals.HZBSizeAndInv[2],
+        inGlobals.HZBSizeAndInv[3]));
+    constants["ViewerPos"].Set(inGlobals.ViewerPos);
+    constants["ScreenErrorConstant"].Set(screenErrorConstant);
+    constants["ViewportWidth"].Set(inGlobals.ViewportWidth);
+    constants["ViewportHeight"].Set(inGlobals.ViewportHeight);
+    SetCommonResources(binder, inGlobals.FrameIndexMod2);
+    binder["g_TaskQueueStateUAV"].SetRootBufferUAV(DrawCommandManager::GetTaskQueueStateGPU());
+    binder["g_TaskQueueUAV"].SetRootBufferUAV(DrawCommandManager::GetTaskQueueGPU());
+    binder["g_MeshletBatchUAV"].SetRootBufferUAV(DrawCommandManager::GetMeshletBatchGPU());
+    binder["g_CandidateMeshletUAV"].SetRootBufferUAV(DrawCommandManager::GetCandidateMeshletGPU());
+    binder.Apply();
 
     const uint32_t dagGroups = GetDAGCullGroupCount();
     context.Dispatch1D(dagGroups * DAG_CULL_GROUP_SIZE, DAG_CULL_GROUP_SIZE);
@@ -429,22 +652,34 @@ void Renderer::ExportDepth(GraphicsContext& gfxContext, const GlobalConstants& i
 	const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
 {
 	ScopedTimer _prof(L"Renderer::ExportDepth", gfxContext);
+
+    ASSERT(m_ExportDepthProgram != nullptr);
+    if (!m_ExportDepthProgram)
+        return;
+
 	gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
 	gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
-	gfxContext.SetRootSignature(m_RootSig);
+
+    ProgramBinder binder(*m_ExportDepthProgram, gfxContext);
+    binder.SetRootSignature();
 	gfxContext.SetPipelineState(m_ExportDepthPSO);
 
 	gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE);
 	gfxContext.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 	gfxContext.SetDepthStencilTarget(g_SceneDepthBuffer.GetDSV());
 	gfxContext.SetViewportAndScissor(viewport, scissor);
-    gfxContext.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
+    SetCommonResources(binder, inGlobals.FrameIndexMod2);
+    binder.Apply();
 	gfxContext.Draw(3);
 }
 
 void Renderer::ResolveVBufferToGBuffer(GraphicsContext& gfxContext, const GlobalConstants& inGlobals)
 {
 	ScopedTimer _prof(L"Renderer::ResolveVBufferToGBuffer", gfxContext);
+    ASSERT(m_ResolveVBufferToGBufferProgram != nullptr);
+    if (!m_ResolveVBufferToGBufferProgram)
+        return;
+
 	ComputeContext& context = gfxContext.GetComputeContext();
 
 	context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -456,11 +691,19 @@ void Renderer::ResolveVBufferToGBuffer(GraphicsContext& gfxContext, const Global
 
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
-	context.SetRootSignature(m_RootSig);
 
+    ProgramBinder binder(*m_ResolveVBufferToGBufferProgram, context);
+    binder.SetRootSignature();
     context.SetPipelineState(m_ResolveVBufferToGBufferPSO);
-	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-    context.SetConstants(kViewModeConstants, (uint32_t)ViewMode);
+
+    ProgramVar constants = binder["g_ResolveVBufferToGBuffer"];
+    constants["ViewProjMatrix"].Set(inGlobals.ViewProjMatrix);
+    constants["InvViewportSize"].Set(DirectX::XMFLOAT2(inGlobals.InvViewportWidth, inGlobals.InvViewportHeight));
+    constants["ViewportWidth"].Set(inGlobals.ViewportWidth);
+    constants["ViewportHeight"].Set(inGlobals.ViewportHeight);
+    constants["ViewMode"].Set((uint32_t)ViewMode);
+    SetCommonResources(binder, inGlobals.FrameIndexMod2);
+    binder.Apply();
 
     context.Dispatch2D(g_SceneColorBuffer.GetWidth(), g_SceneColorBuffer.GetHeight());
 }
@@ -528,9 +771,9 @@ void MeshSorter::RenderMeshedInternal(
             // mesh buffer gen
             context.TransitionResource(DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
-            context.GetComputeContext().SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-            context.GetComputeContext().SetConstants(kCommandConstants, passIndex); // pass index
+
+            if (!BindMeshBufferGenPass(context, m_MeshBufferGenProgram, m_MeshBufferGenPSO, passIndex))
+                return;
             context.GetComputeContext().Dispatch1D(1, 1);
         }
 
@@ -538,9 +781,10 @@ void MeshSorter::RenderMeshedInternal(
             ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 0", context);
             context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
             context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.SetPipelineState(m_UberMeshPSO[passIndex]);
-            context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-            context.SetConstants(kCommandConstants, 0, 0, 0);
+            context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+            context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
+            if (!BindVBufferMeshPass(context, m_VBufferMeshProgram[passIndex], m_VBufferMeshPSO[passIndex], inGlobals))
+                return;
             context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
         }
@@ -561,9 +805,8 @@ void MeshSorter::RenderMeshedInternal(
             // mesh buffer gen
             context.TransitionResource( DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
-            context.GetComputeContext().SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-            context.GetComputeContext().SetConstants(kCommandConstants, passIndex); // pass index
+            if (!BindMeshBufferGenPass(context, m_MeshBufferGenProgram, m_MeshBufferGenPSO, passIndex))
+                return;
             context.GetComputeContext().Dispatch1D(1, 1);
         }
 
@@ -571,9 +814,10 @@ void MeshSorter::RenderMeshedInternal(
             ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 1", context);
             context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
             context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.SetPipelineState(m_UberMeshPSO[passIndex]);
-            context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-            context.SetConstants(kCommandConstants, 0, 0, 0);
+            context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+            context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
+            if (!BindVBufferMeshPass(context, m_VBufferMeshProgram[passIndex], m_VBufferMeshPSO[passIndex], inGlobals))
+                return;
             context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
         }
@@ -594,9 +838,8 @@ void MeshSorter::RenderMeshedInternal(
             // mesh buffer gen
             context.TransitionResource( DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
-            context.GetComputeContext().SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-            context.GetComputeContext().SetConstants(kCommandConstants, passIndex); // pass index
+            if (!BindMeshBufferGenPass(context, m_MeshBufferGenProgram, m_MeshBufferGenPSO, passIndex))
+                return;
             context.GetComputeContext().Dispatch1D(1, 1);
         }
 
@@ -604,9 +847,10 @@ void MeshSorter::RenderMeshedInternal(
             ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 0", context);
             context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
             context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.SetPipelineState(m_UberMeshPSO[passIndex]);
-            context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-            context.SetConstants(kCommandConstants, 0, 0, 0);
+            context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+            context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
+            if (!BindVBufferMeshPass(context, m_VBufferMeshProgram[passIndex], m_VBufferMeshPSO[passIndex], inGlobals))
+                return;
             context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
         }
@@ -616,9 +860,8 @@ void MeshSorter::RenderMeshedInternal(
             // mesh buffer gen
             context.TransitionResource( DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            context.GetComputeContext().SetPipelineState(m_MeshBufferGenPSO);
-            context.GetComputeContext().SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-            context.GetComputeContext().SetConstants(kCommandConstants, passIndex); // pass index
+            if (!BindMeshBufferGenPass(context, m_MeshBufferGenProgram, m_MeshBufferGenPSO, passIndex))
+                return;
             context.GetComputeContext().Dispatch1D(1, 1);
         }
 
@@ -626,9 +869,10 @@ void MeshSorter::RenderMeshedInternal(
             ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 1", context);
             context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
             context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.SetPipelineState(m_UberMeshPSO[passIndex]);
-            context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &inGlobals);
-            context.SetConstants(kCommandConstants, 0, 0, 0);
+            context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+            context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
+            if (!BindVBufferMeshPass(context, m_VBufferMeshProgram[passIndex], m_VBufferMeshPSO[passIndex], inGlobals))
+                return;
             context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
         }
@@ -672,14 +916,14 @@ void MeshSorter::RenderMeshes(
     Renderer::UpdateGlobalDescriptors();
 
     context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
-    context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, s_SamplerHeap.GetHeapPointer());
+    //context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+    //context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, s_SamplerHeap.GetHeapPointer());
 
 	// Must set the Graphics / Compute root signature only * after * setting your descriptor heaps, as the correct heap pointers must be available when root signature is set.
-    context.SetRootSignature(m_RootSig);
+    //context.SetRootSignature(m_RootSig);
 
-	context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &globals);
-    context.SetConstants(kViewModeConstants, (uint32_t)ViewMode);
+	//context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &globals);
+ //   context.SetConstants(kViewModeConstants, (uint32_t)ViewMode);
 
 	if (m_BatchType == kShadows)
 	{

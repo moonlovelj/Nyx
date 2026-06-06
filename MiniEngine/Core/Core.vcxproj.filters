@@ -562,6 +562,10 @@
     <ClCompile Include="TextureManager.cpp" />
     <ClCompile Include="UploadBuffer.cpp" />
     <ClCompile Include="Utility.cpp" />
+    <ClCompile Include="ProgramBinder.cpp" />
+    <ClCompile Include="ProgramManager.cpp" />
+    <ClCompile Include="ProgramReflection.cpp" />
+    <ClCompile Include="ProgramUtils.cpp" />
     <ClCompile Include="Util\CommandLineArg.cpp" />
     <ClCompile Include="IBL.cpp" />
     <ClCompile Include="HierarchicalDepthBuffer.cpp" />
@@ -630,6 +634,12 @@
     <ClInclude Include="PipelineState.h" />
     <ClInclude Include="PixelBuffer.h" />
     <ClInclude Include="PostEffects.h" />
+    <ClInclude Include="Program.h" />
+    <ClInclude Include="ProgramBinder.h" />
+    <ClInclude Include="ProgramDesc.h" />
+    <ClInclude Include="ProgramManager.h" />
+    <ClInclude Include="ProgramReflection.h" />
+    <ClInclude Include="ProgramUtils.h" />
     <ClInclude Include="EngineTuning.h" />
     <ClInclude Include="Display.h" />
     <ClInclude Include="ReadbackBuffer.h" />
@@ -762,4 +772,3 @@
     </Filter>
   </ItemGroup>
 </Project>
-

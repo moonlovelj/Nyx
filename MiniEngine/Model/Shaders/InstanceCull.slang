@@ -1,0 +1,92 @@
+//
+// Copyright (c) Moon. All rights reserved.
+// This code is licensed under the MIT License (MIT).
+// THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
+// ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING ANY
+// IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR
+// A PARTICULAR PURPOSE, OR NON-INFRINGEMENT.
+//
+
+#ifndef INSTANCE_CULL_PASS_INDEX
+#error INSTANCE_CULL_PASS_INDEX must be supplied through ProgramDesc::AddDefine().
+#endif
+
+#include "CullCommon.slang"
+#include "CommonResources.slang"
+
+struct InstanceCullConstants
+{
+    float4x4 ViewProjMatrix;
+    float4x4 PrevViewProjMatrix;
+    float4 HZBSizeAndInv;
+
+    uint ViewportWidth;
+    uint ViewportHeight;
+    uint MaxCommands;
+};
+
+ConstantBuffer<InstanceCullConstants> g_InstanceCull;
+SamplerState g_HZBSampler;
+
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    if (dispatchThreadID.x >= g_InstanceCull.MaxCommands)
+        return;
+
+    StructuredBuffer<DrawItem> drawItems = GetPotentialDrawItemBufferSRV();
+
+    DrawItem item = drawItems[dispatchThreadID.x];
+    InstanceConstant instanceConstant = LoadInstanceConstant(item.InstanceIndex);
+    MeshConstant meshConstant = LoadMeshConstant(instanceConstant.MeshBufferIdx);
+
+#if INSTANCE_CULL_PASS_INDEX == 1
+    const uint passIndex = 1;
+    const float4x4 viewProjMatrix = g_InstanceCull.ViewProjMatrix;
+    Texture2D<float> hzbTexture = GetCurrentSceneHZBSRV();
+#else
+    const uint passIndex = 0;
+    const float4x4 viewProjMatrix = g_InstanceCull.PrevViewProjMatrix;
+    Texture2D<float> hzbTexture = GetPrevSceneHZBSRV();
+#endif
+
+    CullCommonContext cullContext;
+    cullContext.ViewportWidth = g_InstanceCull.ViewportWidth;
+    cullContext.ViewportHeight = g_InstanceCull.ViewportHeight;
+    cullContext.HZBSizeAndInv = g_InstanceCull.HZBSizeAndInv;
+
+    bool visible = EvaluateBoundsVisibility(
+        instanceConstant.BBoxMin,
+        instanceConstant.BBoxMax,
+        meshConstant.WorldMatrix,
+        viewProjMatrix,
+        hzbTexture,
+        g_HZBSampler,
+        cullContext);
+
+    uint waveVisibleCount = WaveActiveCountBits(visible);
+    uint waveBaseIndex = 0;
+    if (WaveIsFirstLane() && waveVisibleCount > 0)
+    {
+        RWStructuredBuffer<QueueState> taskState = GetTaskQueueStateBufferUAV();
+        // Allocate space for the whole wave at once
+        InterlockedAdd(taskState[0].PassState[passIndex].NodeWriteOffset, waveVisibleCount, waveBaseIndex);
+        InterlockedAdd(taskState[0].PassState[passIndex].NodeCount, waveVisibleCount);
+    }
+
+    // Broadcast base index and compute lane offset
+    waveBaseIndex = WaveReadLaneFirst(waveBaseIndex);
+    uint laneOffset = WavePrefixCountBits(visible);
+
+    // Only visible lanes perform the store
+    if (visible)
+    {
+        uint finalIndex = waveBaseIndex + laneOffset;
+
+        RWByteAddressBuffer taskQueue = GetTaskQueueBufferUAV();
+        uint byteOffset = finalIndex * sizeof(DrawItem);
+        taskQueue.Store(byteOffset, item.InstanceIndex);
+        taskQueue.Store(byteOffset + 4, item.NodeIndex);
+    }
+}
