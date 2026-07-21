@@ -35,6 +35,14 @@ public:
     // Create a color buffer from a swap chain buffer.  Unordered access is restricted.
     void CreateFromSwapChain( const std::wstring& Name, ID3D12Resource* BaseResource );
 
+    // Takes ownership of a resource returned by CreatePlacedResource and builds
+    // only the views permitted by its native flags.
+    void CreateFromResource(
+        const std::wstring& Name,
+        ID3D12Resource* Resource,
+        DXGI_FORMAT ViewFormat,
+        D3D12_RESOURCE_STATES CurrentState = D3D12_RESOURCE_STATE_COMMON);
+
     // Create a color buffer.  If an address is supplied, memory will not be allocated.
     // The vmem address allows you to alias buffers (which can be especially useful for
     // reusing ESRAM across a frame.)

@@ -533,6 +533,15 @@
     <ClCompile Include="GraphicsCommon.cpp" />
     <ClCompile Include="GraphicsCore.cpp" />
     <ClCompile Include="GraphRenderer.cpp" />
+    <ClCompile Include="RenderGraph.cpp" />
+    <ClCompile Include="RenderGraphD3D12.cpp" />
+    <ClCompile Include="RenderGraphD3D12Allocator.cpp" />
+    <ClCompile Include="RenderGraphD3D12Executor.cpp" />
+    <ClCompile Include="RenderGraphCompiler.cpp" />
+    <ClCompile Include="RenderGraphDebug.cpp" />
+    <ClCompile Include="RenderGraphExecution.cpp" />
+    <ClCompile Include="RenderGraphInspection.cpp" />
+    <ClCompile Include="RenderGraphPass.cpp" />
     <ClCompile Include="ImGuiManager.cpp" />
     <ClCompile Include="ImageScaling.cpp" />
     <ClCompile Include="LinearAllocator.cpp" />
@@ -576,6 +585,7 @@
     <ClCompile Include="..\ThirdParty\imgui\imgui_widgets.cpp" />
     <ClCompile Include="..\ThirdParty\imgui\backends\imgui_impl_win32.cpp" />
     <ClCompile Include="..\ThirdParty\imgui\backends\imgui_impl_dx12.cpp" />
+    <ClCompile Include="..\ThirdParty\D3D12MemoryAllocator\src\D3D12MemAlloc.cpp" />
     <ClCompile Include="GameInput.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -609,6 +619,14 @@
     <ClInclude Include="GraphicsCommon.h" />
     <ClInclude Include="GraphicsCore.h" />
     <ClInclude Include="GraphRenderer.h" />
+    <ClInclude Include="RenderGraph.h" />
+    <ClInclude Include="RenderGraphD3D12.h" />
+    <ClInclude Include="RenderGraphD3D12Allocator.h" />
+    <ClInclude Include="RenderGraphDebug.h" />
+    <ClInclude Include="RenderGraph.inl" />
+    <ClInclude Include="RenderGraphInternal.h" />
+    <ClInclude Include="RenderGraphPrivate.h" />
+    <ClInclude Include="RenderGraphViewerTemplate.h" />
     <ClInclude Include="ImGuiManager.h" />
     <ClInclude Include="Hash.h" />
     <ClInclude Include="ImageScaling.h" />

@@ -470,14 +470,14 @@ void CommandContext::InsertUAVBarrier(GpuResource& Resource, bool FlushImmediate
         FlushResourceBarriers();
 }
 
-void CommandContext::InsertAliasBarrier(GpuResource& Before, GpuResource& After, bool FlushImmediate)
+void CommandContext::InsertAliasBarrier(GpuResource* Before, GpuResource& After, bool FlushImmediate)
 {
     ASSERT(m_NumBarriersToFlush < 16, "Exceeded arbitrary limit on buffered barriers");
     D3D12_RESOURCE_BARRIER& BarrierDesc = m_ResourceBarrierBuffer[m_NumBarriersToFlush++];
 
     BarrierDesc.Type = D3D12_RESOURCE_BARRIER_TYPE_ALIASING;
     BarrierDesc.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-    BarrierDesc.Aliasing.pResourceBefore = Before.GetResource();
+    BarrierDesc.Aliasing.pResourceBefore = Before != nullptr ? Before->GetResource() : nullptr;
     BarrierDesc.Aliasing.pResourceAfter = After.GetResource();
 
     if (FlushImmediate)

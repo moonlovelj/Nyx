@@ -32,6 +32,7 @@
 #include "GraphRenderer.h"
 #include "TemporalEffects.h"
 #include "Display.h"
+#include "RenderGraphD3D12Allocator.h"
 
 #pragma comment(lib, "d3d12.lib") 
 
@@ -423,6 +424,7 @@ void Graphics::Initialize(bool RequireDXRSupport)
 void Graphics::Shutdown( void )
 {
     g_CommandManager.IdleGPU();
+    RenderGraph::Detail::ShutdownD3D12TransientAllocator();
 
     CommandContext::DestroyAllContexts();
     g_CommandManager.Shutdown();

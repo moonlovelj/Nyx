@@ -1,0 +1,2 @@
+Vendored from GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator
+Commit: 1d86c1130f61453634b1df85782e1fecfd59a525

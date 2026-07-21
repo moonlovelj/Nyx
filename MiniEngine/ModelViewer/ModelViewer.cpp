@@ -339,7 +339,13 @@ void ModelViewer::RenderScene( void )
                 sorter.RenderMeshes(MeshSorter::kOpaque, gfxContext, globals);
             }
 
-            Renderer::DrawSkybox(gfxContext, m_Camera, viewport, scissor);
+            Renderer::DrawSkybox(
+                gfxContext,
+                m_Camera,
+                viewport,
+                scissor,
+                { RenderGraph::Usage::RenderTarget, RenderGraph::ShaderStage::None },
+                { RenderGraph::Usage::DepthWrite, RenderGraph::ShaderStage::None });
 
             sorter.RenderMeshes(MeshSorter::kTransparent, gfxContext, globals);
         }

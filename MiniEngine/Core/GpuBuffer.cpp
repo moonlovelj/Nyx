@@ -122,6 +122,30 @@ void GpuBuffer::CreatePlaced(const std::wstring& name, ID3D12Heap* pBackingHeap,
 
 }
 
+void GpuBuffer::CreateFromResource(
+    const std::wstring& name,
+    ID3D12Resource* resource,
+    uint32_t NumElements,
+    uint32_t ElementSize,
+    D3D12_RESOURCE_STATES CurrentState)
+{
+    Destroy();
+    m_ElementCount = NumElements;
+    m_ElementSize = ElementSize;
+    m_BufferSize = static_cast<size_t>(NumElements) * ElementSize;
+    m_pResource.Attach(resource);
+    m_UsageState = CurrentState;
+    m_GpuVirtualAddress = resource->GetGPUVirtualAddress();
+
+#ifndef RELEASE
+    resource->SetName(name.c_str());
+#else
+    (name);
+#endif
+
+    CreateDerivedViews();
+}
+
 void GpuBuffer::Create(const std::wstring& name, uint32_t NumElements, uint32_t ElementSize, EsramAllocator& Allocator, const void* initialData)
 {
     (void)Allocator;
@@ -274,4 +298,3 @@ const D3D12_CPU_DESCRIPTOR_HANDLE& StructuredBuffer::GetCounterUAV(CommandContex
     Context.TransitionResource(m_CounterBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     return m_CounterBuffer.GetUAV();
 }
-

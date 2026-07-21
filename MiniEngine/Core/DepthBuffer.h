@@ -31,6 +31,13 @@ public:
         m_hStencilSRV.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
     }
 
+    // Takes ownership of a placed depth resource and creates its DSV/SRV views.
+    void CreateFromResource(
+        const std::wstring& Name,
+        ID3D12Resource* Resource,
+        DXGI_FORMAT ViewFormat,
+        D3D12_RESOURCE_STATES CurrentState = D3D12_RESOURCE_STATE_COMMON);
+
     // Create a depth buffer.  If an address is supplied, memory will not be allocated.
     // The vmem address allows you to alias buffers (which can be especially useful for
     // reusing ESRAM across a frame.)

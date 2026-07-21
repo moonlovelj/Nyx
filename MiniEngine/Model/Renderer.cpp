@@ -493,35 +493,146 @@ void Renderer::Shutdown(void)
 	GPUDrivenDrawIndirectCommandSignature.Destroy();
 }
 
-void Renderer::DrawSkybox( GraphicsContext& gfxContext, const Camera& Camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor )
+namespace
 {
-    ScopedTimer _prof(L"Draw Skybox", gfxContext);
+    struct SkyboxPassData
+    {
+        RenderGraph::TextureHandle SceneColor;
+        RenderGraph::TextureHandle SceneDepth;
+    };
 
-    ASSERT(m_SkyboxProgram != nullptr);
-    if (!m_SkyboxProgram)
+    RenderGraph::TextureDesc MakeRenderGraphTextureDesc(
+        GpuResource& resource,
+        RenderGraph::ResourceFlags flags)
+    {
+        ASSERT(resource.GetResource() != nullptr);
+        const D3D12_RESOURCE_DESC nativeDesc = resource.GetResource()->GetDesc();
+        ASSERT(nativeDesc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D);
+        ASSERT(nativeDesc.Width <= UINT32_MAX);
+
+        RenderGraph::TextureDesc desc;
+        desc.Width = static_cast<uint32_t>(nativeDesc.Width);
+        desc.Height = nativeDesc.Height;
+        desc.DepthOrArraySize = nativeDesc.DepthOrArraySize;
+        desc.MipLevels = nativeDesc.MipLevels;
+        desc.SampleCount = static_cast<uint16_t>(nativeDesc.SampleDesc.Count);
+        desc.Format = static_cast<uint32_t>(nativeDesc.Format);
+        desc.Flags = flags;
+        return desc;
+    }
+
+    void RecordSkyboxCommands(
+        GraphicsContext& gfxContext,
+        ColorBuffer& sceneColor,
+        DepthBuffer& sceneDepth,
+        const Camera& camera,
+        const D3D12_VIEWPORT& viewport,
+        const D3D12_RECT& scissor)
+    {
+        ScopedTimer _prof(L"Draw Skybox", gfxContext);
+
+        ASSERT(m_SkyboxProgram != nullptr);
+        if (!m_SkyboxProgram)
+            return;
+
+        const Matrix4 projInverse = Invert(camera.GetProjMatrix());
+        const Matrix3 viewInverse = Invert(camera.GetViewMatrix()).Get3x3();
+
+        gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+        gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
+
+        ProgramBinder binder(*m_SkyboxProgram, gfxContext);
+        binder.SetRootSignature();
+        gfxContext.SetPipelineState(m_SkyboxPSO);
+
+        gfxContext.SetRenderTarget(sceneColor.GetRTV(), sceneDepth.GetDSV_DepthReadOnly());
+        gfxContext.SetViewportAndScissor(viewport, scissor);
+
+        binder["g_SkyboxVS"]["ProjInverse"].Set(projInverse);
+        binder["g_SkyboxVS"]["ViewInverse"].Set(viewInverse);
+        SetCommonResources(binder);
+        binder.Apply();
+
+        gfxContext.Draw(3);
+    }
+
+    void ReportSkyboxRenderGraphFailure(const RenderGraph::Graph& graph, const char* phase)
+    {
+        Utility::Printf("Skybox Render Graph %s failed.\n", phase);
+        for (const RenderGraph::Diagnostic& diagnostic : graph.CollectDiagnostics())
+            Utility::Printf("  %s\n", diagnostic.Message.c_str());
+        ASSERT(false, "Skybox Render Graph %s failed.", phase);
+    }
+}
+
+void Renderer::DrawSkybox(
+    GraphicsContext& gfxContext,
+    const Camera& camera,
+    const D3D12_VIEWPORT& viewport,
+    const D3D12_RECT& scissor,
+    RenderGraph::ResourceState sceneColorInitialState,
+    RenderGraph::ResourceState sceneDepthInitialState)
+{
+    RenderGraph::Graph graph("Skybox");
+    const RenderGraph::TextureHandle sceneColor = graph.ImportTexture(
+        "Scene Color",
+        MakeRenderGraphTextureDesc(
+            g_SceneColorBuffer,
+            RenderGraph::ResourceFlags::AllowRenderTarget |
+                RenderGraph::ResourceFlags::AllowUnorderedAccess),
+        g_SceneColorBuffer,
+        sceneColorInitialState.UsageType,
+        sceneColorInitialState.Stages);
+    const RenderGraph::TextureHandle sceneDepth = graph.ImportTexture(
+        "Scene Depth",
+        MakeRenderGraphTextureDesc(
+            g_SceneDepthBuffer,
+            RenderGraph::ResourceFlags::AllowDepthStencil),
+        g_SceneDepthBuffer,
+        sceneDepthInitialState.UsageType,
+        sceneDepthInitialState.Stages);
+
+    const SkyboxPassData skybox = graph.AddPass<SkyboxPassData>(
+        "Skybox",
+        [sceneColor, sceneDepth](RenderGraph::PassBuilder& builder, SkyboxPassData& data)
+        {
+            data.SceneColor = builder.ReadWriteRTV(sceneColor);
+            data.SceneDepth = builder.ReadDepth(sceneDepth);
+        },
+        [&camera, viewport, scissor](
+            const SkyboxPassData& data,
+            RenderGraph::PassContext& context)
+        {
+            CommandContext* commandContext = context.GetCommandContext();
+            ASSERT(commandContext != nullptr);
+            if (commandContext == nullptr)
+                return;
+
+            ColorBuffer* sceneColorResource =
+                context.GetResource<RenderGraph::ResourceKind::Texture, ColorBuffer>(data.SceneColor);
+            DepthBuffer* sceneDepthResource =
+                context.GetResource<RenderGraph::ResourceKind::Texture, DepthBuffer>(data.SceneDepth);
+            ASSERT(sceneColorResource != nullptr && sceneDepthResource != nullptr);
+            if (sceneColorResource == nullptr || sceneDepthResource == nullptr)
+                return;
+
+            RecordSkyboxCommands(
+                commandContext->GetGraphicsContext(),
+                *sceneColorResource,
+                *sceneDepthResource,
+                camera,
+                viewport,
+                scissor);
+        });
+    graph.Export(skybox.SceneColor, RenderGraph::Usage::RenderTarget);
+
+    if (!graph.Compile().Succeeded)
+    {
+        ReportSkyboxRenderGraphFailure(graph, "compile");
         return;
-
-    const Matrix4 projInverse = Invert(Camera.GetProjMatrix());
-    const Matrix3 viewInverse = Invert(Camera.GetViewMatrix()).Get3x3();
-
-    gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
-    gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
-
-    ProgramBinder binder(*m_SkyboxProgram, gfxContext);
-    binder.SetRootSignature();
-    gfxContext.SetPipelineState(m_SkyboxPSO);
-
-    gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_READ);
-    gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
-    gfxContext.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV_DepthReadOnly());
-    gfxContext.SetViewportAndScissor(viewport, scissor);
-
-    binder["g_SkyboxVS"]["ProjInverse"].Set(projInverse);
-    binder["g_SkyboxVS"]["ViewInverse"].Set(viewInverse);
-    SetCommonResources(binder);
-    binder.Apply();
-
-    gfxContext.Draw(3);
+    }
+    if (!graph.Execute(gfxContext))
+        ReportSkyboxRenderGraphFailure(graph, "execution");
 }
 
 void Renderer::InstanceCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, uint32_t cullPassIdx)

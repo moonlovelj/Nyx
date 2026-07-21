@@ -120,6 +120,10 @@ public:
         return m_CommandList;
     }
 
+    D3D12_COMMAND_LIST_TYPE GetCommandListType() const noexcept {
+        return m_Type;
+    }
+
     void CopyBuffer( GpuResource& Dest, GpuResource& Src );
     void CopyBufferRegion( GpuResource& Dest, size_t DestOffset, GpuResource& Src, size_t SrcOffset, size_t NumBytes );
     void CopySubresource(GpuResource& Dest, UINT DestSubIndex, GpuResource& Src, UINT SrcSubIndex);
@@ -147,7 +151,7 @@ public:
     void TransitionResource(GpuResource& Resource, D3D12_RESOURCE_STATES NewState, bool FlushImmediate = false);
     void BeginResourceTransition(GpuResource& Resource, D3D12_RESOURCE_STATES NewState, bool FlushImmediate = false);
     void InsertUAVBarrier(GpuResource& Resource, bool FlushImmediate = false);
-    void InsertAliasBarrier(GpuResource& Before, GpuResource& After, bool FlushImmediate = false);
+    void InsertAliasBarrier(GpuResource* Before, GpuResource& After, bool FlushImmediate = false);
     inline void FlushResourceBarriers(void);
 
     void InsertTimeStamp( ID3D12QueryHeap* pQueryHeap, uint32_t QueryIdx );

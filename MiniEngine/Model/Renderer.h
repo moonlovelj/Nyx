@@ -17,6 +17,7 @@
 #include "../Core/VectorMath.h"
 #include "../Core/Camera.h"
 #include "../Core/CommandContext.h"
+#include "../Core/RenderGraph.h"
 #include "../Core/UploadBuffer.h"
 #include "../Core/TextureManager.h"
 #include "../Core/HierarchicalDepthBuffer.h"
@@ -70,7 +71,15 @@ namespace Renderer
     void SetIBLTextures();
     void SetIBLBias(float LODBias);
     void UpdateGlobalDescriptors(void);
-    void DrawSkybox( GraphicsContext& gfxContext, const Camera& camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor );
+    // During incremental migration, the caller declares the states left by the
+    // preceding non-Render-Graph passes. Skybox transitions are owned by the graph.
+    void DrawSkybox(
+        GraphicsContext& gfxContext,
+        const Camera& camera,
+        const D3D12_VIEWPORT& viewport,
+        const D3D12_RECT& scissor,
+        RenderGraph::ResourceState sceneColorInitialState,
+        RenderGraph::ResourceState sceneDepthInitialState);
 
 	void InstanceCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, uint32_t cullPassIdx);
 	void DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, const BaseCamera* camera,

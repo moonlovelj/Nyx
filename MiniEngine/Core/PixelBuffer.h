@@ -37,6 +37,8 @@ public:
     // Note that data is preceded by a 16-byte header:  { DXGI_FORMAT, Pitch (in pixels), Width (in pixels), Height }
     void ExportToFile( const std::wstring& FilePath );
 
+    static DXGI_FORMAT GetBaseFormat( DXGI_FORMAT Format );
+
 protected:
 
     D3D12_RESOURCE_DESC DescribeTex2D(uint32_t Width, uint32_t Height, uint32_t DepthOrArraySize, uint32_t NumMips, DXGI_FORMAT Format, UINT Flags);
@@ -49,7 +51,6 @@ protected:
     void CreateTextureResource( ID3D12Device* Device, const std::wstring& Name, const D3D12_RESOURCE_DESC& ResourceDesc,
         D3D12_CLEAR_VALUE ClearValue, EsramAllocator& Allocator );
 
-    static DXGI_FORMAT GetBaseFormat( DXGI_FORMAT Format );
     static DXGI_FORMAT GetUAVFormat( DXGI_FORMAT Format );
     static DXGI_FORMAT GetDSVFormat( DXGI_FORMAT Format );
     static DXGI_FORMAT GetDepthFormat( DXGI_FORMAT Format );

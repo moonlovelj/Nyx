@@ -70,32 +70,36 @@ void ColorBuffer::CreateDerivedViews(ID3D12Device* Device, DXGI_FORMAT Format, u
         SRVDesc.Texture2D.MostDetailedMip = 0;
     }
 
-    if (m_SRVHandle.ptr == D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN)
-    {
-        m_RTVHandle = Graphics::AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-        m_SRVHandle = Graphics::AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
-        if (isCubeMap)
-        {
-            m_ArraySRVHandle = Graphics::AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-        }
-    }
-
     ID3D12Resource* Resource = m_pResource.Get();
+    const D3D12_RESOURCE_FLAGS resourceFlags = Resource->GetDesc().Flags;
 
     // Create the render target view
-    Device->CreateRenderTargetView(Resource, &RTVDesc, m_RTVHandle);
+    if ((resourceFlags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0)
+    {
+        if (m_RTVHandle.ptr == D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN)
+            m_RTVHandle = Graphics::AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+        Device->CreateRenderTargetView(Resource, &RTVDesc, m_RTVHandle);
+    }
 
     // Create the shader resource view
-    Device->CreateShaderResourceView(Resource, &SRVDesc, m_SRVHandle);
-
-    if (isCubeMap)
+    if ((resourceFlags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE) == 0)
     {
+        if (m_SRVHandle.ptr == D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN)
+            m_SRVHandle = Graphics::AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        Device->CreateShaderResourceView(Resource, &SRVDesc, m_SRVHandle);
+    }
+
+    if (isCubeMap &&
+        (resourceFlags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE) == 0)
+    {
+        if (m_ArraySRVHandle.ptr == D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN)
+            m_ArraySRVHandle = Graphics::AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
         Device->CreateShaderResourceView(Resource, &SRVDesc, m_ArraySRVHandle);
     }
 
-    if (m_FragmentCount > 1)
+    if (m_FragmentCount > 1 ||
+        (resourceFlags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) == 0)
         return;
 
     // Create the UAVs for each mip level (RWTexture2D)
@@ -108,6 +112,25 @@ void ColorBuffer::CreateDerivedViews(ID3D12Device* Device, DXGI_FORMAT Format, u
 
         UAVDesc.Texture2D.MipSlice++;
     }
+}
+
+void ColorBuffer::CreateFromResource(
+    const std::wstring& Name,
+    ID3D12Resource* Resource,
+    DXGI_FORMAT ViewFormat,
+    D3D12_RESOURCE_STATES CurrentState)
+{
+    Destroy();
+    const D3D12_RESOURCE_DESC desc = Resource->GetDesc();
+    m_FragmentCount = desc.SampleDesc.Count;
+    m_SampleCount = desc.SampleDesc.Count;
+    AssociateWithResource(Graphics::g_Device, Name, Resource, CurrentState);
+    m_Format = ViewFormat;
+    CreateDerivedViews(
+        Graphics::g_Device,
+        ViewFormat,
+        desc.DepthOrArraySize,
+        desc.MipLevels);
 }
 
 void ColorBuffer::CreateFromSwapChain( const std::wstring& Name, ID3D12Resource* BaseResource )

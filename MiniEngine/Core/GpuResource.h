@@ -35,7 +35,7 @@ public:
     {
     }
 
-    ~GpuResource() { Destroy(); }
+    virtual ~GpuResource() { Destroy(); }
 
     virtual void Destroy()
     {
@@ -55,6 +55,14 @@ public:
     D3D12_GPU_VIRTUAL_ADDRESS GetGpuVirtualAddress() const { return m_GpuVirtualAddress; }
 
     uint32_t GetVersionID() const { return m_VersionID; }
+
+    // RenderGraph uses these only to validate an imported resource before it
+    // records any commands. CommandContext remains the sole state mutator.
+    D3D12_RESOURCE_STATES GetUsageState() const { return m_UsageState; }
+    bool HasPendingTransition() const
+    {
+        return m_TransitioningState != static_cast<D3D12_RESOURCE_STATES>(-1);
+    }
 
 protected:
 

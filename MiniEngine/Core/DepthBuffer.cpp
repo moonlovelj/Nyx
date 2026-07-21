@@ -19,6 +19,18 @@
 
 using namespace Graphics;
 
+void DepthBuffer::CreateFromResource(
+    const std::wstring& Name,
+    ID3D12Resource* Resource,
+    DXGI_FORMAT ViewFormat,
+    D3D12_RESOURCE_STATES CurrentState)
+{
+    Destroy();
+    AssociateWithResource(Graphics::g_Device, Name, Resource, CurrentState);
+    m_Format = ViewFormat;
+    CreateDerivedViews(Graphics::g_Device, ViewFormat);
+}
+
 void DepthBuffer::Create( const std::wstring& Name, uint32_t Width, uint32_t Height, DXGI_FORMAT Format, D3D12_GPU_VIRTUAL_ADDRESS VidMemPtr )
 {
     Create(Name, Width, Height, 1, Format, VidMemPtr);
@@ -48,10 +60,11 @@ void DepthBuffer::Create( const std::wstring& Name, uint32_t Width, uint32_t Hei
 void DepthBuffer::CreateDerivedViews( ID3D12Device* Device, DXGI_FORMAT Format )
 {
     ID3D12Resource* Resource = m_pResource.Get();
+    const D3D12_RESOURCE_DESC resourceDesc = Resource->GetDesc();
 
     D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc;
     dsvDesc.Format = GetDSVFormat(Format);
-    if (Resource->GetDesc().SampleDesc.Count == 1)
+    if (resourceDesc.SampleDesc.Count == 1)
     {
         dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
         dsvDesc.Texture2D.MipSlice = 0;
@@ -93,6 +106,9 @@ void DepthBuffer::CreateDerivedViews( ID3D12Device* Device, DXGI_FORMAT Format )
         m_hDSV[2] = m_hDSV[0];
         m_hDSV[3] = m_hDSV[1];
     }
+
+    if ((resourceDesc.Flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE) != 0)
+        return;
 
     if (m_hDepthSRV.ptr == D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN)
         m_hDepthSRV = Graphics::AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);

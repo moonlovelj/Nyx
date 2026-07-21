@@ -628,7 +628,20 @@ void SceneViewer::RenderScene( void )
 
             Lighting::RenderDeferredLighting(gfxContext, globals);
 
-            Renderer::DrawSkybox(gfxContext, m_Camera, viewport, scissor);
+            const RenderGraph::ResourceState skyboxDepthInitialState = XeGTAO::Enable
+                ? RenderGraph::ResourceState{
+                      RenderGraph::Usage::ShaderResource,
+                      RenderGraph::ShaderStage::Compute }
+                : RenderGraph::ResourceState{
+                      RenderGraph::Usage::DepthWrite,
+                      RenderGraph::ShaderStage::None };
+            Renderer::DrawSkybox(
+                gfxContext,
+                m_Camera,
+                viewport,
+                scissor,
+                { RenderGraph::Usage::UnorderedAccess, RenderGraph::ShaderStage::Compute },
+                skyboxDepthInitialState);
 
             {
                 ScopedTimer _prof(L"Draw Transparent", gfxContext);
