@@ -40,14 +40,5 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
-    <None Include="Shaders\ProgramDescriptorHandleTest.slang">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="Shaders\ProgramSmokeTest.slang">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="Shaders\ProgramValuePackingTest.slang">
-      <Filter>Shaders</Filter>
-    </None>
   </ItemGroup>
 </Project>

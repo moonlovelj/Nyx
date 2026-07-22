@@ -5,6 +5,8 @@ VisualStudioVersion = 17.14.37314.3 d17.14
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Nyx", "Nyx.vcxproj", "{9DE1FF75-DE96-45AE-96A6-5830CB3F87BE}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Tests", "..\Tests\Tests.vcxproj", "{A3FBF496-4D1B-4E1B-82BA-60F31D4B6D9A}"
+EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Core", "..\Core\Core.vcxproj", "{86A58508-0D6A-4786-A32F-01A301FDC6F3}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Model", "..\Model\Model.vcxproj", "{5D3AEEFB-8789-48E5-9BD9-09C667052D09}"
@@ -24,6 +26,12 @@ Global
 		{9DE1FF75-DE96-45AE-96A6-5830CB3F87BE}.Profile|Windows.Build.0 = Profile|x64
 		{9DE1FF75-DE96-45AE-96A6-5830CB3F87BE}.Release|Windows.ActiveCfg = Release|x64
 		{9DE1FF75-DE96-45AE-96A6-5830CB3F87BE}.Release|Windows.Build.0 = Release|x64
+		{A3FBF496-4D1B-4E1B-82BA-60F31D4B6D9A}.Debug|Windows.ActiveCfg = Debug|x64
+		{A3FBF496-4D1B-4E1B-82BA-60F31D4B6D9A}.Debug|Windows.Build.0 = Debug|x64
+		{A3FBF496-4D1B-4E1B-82BA-60F31D4B6D9A}.Profile|Windows.ActiveCfg = Profile|x64
+		{A3FBF496-4D1B-4E1B-82BA-60F31D4B6D9A}.Profile|Windows.Build.0 = Profile|x64
+		{A3FBF496-4D1B-4E1B-82BA-60F31D4B6D9A}.Release|Windows.ActiveCfg = Release|x64
+		{A3FBF496-4D1B-4E1B-82BA-60F31D4B6D9A}.Release|Windows.Build.0 = Release|x64
 		{86A58508-0D6A-4786-A32F-01A301FDC6F3}.Debug|Windows.ActiveCfg = Debug|x64
 		{86A58508-0D6A-4786-A32F-01A301FDC6F3}.Debug|Windows.Build.0 = Debug|x64
 		{86A58508-0D6A-4786-A32F-01A301FDC6F3}.Profile|Windows.ActiveCfg = Profile|x64

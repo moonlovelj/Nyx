@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{126FBA34-BCA6-4B6E-8BD2-0DB9C84801D7}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx</Extensions>
+    </Filter>
+    <Filter Include="Shaders">
+      <UniqueIdentifier>{F07CF76A-1B43-4AB5-9EA9-50252B31135F}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Shaders\ProgramContextSwitchTest.slang"><Filter>Shaders</Filter></None>
+    <None Include="Shaders\ProgramDescriptorExecutionTest.slang"><Filter>Shaders</Filter></None>
+    <None Include="Shaders\ProgramDescriptorHandleTest.slang"><Filter>Shaders</Filter></None>
+    <None Include="Shaders\ProgramGraphicsBinderTest.slang"><Filter>Shaders</Filter></None>
+    <None Include="Shaders\ProgramRootSignatureLayoutTest.slang"><Filter>Shaders</Filter></None>
+    <None Include="Shaders\ProgramRootSignatureLimitTest.slang"><Filter>Shaders</Filter></None>
+    <None Include="Shaders\ProgramSmokeTest.slang"><Filter>Shaders</Filter></None>
+    <None Include="Shaders\ProgramValuePackingTest.slang"><Filter>Shaders</Filter></None>
+  </ItemGroup>
+</Project>

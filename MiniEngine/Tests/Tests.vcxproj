@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
@@ -15,12 +15,12 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <RootNamespace>Nyx</RootNamespace>
-    <ProjectGuid>{9DE1FF75-DE96-45AE-96A6-5830CB3F87BE}</ProjectGuid>
+    <RootNamespace>Tests</RootNamespace>
+    <ProjectGuid>{A3FBF496-4D1B-4E1B-82BA-60F31D4B6D9A}</ProjectGuid>
     <DefaultLanguage>en-US</DefaultLanguage>
     <Keyword>Win32Proj</Keyword>
-    <ProjectName>Nyx</ProjectName>
-    <PlatformToolset>v142</PlatformToolset>
+    <ProjectName>Tests</ProjectName>
+    <PlatformToolset>v143</PlatformToolset>
     <MinimumVisualStudioVersion>16.0</MinimumVisualStudioVersion>
     <TargetRuntime>Native</TargetRuntime>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
@@ -39,7 +39,9 @@
     <Import Project="..\PropertySheets\Build.props" />
     <Import Project="..\PropertySheets\Desktop.props" />
   </ImportGroup>
-  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Label="UserMacros">
+    <DxcRuntimeDir>$(ProjectDir)..\ThirdParty\dxc_2026_05_27\bin\$(Platform)\</DxcRuntimeDir>
+  </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
@@ -49,41 +51,55 @@
     </ClCompile>
     <Link>
       <AdditionalOptions Condition="'$(Configuration)'=='Debug'">/nodefaultlib:MSVCRT %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)
-	  </AdditionalDependencies>
+      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../Core/Core.vcxproj">
+    <ProjectReference Include="..\Core\Core.vcxproj">
       <Project>{86A58508-0D6A-4786-A32F-01A301FDC6F3}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <Image Include="Logo.png" />
-    <Image Include="Logo44.png" />
-    <Image Include="SmallLogo.png" />
-    <Image Include="SplashScreen.png" />
-    <Image Include="StoreLogo.png" />
-    <Image Include="WideLogo.png" />
-    <None Include="packages.config" />
+    <None Include="Shaders\ProgramContextSwitchTest.slang" />
+    <None Include="Shaders\ProgramDescriptorExecutionTest.slang" />
+    <None Include="Shaders\ProgramDescriptorHandleTest.slang" />
+    <None Include="Shaders\ProgramGraphicsBinderTest.slang" />
+    <None Include="Shaders\ProgramRootSignatureLayoutTest.slang" />
+    <None Include="Shaders\ProgramRootSignatureLimitTest.slang" />
+    <None Include="Shaders\ProgramSmokeTest.slang" />
+    <None Include="Shaders\ProgramValuePackingTest.slang" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ItemDefinitionGroup>
     <Link>
-      <AdditionalLibraryDirectories>..\..\Packages\zlib-msvc-x64.1.2.11.8900\build\native\lib_release;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>zlibstatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\ThirdParty\slang-2026.10\lib;..\..\Packages\zlib-msvc-x64.1.2.11.8900\build\native\lib_release;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>slang.lib;zlibstatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>copy /Y "$(ProjectDir)..\ThirdParty\slang-2026.10\bin\slang.dll" "$(OutDir)"
+copy /Y "$(ProjectDir)..\ThirdParty\slang-2026.10\bin\slang-compiler.dll" "$(OutDir)"
+copy /Y "$(ProjectDir)..\ThirdParty\slang-2026.10\bin\slang-rt.dll" "$(OutDir)"
+xcopy /Y /D /E /I "$(ProjectDir)..\ThirdParty\slang-2026.10\bin\slang-standard-module-2026.10" "$(OutDir)slang-standard-module-2026.10"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ImportGroup Label="ExtensionTargets">
     <Import Project="..\..\Packages\WinPixEventRuntime.1.0.210209001\build\WinPixEventRuntime.targets" Condition="Exists('..\..\Packages\WinPixEventRuntime.1.0.210209001\build\WinPixEventRuntime.targets')" />
   </ImportGroup>
+  <Target Name="CopyDxcRuntimeDependencies" AfterTargets="Build">
+    <ItemGroup>
+      <DxcRuntimeDependency Include="$(DxcRuntimeDir)dxcompiler.dll" />
+      <DxcRuntimeDependency Include="$(DxcRuntimeDir)dxil.dll" />
+    </ItemGroup>
+    <Error Text="DXC runtime DLLs were not found in $(DxcRuntimeDir). Slang DXIL emission requires dxcompiler.dll and dxil.dll." Condition="!Exists('$(DxcRuntimeDir)dxcompiler.dll') Or !Exists('$(DxcRuntimeDir)dxil.dll')" />
+    <Copy SourceFiles="@(DxcRuntimeDependency)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
-      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
+      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them. The missing file is {0}.</ErrorText>
     </PropertyGroup>
     <Error Condition="!Exists('..\..\Packages\zlib-msvc-x64.1.2.11.8900\build\native\zlib-msvc-x64.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\Packages\zlib-msvc-x64.1.2.11.8900\build\native\zlib-msvc-x64.targets'))" />
     <Error Condition="!Exists('..\..\Packages\WinPixEventRuntime.1.0.210209001\build\WinPixEventRuntime.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\Packages\WinPixEventRuntime.1.0.210209001\build\WinPixEventRuntime.targets'))" />

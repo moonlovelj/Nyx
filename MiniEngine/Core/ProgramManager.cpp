@@ -17,6 +17,10 @@
 #include <mutex>
 #include <unordered_map>
 
+#ifndef NYX_DUMP_PROGRAM_REFLECTION
+#define NYX_DUMP_PROGRAM_REFLECTION 0
+#endif
+
 using Slang::ComPtr;
 
 struct ProgramManager::SessionState
@@ -290,7 +294,7 @@ namespace
         std::string& buildLog)
     {
         (void)usesDescriptorHeapIndexing;
-#ifdef _DEBUG
+#if defined(_DEBUG) && NYX_DUMP_PROGRAM_REFLECTION
         AppendLine(buildLog, "[ProgramReflection] Reflected physical bindings:");
         if (usesDescriptorHeapIndexing)
         {
@@ -505,7 +509,7 @@ namespace
             "Program RS: " + Utility::RemoveBasePath(desc.GetSourceFile());
         D3D12_ROOT_SIGNATURE_FLAGS rootSignatureFlags = desc.GetRootSignatureFlags();
 
-#ifdef _DEBUG
+#if defined(_DEBUG) && NYX_DUMP_PROGRAM_REFLECTION
         Utility::Printf("[ProgramReflection] Creating root signature '%s':\n", rootSignatureName.c_str());
         if (rootSignatureFlags != D3D12_ROOT_SIGNATURE_FLAG_NONE)
         {
@@ -760,7 +764,7 @@ std::shared_ptr<Program> ProgramManager::BuildProgram(const ProgramDesc& desc, s
             code->getBufferSize());
     }
 
-#ifdef _DEBUG
+#if defined(_DEBUG) && NYX_DUMP_PROGRAM_REFLECTION
     AppendReflectionDebugLog(reflection, buildLog);
 #endif
     program->SetBuildLog(buildLog);
