@@ -62,18 +62,26 @@ namespace
         }
     }
 
-    void SetCommonResources(ProgramBinder& binder, uint32_t frameIndexMod2 = 0)
+    //void SetCommonResources(ProgramBinder& binder, uint32_t frameIndexMod2 = 0)
+    //{
+    //    ProgramVar commonResources = binder["g_CommonResources"];
+    //    commonResources["BindlessResourcesBaseIndex"].Set(Renderer::GetBindlessResourcesBaseOffset());
+    //    commonResources["FrameIndexMod2"].Set(frameIndexMod2);
+    //}
+
+    void SetCommonResources(ProgramBinder& binder, const FrameConstants& frame)
     {
         ProgramVar commonResources = binder["g_CommonResources"];
-        commonResources["BindlessResourcesBaseIndex"].Set(Renderer::GetBindlessResourcesBaseOffset());
-        commonResources["FrameIndexMod2"].Set(frameIndexMod2);
+        commonResources["BindlessResourcesBaseIndex"].Set(frame.BindlessResourcesBaseIndex);
+        commonResources["FrameIndexMod2"].Set(frame.FrameIndexMod2);
     }
 
     bool BindVBufferMeshPass(
         GraphicsContext& context,
         const std::shared_ptr<Program>& program,
         const MeshShaderPSO& pso,
-        const GlobalConstants& inGlobals)
+        const RenderView& view,
+        const FrameConstants& frame)
     {
         ASSERT(program != nullptr);
         if (!program)
@@ -83,11 +91,12 @@ namespace
         binder.SetRootSignature();
         context.SetPipelineState(pso);
 
+        const ViewConstants& viewConstants = view.GetConstants();
         ProgramVar constants = binder["g_VBufferMesh"];
-        constants["ViewProjMatrix"].Set(inGlobals.ViewProjMatrix);
-        constants["ViewportWidth"].Set(inGlobals.ViewportWidth);
-        constants["ViewportHeight"].Set(inGlobals.ViewportHeight);
-        SetCommonResources(binder, inGlobals.FrameIndexMod2);
+        constants["ViewProjMatrix"].Set(viewConstants.ViewProjMatrix);
+        constants["ViewportWidth"].Set(viewConstants.ViewportWidth);
+        constants["ViewportHeight"].Set(viewConstants.ViewportHeight);
+        SetCommonResources(binder, frame);
         binder.Apply();
         return true;
     }
@@ -96,6 +105,7 @@ namespace
         GraphicsContext& context,
         const std::shared_ptr<Program>& program,
         const ComputePSO& pso,
+        const FrameConstants& frame,
         uint32_t passIndex)
     {
         ASSERT(program != nullptr);
@@ -112,7 +122,7 @@ namespace
 
         ProgramVar constants = binder["g_MeshBufferGen"];
         constants["PassIndex"].Set(passIndex);
-        SetCommonResources(binder);
+        SetCommonResources(binder, frame);
         binder.Apply();
         return true;
     }
@@ -173,6 +183,15 @@ namespace Renderer
 
     GraphicsPSO m_ExportDepthPSO(L"Renderer: Export Depth PSO");
     std::shared_ptr<Program> m_ExportDepthProgram;
+
+    ComputePSO m_InstanceCullNoHZBPSO(L"Renderer: Instance Cull No HZB PSO");
+    std::shared_ptr<Program> m_InstanceCullNoHZBProgram;
+
+    ComputePSO m_DAGCullNoHZBPSO(L"Renderer: DAG Cull No HZB PSO");
+    std::shared_ptr<Program> m_DAGCullNoHZBProgram;
+
+    MeshShaderPSO m_DepthOnlyMeshPSO(L"Renderer: Depth Only Mesh PSO");
+    std::shared_ptr<Program> m_DepthOnlyMeshProgram;
 }
 
 std::string Renderer::GetModelShaderPath(const char* shaderFileName)
@@ -393,6 +412,67 @@ void Renderer::Initialize(void)
         m_DAGCullPSO[passIndex].Finalize();
     }
 
+    {
+        ProgramDesc instanceCullNoHZBDesc = ProgramUtils::MakeComputeDesc(
+            GetModelShaderPath("InstanceCull.slang"),
+            "computeMain",
+            ProgramUtils::BindlessMode::ResourceHeap);
+        instanceCullNoHZBDesc.AddDefine("DISABLE_HZB_CULL");
+        m_InstanceCullNoHZBProgram = ProgramUtils::GetProgram(
+            instanceCullNoHZBDesc,
+            "Renderer: InstanceCull No HZB");
+        if (!m_InstanceCullNoHZBProgram)
+            return;
+
+        ProgramUtils::SetProgram(m_InstanceCullNoHZBPSO, *m_InstanceCullNoHZBProgram);
+        m_InstanceCullNoHZBPSO.Finalize();
+    }
+
+    {
+        ProgramDesc dagCullNoHZBDesc = ProgramUtils::MakeComputeDesc(
+            GetModelShaderPath("DAGCull.slang"),
+            "computeMain",
+            ProgramUtils::BindlessMode::ResourceHeap);
+        dagCullNoHZBDesc.AddDefine("DISABLE_HZB_CULL");
+        dagCullNoHZBDesc.AddRootBufferUAV("g_TaskQueueStateUAV");
+        dagCullNoHZBDesc.AddRootBufferUAV("g_TaskQueueUAV");
+        dagCullNoHZBDesc.AddRootBufferUAV("g_MeshletBatchUAV");
+        dagCullNoHZBDesc.AddRootBufferUAV("g_CandidateMeshletUAV");
+
+        m_DAGCullNoHZBProgram = ProgramUtils::GetProgram(
+            dagCullNoHZBDesc,
+            "Renderer: DAGCull No HZB");
+        if (!m_DAGCullNoHZBProgram)
+            return;
+
+        ProgramUtils::SetProgram(m_DAGCullNoHZBPSO, *m_DAGCullNoHZBProgram);
+        m_DAGCullNoHZBPSO.Finalize();
+    }
+
+    {
+        ProgramDesc vDepthOnlyMeshDesc = ProgramUtils::MakeGraphicsDesc(
+            GetModelShaderPath("VBufferMesh.slang"),
+            "",
+            "pixelMain",
+            "meshMain",
+            ProgramUtils::BindlessMode::ResourceAndSamplerHeap);
+        vDepthOnlyMeshDesc.AddDefine("DISABLE_HZB_CULL");
+        vDepthOnlyMeshDesc.AddDefine("DEPTH_ONLY");
+
+        m_DepthOnlyMeshProgram = ProgramUtils::GetProgram(
+            vDepthOnlyMeshDesc,
+            "Renderer: DepthOnly Mesh");
+        if (!m_DepthOnlyMeshProgram)
+            return;
+
+        m_DepthOnlyMeshPSO.SetRasterizerState(RasterizerShadowTwoSided);
+        m_DepthOnlyMeshPSO.SetDepthStencilState(DepthStateReadWrite);
+        m_DepthOnlyMeshPSO.SetBlendState(BlendDisable);
+        m_DepthOnlyMeshPSO.SetRenderTargetFormats(0, {}, SHADOW_FORMAT);
+        ProgramUtils::SetProgram(m_DepthOnlyMeshPSO, *m_DepthOnlyMeshProgram);
+        m_DepthOnlyMeshPSO.Finalize();
+    }
+
 	m_ExportDepthPSO = m_DefaultPSO;
 	m_ExportDepthPSO.SetRasterizerState(RasterizerTwoSided);
 	m_ExportDepthPSO.SetDepthStencilState(DepthStateReadWrite);
@@ -493,7 +573,9 @@ void Renderer::Shutdown(void)
 	GPUDrivenDrawIndirectCommandSignature.Destroy();
 }
 
-void Renderer::DrawSkybox( GraphicsContext& gfxContext, const Camera& Camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor )
+void Renderer::DrawSkybox( GraphicsContext& gfxContext,
+     const RenderView& view,
+     const FrameConstants& frame)
 {
     ScopedTimer _prof(L"Draw Skybox", gfxContext);
 
@@ -501,8 +583,8 @@ void Renderer::DrawSkybox( GraphicsContext& gfxContext, const Camera& Camera, co
     if (!m_SkyboxProgram)
         return;
 
-    const Matrix4 projInverse = Invert(Camera.GetProjMatrix());
-    const Matrix3 viewInverse = Invert(Camera.GetViewMatrix()).Get3x3();
+    const Matrix4 projInverse = Invert(view.GetConstants().ProjMatrix);
+    const Matrix3 viewInverse = Invert(view.GetConstants().ViewMatrix).Get3x3();
 
     gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
     gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
@@ -514,51 +596,57 @@ void Renderer::DrawSkybox( GraphicsContext& gfxContext, const Camera& Camera, co
     gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_READ);
     gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
     gfxContext.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV_DepthReadOnly());
-    gfxContext.SetViewportAndScissor(viewport, scissor);
+    gfxContext.SetViewportAndScissor(view.GetViewport(), view.GetScissor());
+    gfxContext.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
     binder["g_SkyboxVS"]["ProjInverse"].Set(projInverse);
     binder["g_SkyboxVS"]["ViewInverse"].Set(viewInverse);
-    SetCommonResources(binder);
+    SetCommonResources(binder, frame);
     binder.Apply();
 
     gfxContext.Draw(3);
 }
 
-void Renderer::InstanceCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, uint32_t cullPassIdx)
+void Renderer::InstanceCull(
+    GraphicsContext& gfxContext,
+    const RenderView& view,
+    const FrameConstants& frame,
+    const Program* program,
+    const ComputePSO& pso,
+    bool disableHZBCull)
 {
     ScopedTimer _prof(L"Renderer::InstanceCull", gfxContext);
-    ASSERT(cullPassIdx < 2);
-    if (cullPassIdx >= 2)
-        return;
 
-    ASSERT(m_InstanceCullProgram[cullPassIdx] != nullptr);
-    if (!m_InstanceCullProgram[cullPassIdx])
+    ASSERT(program != nullptr);
+    if (!program)
         return;
 
 	ComputeContext& context = gfxContext.GetComputeContext();
 
 	context.TransitionResource( DrawCommandManager::GetPotentialDrawItemsGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 	context.TransitionResource( DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    context.TransitionResource( DrawCommandManager::GetTaskQueueGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
 
-    ProgramBinder binder(*m_InstanceCullProgram[cullPassIdx], context);
+    ProgramBinder binder(*program, context);
     binder.SetRootSignature();
-	context.SetPipelineState(m_InstanceCullPSO[cullPassIdx]);
+	context.SetPipelineState(pso);
 
+    const ViewConstants& viewConstants = view.GetConstants();
     ProgramVar constants = binder["g_InstanceCull"];
-    constants["ViewProjMatrix"].Set(inGlobals.ViewProjMatrix);
-    constants["PrevViewProjMatrix"].Set(inGlobals.PrevViewProjMatrix);
-    constants["HZBSizeAndInv"].Set(DirectX::XMFLOAT4(
-        inGlobals.HZBSizeAndInv[0],
-        inGlobals.HZBSizeAndInv[1],
-        inGlobals.HZBSizeAndInv[2],
-        inGlobals.HZBSizeAndInv[3]));
-    constants["ViewportWidth"].Set(inGlobals.ViewportWidth);
-    constants["ViewportHeight"].Set(inGlobals.ViewportHeight);
+    constants["ViewProjMatrix"].Set(viewConstants.ViewProjMatrix);
+    constants["ViewportWidth"].Set(viewConstants.ViewportWidth);
+    constants["ViewportHeight"].Set(viewConstants.ViewportHeight);
     constants["MaxCommands"].Set(DrawCommandManager::GetNumPotentialDrawItems());
-    SetCommonResources(binder, inGlobals.FrameIndexMod2);
+    if (!disableHZBCull)
+    {
+        constants["PrevViewProjMatrix"].Set(viewConstants.PrevViewProjMatrix);
+        constants["HZBSizeAndInv"].Set(viewConstants.HZBSizeAndInv);
+    }
+
+    SetCommonResources(binder, frame);
     binder.Apply();
 
 	context.Dispatch1D( DrawCommandManager::GetNumPotentialDrawItems());
@@ -590,16 +678,18 @@ void Renderer::InstanceCull(GraphicsContext& gfxContext, const GlobalConstants& 
     return s_GroupCount;
 }
 
-void Renderer::DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, const BaseCamera* camera, 
-    const D3D12_VIEWPORT& viewport, uint32_t cullPassIdx)
+void Renderer::DAGCull(
+    GraphicsContext& gfxContext,
+    const RenderView& view,
+    const FrameConstants& frame,
+    const Program* program,
+    const ComputePSO& pso,
+    bool disableHZBCull)
 {
 	ScopedTimer _prof(L"Renderer::DAGCull", gfxContext);
-    ASSERT(cullPassIdx < 2);
-    if (cullPassIdx >= 2)
-        return;
 
-    ASSERT(m_DAGCullProgram[cullPassIdx] != nullptr);
-    if (!m_DAGCullProgram[cullPassIdx])
+    ASSERT(program != nullptr);
+    if (!program)
         return;
 
 	ComputeContext& context = gfxContext.GetComputeContext();
@@ -613,30 +703,25 @@ void Renderer::DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlo
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
 	context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
 
-    ProgramBinder binder(*m_DAGCullProgram[cullPassIdx], context);
+    ProgramBinder binder(*program, context);
     binder.SetRootSignature();
-	context.SetPipelineState(m_DAGCullPSO[cullPassIdx]);
+	context.SetPipelineState(pso);
 
-	float screenErrorConstant = 1.f;
-	auto* cameraProj = static_cast<const Camera*>(camera);
-	if (cameraProj)
-	{
-		screenErrorConstant = std::tanf(0.5f * cameraProj->GetFOV()) * 2 / viewport.Height * PixelErrorThreshold;
-	}
-
+    const ViewConstants& viewConstants = view.GetConstants();
     ProgramVar constants = binder["g_DAGCull"];
-    constants["ViewProjMatrix"].Set(inGlobals.ViewProjMatrix);
-    constants["PrevViewProjMatrix"].Set(inGlobals.PrevViewProjMatrix);
-    constants["HZBSizeAndInv"].Set(DirectX::XMFLOAT4(
-        inGlobals.HZBSizeAndInv[0],
-        inGlobals.HZBSizeAndInv[1],
-        inGlobals.HZBSizeAndInv[2],
-        inGlobals.HZBSizeAndInv[3]));
-    constants["ViewerPos"].Set(inGlobals.ViewerPos);
-    constants["ScreenErrorConstant"].Set(screenErrorConstant);
-    constants["ViewportWidth"].Set(inGlobals.ViewportWidth);
-    constants["ViewportHeight"].Set(inGlobals.ViewportHeight);
-    SetCommonResources(binder, inGlobals.FrameIndexMod2);
+    constants["ViewProjMatrix"].Set(viewConstants.ViewProjMatrix);
+    constants["ViewerPos"].Set(viewConstants.ViewerPos);
+    constants["LodScale"].Set(viewConstants.LodScale);
+    constants["PixelErrorThreshold"].Set(static_cast<float>(PixelErrorThreshold));
+    constants["ProjectionType"].Set(static_cast<uint32_t>(viewConstants.Projection));
+    constants["ViewportWidth"].Set(viewConstants.ViewportWidth);
+    constants["ViewportHeight"].Set(viewConstants.ViewportHeight);
+    if (!disableHZBCull)
+    {
+        constants["PrevViewProjMatrix"].Set(viewConstants.PrevViewProjMatrix);
+        constants["HZBSizeAndInv"].Set(viewConstants.HZBSizeAndInv);
+    }
+    SetCommonResources(binder, frame);
     binder["g_TaskQueueStateUAV"].SetRootBufferUAV(DrawCommandManager::GetTaskQueueStateGPU());
     binder["g_TaskQueueUAV"].SetRootBufferUAV(DrawCommandManager::GetTaskQueueGPU());
     binder["g_MeshletBatchUAV"].SetRootBufferUAV(DrawCommandManager::GetMeshletBatchGPU());
@@ -648,8 +733,10 @@ void Renderer::DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlo
 }
 
 
-void Renderer::ExportDepth(GraphicsContext& gfxContext, const GlobalConstants& inGlobals,
-	const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
+void Renderer::ExportDepth(
+    GraphicsContext& gfxContext,
+    const RenderView& view,
+    const FrameConstants& frame)
 {
 	ScopedTimer _prof(L"Renderer::ExportDepth", gfxContext);
 
@@ -667,18 +754,30 @@ void Renderer::ExportDepth(GraphicsContext& gfxContext, const GlobalConstants& i
 	gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE);
 	gfxContext.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 	gfxContext.SetDepthStencilTarget(g_SceneDepthBuffer.GetDSV());
-	gfxContext.SetViewportAndScissor(viewport, scissor);
-    SetCommonResources(binder, inGlobals.FrameIndexMod2);
+	gfxContext.SetViewportAndScissor(view.GetViewport(), view.GetScissor());
+    SetCommonResources(binder, frame);
     binder.Apply();
 	gfxContext.Draw(3);
 }
 
-void Renderer::ResolveVBufferToGBuffer(GraphicsContext& gfxContext, const GlobalConstants& inGlobals)
+void Renderer::ResolveVBufferToGBuffer(
+    GraphicsContext& gfxContext,
+    const RenderView& view,
+    const FrameConstants& frame)
 {
 	ScopedTimer _prof(L"Renderer::ResolveVBufferToGBuffer", gfxContext);
     ASSERT(m_ResolveVBufferToGBufferProgram != nullptr);
     if (!m_ResolveVBufferToGBufferProgram)
         return;
+
+    gfxContext.TransitionResource(g_GBufferA, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    gfxContext.TransitionResource(g_GBufferB, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    gfxContext.TransitionResource(g_GBufferC, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    gfxContext.TransitionResource(g_GBufferD, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    gfxContext.ClearColor(g_GBufferA);
+    gfxContext.ClearColor(g_GBufferB);
+    gfxContext.ClearColor(g_GBufferC);
+    gfxContext.ClearColor(g_GBufferD);
 
 	ComputeContext& context = gfxContext.GetComputeContext();
 
@@ -696,16 +795,250 @@ void Renderer::ResolveVBufferToGBuffer(GraphicsContext& gfxContext, const Global
     binder.SetRootSignature();
     context.SetPipelineState(m_ResolveVBufferToGBufferPSO);
 
+    const ViewConstants& viewConstants = view.GetConstants();
     ProgramVar constants = binder["g_ResolveVBufferToGBuffer"];
-    constants["ViewProjMatrix"].Set(inGlobals.ViewProjMatrix);
-    constants["InvViewportSize"].Set(DirectX::XMFLOAT2(inGlobals.InvViewportWidth, inGlobals.InvViewportHeight));
-    constants["ViewportWidth"].Set(inGlobals.ViewportWidth);
-    constants["ViewportHeight"].Set(inGlobals.ViewportHeight);
+    constants["ViewProjMatrix"].Set(viewConstants.ViewProjMatrix);
+    constants["InvViewportSize"].Set(
+        DirectX::XMFLOAT2(viewConstants.InvViewportWidth, viewConstants.InvViewportHeight));
+    constants["ViewportWidth"].Set(viewConstants.ViewportWidth);
+    constants["ViewportHeight"].Set(viewConstants.ViewportHeight);
     constants["ViewMode"].Set((uint32_t)ViewMode);
-    SetCommonResources(binder, inGlobals.FrameIndexMod2);
+    SetCommonResources(binder, frame);
     binder.Apply();
 
     context.Dispatch2D(g_SceneColorBuffer.GetWidth(), g_SceneColorBuffer.GetHeight());
+}
+
+void Renderer::RenderVisibility(
+    GraphicsContext& gfxContext,
+    const RenderView& view,
+    const FrameConstants& frame)
+{
+    ScopedTimer _profMain(L"Renderer::RenderVisibility", gfxContext);
+    gfxContext.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    gfxContext.ClearColor(g_VisibilityBuffer);
+
+    if (DrawCommandManager::GetNumPotentialDrawItems() == 0)
+    {
+        return;
+    }
+
+    gfxContext.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    gfxContext.SetViewportAndScissor(view.GetViewport(), view.GetScissor());
+
+    for (auto& chunksGPU : GeometryStreaming::m_GeometryChunksGPU)
+    {
+        gfxContext.TransitionResource(chunksGPU, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+    }
+
+    gfxContext.TransitionResource(GeometryStreaming::m_GroupDataLocationGPU, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+
+    if (!FreezeCull)
+    {
+        gfxContext.GetComputeContext().ClearBufferUAV(DrawCommandManager::GetTaskQueueStateGPU(),
+                                                   DrawCommandManager::GetTaskQueueStateGPU().GetBufferSize(), 0);
+        gfxContext.TransitionResource(DrawCommandManager::GetTaskQueueGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        gfxContext.ClearUAV(DrawCommandManager::GetTaskQueueGPU(), 0xFFFFFFFF);
+        gfxContext.TransitionResource(DrawCommandManager::GetMeshletBatchGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        gfxContext.ClearUAV(DrawCommandManager::GetMeshletBatchGPU(), 0);
+        gfxContext.TransitionResource(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+        uint32_t passIndex = 0;
+        Renderer::InstanceCull(gfxContext, view, frame, m_InstanceCullProgram[passIndex].get(), m_InstanceCullPSO[passIndex]);
+        Renderer::DAGCull(gfxContext, view, frame, m_DAGCullProgram[passIndex].get(), m_DAGCullPSO[passIndex]);
+        {
+            // mesh buffer gen
+            gfxContext.TransitionResource(DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            gfxContext.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+            if (!BindMeshBufferGenPass(
+                    gfxContext, m_MeshBufferGenProgram, m_MeshBufferGenPSO, frame, passIndex))
+                return;
+            gfxContext.GetComputeContext().Dispatch1D(1, 1);
+        }
+
+        {
+            ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 0", gfxContext);
+            gfxContext.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+            gfxContext.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+            gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
+            if (!BindVBufferMeshPass(
+                    gfxContext, m_VBufferMeshProgram[passIndex], m_VBufferMeshPSO[passIndex], view, frame))
+                return;
+            gfxContext.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            gfxContext.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
+        }
+
+        {
+            ExportDepth(gfxContext, view, frame);
+        }
+
+        {
+            gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            Renderer::GetCurrentHZB().GenerateHZB(gfxContext, g_SceneDepthBuffer);
+        }
+
+        passIndex = 1;
+        Renderer::InstanceCull(gfxContext, view, frame, m_InstanceCullProgram[passIndex].get(), m_InstanceCullPSO[passIndex]);
+        Renderer::DAGCull(gfxContext, view, frame, m_DAGCullProgram[passIndex].get(), m_DAGCullPSO[passIndex]);
+        {
+            // mesh buffer gen
+            gfxContext.TransitionResource(DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            gfxContext.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            if (!BindMeshBufferGenPass(
+                    gfxContext, m_MeshBufferGenProgram, m_MeshBufferGenPSO, frame, passIndex))
+                return;
+            gfxContext.GetComputeContext().Dispatch1D(1, 1);
+        }
+
+        {
+            ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 1", gfxContext);
+            gfxContext.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+            gfxContext.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+            gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
+            if (!BindVBufferMeshPass(
+                    gfxContext, m_VBufferMeshProgram[passIndex], m_VBufferMeshPSO[passIndex], view, frame))
+                return;
+            gfxContext.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            gfxContext.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
+        }
+
+        {
+            ExportDepth(gfxContext, view, frame);
+        }
+
+        {
+            gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            Renderer::GetCurrentHZB().GenerateHZB(gfxContext, g_SceneDepthBuffer);
+        }
+    }
+    else
+    {
+        uint32_t passIndex = 0;
+        {
+            // mesh buffer gen
+            gfxContext.TransitionResource(DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            gfxContext.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            if (!BindMeshBufferGenPass(
+                    gfxContext, m_MeshBufferGenProgram, m_MeshBufferGenPSO, frame, passIndex))
+                return;
+            gfxContext.GetComputeContext().Dispatch1D(1, 1);
+        }
+
+        {
+            ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 0", gfxContext);
+            gfxContext.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+            gfxContext.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+            gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
+            if (!BindVBufferMeshPass(
+                    gfxContext, m_VBufferMeshProgram[passIndex], m_VBufferMeshPSO[passIndex], view, frame))
+                return;
+            gfxContext.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            gfxContext.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
+        }
+
+        passIndex = 1;
+        {
+            // mesh buffer gen
+            gfxContext.TransitionResource(DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            gfxContext.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            if (!BindMeshBufferGenPass(
+                    gfxContext, m_MeshBufferGenProgram, m_MeshBufferGenPSO, frame, passIndex))
+                return;
+            gfxContext.GetComputeContext().Dispatch1D(1, 1);
+        }
+
+        {
+            ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 1", gfxContext);
+            gfxContext.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+            gfxContext.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+            gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
+            if (!BindVBufferMeshPass(
+                    gfxContext, m_VBufferMeshProgram[passIndex], m_VBufferMeshPSO[passIndex], view, frame))
+                return;
+            gfxContext.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            gfxContext.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
+        }
+
+        {
+            ExportDepth(gfxContext, view, frame);
+        }
+
+        {
+            gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            Renderer::GetCurrentHZB().GenerateHZB(gfxContext, g_SceneDepthBuffer);
+        }
+    }
+}
+
+void Renderer::RenderSceneDepth(
+    GraphicsContext& gfxContext,
+    const RenderView& view,
+    const FrameConstants& frame,
+    DepthBuffer& depthTarget)
+{
+    ASSERT(depthTarget.GetFormat() == SHADOW_FORMAT);
+
+    ScopedTimer _prof0(L"Renderer::RenderSceneDepth", gfxContext);
+
+    gfxContext.TransitionResource(depthTarget, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+    gfxContext.ClearDepth(depthTarget);
+
+    if (FreezeCull) return;
+
+    if (DrawCommandManager::GetNumPotentialDrawItems() == 0)
+    {
+        return;
+    }
+
+    gfxContext.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    gfxContext.SetViewportAndScissor(view.GetViewport(), view.GetScissor());
+
+    for (auto& chunksGPU : GeometryStreaming::m_GeometryChunksGPU)
+    {
+        gfxContext.TransitionResource(chunksGPU, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+    }
+
+    gfxContext.TransitionResource(GeometryStreaming::m_GroupDataLocationGPU, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+
+    gfxContext.GetComputeContext().ClearBufferUAV(DrawCommandManager::GetTaskQueueStateGPU(),
+                                                  DrawCommandManager::GetTaskQueueStateGPU().GetBufferSize(), 0);
+    gfxContext.TransitionResource(DrawCommandManager::GetTaskQueueGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    gfxContext.ClearUAV(DrawCommandManager::GetTaskQueueGPU(), 0xFFFFFFFF);
+    gfxContext.TransitionResource(DrawCommandManager::GetMeshletBatchGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    gfxContext.ClearUAV(DrawCommandManager::GetMeshletBatchGPU(), 0);
+    gfxContext.TransitionResource(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+    uint32_t passIndex = 0;
+    Renderer::InstanceCull(gfxContext, view, frame, m_InstanceCullNoHZBProgram.get(), m_InstanceCullNoHZBPSO, true);
+    Renderer::DAGCull(gfxContext, view, frame, m_DAGCullNoHZBProgram.get(), m_DAGCullNoHZBPSO, true);
+    {
+        // mesh buffer gen
+        gfxContext.TransitionResource(DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        gfxContext.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+        if (!BindMeshBufferGenPass(
+                gfxContext, m_MeshBufferGenProgram, m_MeshBufferGenPSO, frame, passIndex))
+            return;
+        gfxContext.GetComputeContext().Dispatch1D(1, 1);
+    }
+
+    {
+        ScopedTimer _prof(L"Dispatch Depth Only Mesh Pass", gfxContext);
+        gfxContext.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+        gfxContext.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
+        gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
+        gfxContext.SetDepthStencilTarget(depthTarget.GetDSV());
+        if (!BindVBufferMeshPass(
+                gfxContext, m_DepthOnlyMeshProgram, m_DepthOnlyMeshPSO, view, frame))
+            return;
+        gfxContext.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
+    }
 }
 
 uint32_t Renderer::GetBindlessResourcesBaseOffset()
@@ -734,310 +1067,4 @@ HierarchicalDepthBuffer& Renderer::GetPrevHZB()
 HierarchicalDepthBuffer& Renderer::GetCurrentHZB()
 {
     return g_FurthestHZB[TemporalEffects::GetFrameIndexMod2()];
-}
-
-void MeshSorter::Sort()
-{
-    struct { bool operator()(uint64_t a, uint64_t b) const { return a < b; } } Cmp;
-    std::sort(m_SortKeys.begin(), m_SortKeys.end(), Cmp);
-}
-
-void MeshSorter::RenderMeshedInternal(
-    GraphicsContext& context,
-    const GlobalConstants& inGlobals)
-{
-    for (auto& chunksGPU : GeometryStreaming::m_GeometryChunksGPU)
-    {
-        context.TransitionResource(chunksGPU, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
-    }
-    
-    context.TransitionResource(GeometryStreaming::m_GroupDataLocationGPU, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
-
-    if (!FreezeCull)
-    {
-        context.GetComputeContext().ClearBufferUAV( DrawCommandManager::GetTaskQueueStateGPU(),
-             DrawCommandManager::GetTaskQueueStateGPU().GetBufferSize(), 0);
-        context.TransitionResource( DrawCommandManager::GetTaskQueueGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        context.ClearUAV( DrawCommandManager::GetTaskQueueGPU(), 0xFFFFFFFF);
-        context.TransitionResource( DrawCommandManager::GetMeshletBatchGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        context.ClearUAV( DrawCommandManager::GetMeshletBatchGPU(), 0);
-        context.TransitionResource(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        context.ClearUAV(GeometryStreaming::m_GeometryStreamingRequestMaskGPU, 0);
-
-        uint32_t passIndex = 0;
-        Renderer::InstanceCull(context, inGlobals, passIndex);
-        Renderer::DAGCull(context, inGlobals, m_Camera, m_Viewport, passIndex);
-        {
-            // mesh buffer gen
-            context.TransitionResource(DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-
-            if (!BindMeshBufferGenPass(context, m_MeshBufferGenProgram, m_MeshBufferGenPSO, passIndex))
-                return;
-            context.GetComputeContext().Dispatch1D(1, 1);
-        }
-
-        {
-            ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 0", context);
-            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-            context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
-            context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
-            if (!BindVBufferMeshPass(context, m_VBufferMeshProgram[passIndex], m_VBufferMeshPSO[passIndex], inGlobals))
-                return;
-            context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
-        }
-
-        {
-            ExportDepth(context, inGlobals, m_Viewport, m_Scissor);
-        }
-
-        {
-            context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            Renderer::GetCurrentHZB().GenerateHZB(context, g_SceneDepthBuffer);
-        }
-
-        passIndex = 1;
-        Renderer::InstanceCull(context, inGlobals, passIndex);
-        Renderer::DAGCull(context, inGlobals, m_Camera, m_Viewport, passIndex);
-        {
-            // mesh buffer gen
-            context.TransitionResource( DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            if (!BindMeshBufferGenPass(context, m_MeshBufferGenProgram, m_MeshBufferGenPSO, passIndex))
-                return;
-            context.GetComputeContext().Dispatch1D(1, 1);
-        }
-
-        {
-            ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 1", context);
-            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-            context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
-            context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
-            if (!BindVBufferMeshPass(context, m_VBufferMeshProgram[passIndex], m_VBufferMeshPSO[passIndex], inGlobals))
-                return;
-            context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
-        }
-
-		{
-            ExportDepth(context, inGlobals, m_Viewport, m_Scissor);
-		}
-
-        {
-            context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            Renderer::GetCurrentHZB().GenerateHZB(context, g_SceneDepthBuffer);
-        }
-    }
-    else
-    {
-        uint32_t passIndex = 0;
-        {
-            // mesh buffer gen
-            context.TransitionResource( DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            if (!BindMeshBufferGenPass(context, m_MeshBufferGenProgram, m_MeshBufferGenPSO, passIndex))
-                return;
-            context.GetComputeContext().Dispatch1D(1, 1);
-        }
-
-        {
-            ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 0", context);
-            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-            context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
-            context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
-            if (!BindVBufferMeshPass(context, m_VBufferMeshProgram[passIndex], m_VBufferMeshPSO[passIndex], inGlobals))
-                return;
-            context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
-        }
-
-        passIndex = 1;
-        {
-            // mesh buffer gen
-            context.TransitionResource( DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            if (!BindMeshBufferGenPass(context, m_MeshBufferGenProgram, m_MeshBufferGenPSO, passIndex))
-                return;
-            context.GetComputeContext().Dispatch1D(1, 1);
-        }
-
-        {
-            ScopedTimer _prof(L"Dispatch Mesh Indirect Pass 1", context);
-            context.TransitionResource(DrawCommandManager::GetIndirectDispatchMeshGPU(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-            context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
-            context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
-            if (!BindVBufferMeshPass(context, m_VBufferMeshProgram[passIndex], m_VBufferMeshPSO[passIndex], inGlobals))
-                return;
-            context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            context.ExecuteIndirect(GPUDrivenDrawIndirectCommandSignature, DrawCommandManager::GetIndirectDispatchMeshGPU(), 0, 1);
-        }
-
-		{
-			ExportDepth(context, inGlobals, m_Viewport, m_Scissor);
-		}
-
-		{
-			context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-			Renderer::GetCurrentHZB().GenerateHZB(context, g_SceneDepthBuffer);
-		}
-    }
-}
-
-void MeshSorter::RenderMeshes(
-    DrawPass pass,
-    GraphicsContext& context,
-    const GlobalConstants& inGlobals)
-{
-	ASSERT(m_DSV != nullptr);
-
-	ScopedTimer _prof(L"MeshSorter::RenderMeshes", context);
-
-	GlobalConstants globals = inGlobals;
-	// Set common shader constants
-	globals.ViewProjMatrix = m_Camera->GetViewProjMatrix();
-    globals.ViewMatrix = m_Camera->GetViewMatrix();
-	globals.ViewerPos = m_Camera->GetPosition();
-    const Frustum& frustum = m_Camera->GetViewSpaceFrustum();
-
-    //kNearPlane, kFarPlane, kLeftPlane, kRightPlane, kTopPlane, kBottomPlane
-
-	globals.ViewSpaceFrustumPlanes[0] = frustum.GetFrustumPlane(Frustum::kNearPlane);
-	globals.ViewSpaceFrustumPlanes[1] = frustum.GetFrustumPlane(Frustum::kFarPlane);
-	globals.ViewSpaceFrustumPlanes[2] = frustum.GetFrustumPlane(Frustum::kLeftPlane);
-	globals.ViewSpaceFrustumPlanes[3] = frustum.GetFrustumPlane(Frustum::kRightPlane);
-	globals.ViewSpaceFrustumPlanes[4] = frustum.GetFrustumPlane(Frustum::kTopPlane);
-	globals.ViewSpaceFrustumPlanes[5] = frustum.GetFrustumPlane(Frustum::kBottomPlane);
-
-    Renderer::UpdateGlobalDescriptors();
-
-    context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    //context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, s_TextureHeap.GetHeapPointer());
-    //context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, s_SamplerHeap.GetHeapPointer());
-
-	// Must set the Graphics / Compute root signature only * after * setting your descriptor heaps, as the correct heap pointers must be available when root signature is set.
-    //context.SetRootSignature(m_RootSig);
-
-	//context.SetDynamicConstantBufferView(kCommonCBV, sizeof(GlobalConstants), &globals);
- //   context.SetConstants(kViewModeConstants, (uint32_t)ViewMode);
-
-	if (m_BatchType == kShadows)
-	{
-		context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
-		context.ClearDepth(*m_DSV);
-		context.SetDepthStencilTarget(m_DSV->GetDSV());
-
-		if (m_Viewport.Width == 0)
-		{
-			m_Viewport.TopLeftX = 0.0f;
-			m_Viewport.TopLeftY = 0.0f;
-			m_Viewport.Width = (float)m_DSV->GetWidth();
-			m_Viewport.Height = (float)m_DSV->GetHeight();
-			m_Viewport.MaxDepth = 1.0f;
-			m_Viewport.MinDepth = 0.0f;
-
-			m_Scissor.left = 1;
-			m_Scissor.right = m_DSV->GetWidth() - 2;
-			m_Scissor.top = 1;
-			m_Scissor.bottom = m_DSV->GetHeight() - 2;
-		}
-	}
-	else
-	{
-		for (uint32_t i = 0; i < m_NumRTVs; ++i)
-		{
-			ASSERT(m_RTV[i] != nullptr);
-			ASSERT(m_DSV->GetWidth() == m_RTV[i]->GetWidth());
-			ASSERT(m_DSV->GetHeight() == m_RTV[i]->GetHeight());
-		}
-
-		if (m_Viewport.Width == 0)
-		{
-			m_Viewport.TopLeftX = 0.0f;
-			m_Viewport.TopLeftY = 0.0f;
-			m_Viewport.Width = (float)m_DSV->GetWidth();
-			m_Viewport.Height = (float)m_DSV->GetHeight();
-			m_Viewport.MaxDepth = 1.0f;
-			m_Viewport.MinDepth = 0.0f;
-
-			m_Scissor.left = 0;
-			m_Scissor.right = m_DSV->GetWidth();
-			m_Scissor.top = 0;
-			m_Scissor.bottom = m_DSV->GetWidth();
-		}
-	}
-
-    //for ( ; m_CurrentPass <= pass; m_CurrentPass = (DrawPass)(m_CurrentPass + 1))
-    //const uint32_t passCount = m_PassCounts[pass];
-    {
-		if (m_BatchType == kDefault)
-		{
-			switch (pass)
-			{
-			case kZPass:
-				context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-				context.SetDepthStencilTarget(m_DSV->GetDSV());
-				break;
-			case kOpaque:
-                context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-                context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-                context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), m_DSV->GetDSV());
-				break;
-            case kVBuffer:
-				context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-                break;
-			case kGBuffer:
-			    {
-			        context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-			        context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-			        context.TransitionResource(g_GBufferA, D3D12_RESOURCE_STATE_RENDER_TARGET);
-			        context.TransitionResource(g_GBufferB, D3D12_RESOURCE_STATE_RENDER_TARGET);
-			        context.TransitionResource(g_GBufferC, D3D12_RESOURCE_STATE_RENDER_TARGET);
-			        context.TransitionResource(g_GBufferD, D3D12_RESOURCE_STATE_RENDER_TARGET);
-			        D3D12_CPU_DESCRIPTOR_HANDLE RTVs[] = {
-			            g_SceneColorBuffer.GetRTV(),
-                        g_GBufferA.GetRTV(),
-                        g_GBufferB.GetRTV(),
-                        g_GBufferC.GetRTV(),
-                        g_GBufferD.GetRTV(),
-                    };
-			        context.SetRenderTargets(5, RTVs, m_DSV->GetDSV());
-			    }
-			    break;
-			case kTransparent:
-				context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_READ);
-				context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-				context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), m_DSV->GetDSV_DepthReadOnly());
-				break;
-			}
-		}
-
-        context.SetViewportAndScissor(m_Viewport, m_Scissor);
-        context.FlushResourceBarriers();
-
-        //context.SetIndexBuffer(m_IBV);
-        
-        //const uint32_t lastDraw = m_CurrentDraw + passCount;
-		if (pass == kTransparent)
-		{
-            //RenderMeshedInternal(context, globals, Renderer::PsoIdx::kPsoTransparent, true);
-		}
-		else
-		{
-			if (kVBuffer == pass)
-			{
-                if (DrawCommandManager::GetNumPotentialDrawItems() > 0)
-                    RenderMeshedInternal(context, globals);
-			}
-        }
-    }
-
-	if (m_BatchType == kShadows)
-	{
-		context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-	}
 }

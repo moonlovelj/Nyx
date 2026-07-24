@@ -23,12 +23,16 @@ class ShadowBuffer;
 class GraphicsContext;
 class IntVar;
 class ModelInstance;
-struct GlobalConstants;
 namespace Math
 {
     class Vector3;
     class Matrix4;
     class Camera;
+}
+namespace Renderer
+{
+    class RenderView;
+    struct FrameConstants;
 }
 
 namespace Lighting
@@ -54,8 +58,12 @@ namespace Lighting
     void FillLightGrid(GraphicsContext& gfxContext, const Math::Camera& camera);
     void Shutdown(void);
 
-    void RenderDeferredLighting(GraphicsContext& gfxContext,
-        const GlobalConstants& globals);
+    void RenderDeferredLighting(
+        GraphicsContext& gfxContext,
+        const Renderer::RenderView& view,
+        const Renderer::FrameConstants& frame);
 
-    void RenderLightShadows(GraphicsContext& gfxContext, const GlobalConstants& globals);
+    void RenderLightShadows(
+        GraphicsContext& gfxContext,
+        const Renderer::FrameConstants& frame);
 }

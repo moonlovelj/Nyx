@@ -210,7 +210,9 @@ bool TestForLod(
     float3 cameraPos,
     float error,
     float4 sphereLS,
-    float screenErrorConstant)
+    float lodScale,
+    float pixelErrorThreshold,
+    bool isPerspective)
 {
     float3 axisX = float3(worldMatrix._m00, worldMatrix._m10, worldMatrix._m20);
     float3 axisY = float3(worldMatrix._m01, worldMatrix._m11, worldMatrix._m21);
@@ -218,12 +220,13 @@ bool TestForLod(
     float uniformScaleUpperBound = max(length(axisX), max(length(axisY), length(axisZ)));
 
     float4 sphereWS = float4(mul(worldMatrix, float4(sphereLS.xyz, 1.0)).xyz, uniformScaleUpperBound * sphereLS.w);
-    float allowedErrorWS = error * uniformScaleUpperBound;
+    float geometricErrorWS = error * uniformScaleUpperBound;
 
     const float lodFactor = 1.0;
     float cameraToSphereSurface = max(0.0, length(cameraPos - sphereWS.xyz) - sphereWS.w);
-    float projectedError = cameraToSphereSurface * screenErrorConstant;
-    return projectedError * lodFactor >= allowedErrorWS;
+    float distanceScale = isPerspective ? cameraToSphereSurface : 1.0;
+    float allowedErrorWS = distanceScale * lodScale * pixelErrorThreshold;
+    return allowedErrorWS * lodFactor >= geometricErrorWS;
 }
 
 bool EvaluateBoundsVisibility(
@@ -255,6 +258,34 @@ bool EvaluateBoundsVisibility(
 
     return LargeEnough(clipMin, clipMax, 1.0, context) &&
         HZBVisible(hzbTexture, hzbSampler, clipMin, clipMax, context);
+}
+
+bool EvaluateBoundsInFrustum(
+    float3 bboxMin,
+    float3 bboxMax,
+    float4x4 worldMatrix,
+    float4x4 viewProjMatrix,
+    CullCommonContext context)
+{
+    float4 clipMin;
+    float4 clipMax;
+    bool clipValid = false;
+
+    bool inFrustum = BBoxIntersectFrustum(
+        bboxMin,
+        bboxMax,
+        worldMatrix,
+        viewProjMatrix,
+        clipMin,
+        clipMax,
+        clipValid);
+
+    if (!inFrustum)
+        return false;
+    if (!clipValid)
+        return true;
+
+    return LargeEnough(clipMin, clipMax, 1.0, context);
 }
 
 #endif

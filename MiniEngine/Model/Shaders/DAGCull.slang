@@ -7,9 +7,9 @@
 // A PARTICULAR PURPOSE, OR NON-INFRINGEMENT.
 //
 
-#ifndef DAG_CULL_PASS_INDEX
-#error DAG_CULL_PASS_INDEX must be supplied through ProgramDesc::AddDefine().
-#endif
+//#ifndef DAG_CULL_PASS_INDEX
+//#error DAG_CULL_PASS_INDEX must be supplied through ProgramDesc::AddDefine().
+//#endif
 
 #if DAG_CULL_PASS_INDEX == 1
 #define DAG_CULL_PASS1
@@ -24,16 +24,24 @@
 struct DAGCullConstants
 {
     float4x4 ViewProjMatrix;
-    float4x4 PrevViewProjMatrix;
-    float4 HZBSizeAndInv;
     float3 ViewerPos;
-    float ScreenErrorConstant;
+    float LodScale;
+    float PixelErrorThreshold;
+    uint ProjectionType;
     uint ViewportWidth;
     uint ViewportHeight;
+
+#ifndef DISABLE_HZB_CULL
+    float4x4 PrevViewProjMatrix;
+    float4 HZBSizeAndInv;
+#endif
 };
 
 ConstantBuffer<DAGCullConstants> g_DAGCull;
+
+#ifndef DISABLE_HZB_CULL
 SamplerState g_HZBSampler;
+#endif
 
 globallycoherent RWStructuredBuffer<QueueState> g_TaskQueueStateUAV;
 globallycoherent RWByteAddressBuffer g_TaskQueueUAV;
@@ -64,7 +72,9 @@ CullCommonContext GetCullCommonContext()
     CullCommonContext context;
     context.ViewportWidth = g_DAGCull.ViewportWidth;
     context.ViewportHeight = g_DAGCull.ViewportHeight;
+#ifndef DISABLE_HZB_CULL
     context.HZBSizeAndInv = g_DAGCull.HZBSizeAndInv;
+#endif
     return context;
 }
 
@@ -114,6 +124,7 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
     MeshConstant meshInstance = LoadMeshConstant(inst.MeshBufferIdx);
     CullCommonContext cullContext = GetCullCommonContext();
 
+#ifndef DISABLE_HZB_CULL
 #ifdef DAG_CULL_PASS0
     bVisible = bVisible && EvaluateBoundsVisibility(
         childNode.BBoxMin, childNode.BBoxMax,
@@ -132,6 +143,13 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
         g_HZBSampler,
         cullContext);
 #endif
+#else
+    bVisible = bVisible && EvaluateBoundsInFrustum(
+        childNode.BBoxMin, childNode.BBoxMax,
+        meshInstance.WorldMatrix,
+        g_DAGCull.ViewProjMatrix,
+        cullContext);
+#endif
 
     bVisible = bVisible &&
         !TestForLod(
@@ -139,7 +157,9 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
             g_DAGCull.ViewerPos,
             childNode.MaxParrentError,
             childNode.BoundSphere,
-            g_DAGCull.ScreenErrorConstant);
+            g_DAGCull.LodScale,
+            g_DAGCull.PixelErrorThreshold,
+            g_DAGCull.ProjectionType == 0);
     
     bool bIsLeaf = childNode.IsGroup();
 
@@ -294,6 +314,7 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
         bool bAlphaBlend = (meshletHeader.GetPSOFlags() & PSO_ALPHA_BLEND) != 0u;
         CullCommonContext cullContext = GetCullCommonContext();
 
+#ifndef DISABLE_HZB_CULL
         bool bMeshletVisible = EvaluateBoundsVisibility(
             meshletHeader.BBoxMin,
             meshletHeader.BBoxMax,
@@ -313,6 +334,14 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
                 g_HZBSampler,
                 cullContext);
 #endif
+#else
+        bool bMeshletVisible = EvaluateBoundsInFrustum(
+            meshletHeader.BBoxMin,
+            meshletHeader.BBoxMax,
+            meshInstance.WorldMatrix,
+            g_DAGCull.ViewProjMatrix,
+            cullContext);
+#endif
         
         bMeshletVisible = bMeshletVisible && !bAlphaBlend;
 
@@ -328,7 +357,9 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
                     g_DAGCull.ViewerPos,
                     refineGroupHeader.ParrentError,
                     refineGroupHeader.BoundSphere,
-                    g_DAGCull.ScreenErrorConstant);
+                    g_DAGCull.LodScale,
+                    g_DAGCull.PixelErrorThreshold,
+                    g_DAGCull.ProjectionType == 0);
             }
         }
 
@@ -337,10 +368,16 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
             uint writeOffset;
             WaveInterlockedAddScalar(g_TaskQueueStateUAV[0].PassState[passIndex].VisibleMeshletCount, true, 1, writeOffset);
             RWStructuredBuffer<VisibleMeshletPayload> payloadBufferUAV = GetVisibleMeshletBufferUAV();
+
+#ifndef DISABLE_HZB_CULL
 #ifdef DAG_CULL_PASS1
             // Write after pass0
             if (writeOffset + g_TaskQueueStateUAV[0].PassState[0].VisibleMeshletCount < MAX_VISIBLE_MESHLETS)
                 payloadBufferUAV[writeOffset + g_TaskQueueStateUAV[0].PassState[0].VisibleMeshletCount] = meshletPayload;
+#else
+            if (writeOffset < MAX_VISIBLE_MESHLETS)
+                payloadBufferUAV[writeOffset] = meshletPayload;
+#endif
 #else
             if (writeOffset < MAX_VISIBLE_MESHLETS)
                 payloadBufferUAV[writeOffset] = meshletPayload;
@@ -356,8 +393,12 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
 [numthreads(DAG_CULL_GROUP_SIZE, 1, 1)]
 void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 {
+#ifndef DISABLE_HZB_CULL
 #ifdef DAG_CULL_PASS1
     const uint passIndex = 1;
+#else
+    const uint passIndex = 0;
+#endif
 #else
     const uint passIndex = 0;
 #endif

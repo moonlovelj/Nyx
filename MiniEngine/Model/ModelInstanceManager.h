@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "../Core/CommandContext.h"
 #include "Model.h"
 #include "Renderer.h"
@@ -8,8 +8,6 @@
 namespace ModelInstanceManager
 {
 	void Initialize(std::shared_ptr<Model> sourceModel, uint32_t instanceCount = 1);
-
-	void Render(Renderer::MeshSorter& sorter);
 
 	void Update(GraphicsContext& gfxContext, float deltaTime);
 

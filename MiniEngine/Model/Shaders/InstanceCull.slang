@@ -7,9 +7,9 @@
 // A PARTICULAR PURPOSE, OR NON-INFRINGEMENT.
 //
 
-#ifndef INSTANCE_CULL_PASS_INDEX
-#error INSTANCE_CULL_PASS_INDEX must be supplied through ProgramDesc::AddDefine().
-#endif
+//#ifndef INSTANCE_CULL_PASS_INDEX
+//#error INSTANCE_CULL_PASS_INDEX must be supplied through ProgramDesc::AddDefine().
+//#endif
 
 #include "CullCommon.slang"
 #include "CommonResources.slang"
@@ -17,16 +17,21 @@
 struct InstanceCullConstants
 {
     float4x4 ViewProjMatrix;
-    float4x4 PrevViewProjMatrix;
-    float4 HZBSizeAndInv;
-
     uint ViewportWidth;
     uint ViewportHeight;
     uint MaxCommands;
+
+#ifndef DISABLE_HZB_CULL
+    float4x4 PrevViewProjMatrix;
+    float4 HZBSizeAndInv;
+#endif
 };
 
 ConstantBuffer<InstanceCullConstants> g_InstanceCull;
+
+#ifndef DISABLE_HZB_CULL
 SamplerState g_HZBSampler;
+#endif
 
 [shader("compute")]
 [numthreads(64, 1, 1)]
@@ -41,6 +46,7 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
     InstanceConstant instanceConstant = LoadInstanceConstant(item.InstanceIndex);
     MeshConstant meshConstant = LoadMeshConstant(instanceConstant.MeshBufferIdx);
 
+#ifndef DISABLE_HZB_CULL
 #if INSTANCE_CULL_PASS_INDEX == 1
     const uint passIndex = 1;
     const float4x4 viewProjMatrix = g_InstanceCull.ViewProjMatrix;
@@ -64,6 +70,18 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
         hzbTexture,
         g_HZBSampler,
         cullContext);
+#else
+    CullCommonContext cullContext;
+    cullContext.ViewportWidth = g_InstanceCull.ViewportWidth;
+    cullContext.ViewportHeight = g_InstanceCull.ViewportHeight;
+    const uint passIndex = 0;
+    bool visible = EvaluateBoundsInFrustum(
+        instanceConstant.BBoxMin,
+        instanceConstant.BBoxMax,
+        meshConstant.WorldMatrix,
+        g_InstanceCull.ViewProjMatrix,
+        cullContext);
+#endif
 
     uint waveVisibleCount = WaveActiveCountBits(visible);
     uint waveBaseIndex = 0;

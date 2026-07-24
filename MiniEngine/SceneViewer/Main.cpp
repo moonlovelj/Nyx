@@ -26,6 +26,7 @@
 #include "ModelInstanceManager.h"
 #include "GeometryStreaming.h"
 #include "imgui.h"
+#include <array>
 #include <chrono>
 #include <algorithm>
 #include <cmath>
@@ -42,7 +43,115 @@ using namespace GameCore;
 using namespace Math;
 using namespace Graphics;
 using namespace std;
-using Renderer::MeshSorter;
+
+namespace
+{
+    void UpdateDirectionalShadowCamera(
+        ShadowCamera& shadowCamera,
+        const Camera& viewCamera,
+        Vector3 lightDirection,
+        float shadowDistance,
+        uint32_t shadowWidth,
+        uint32_t shadowHeight,
+        uint32_t shadowBufferPrecision)
+    {
+        const float cameraNear = viewCamera.GetNearClip();
+        const float cameraFar = viewCamera.GetFarClip();
+        const float cameraDepthRange = std::max(cameraFar - cameraNear, 0.0001f);
+        const float sliceFar = std::clamp(shadowDistance, cameraNear + 0.0001f, cameraFar);
+        const float sliceFarT = (sliceFar - cameraNear) / cameraDepthRange;
+
+        const Frustum& viewFrustum = viewCamera.GetWorldSpaceFrustum();
+        std::array<Vector3, 8> receiverCorners;
+        Vector3 receiverCenter(kZero);
+
+        for (uint32_t cornerIndex = 0; cornerIndex < 4; ++cornerIndex)
+        {
+            const Vector3 nearCorner = viewFrustum.GetFrustumCorner(
+                static_cast<Frustum::CornerID>(cornerIndex));
+            const Vector3 cameraFarCorner = viewFrustum.GetFrustumCorner(
+                static_cast<Frustum::CornerID>(cornerIndex + 4));
+
+            receiverCorners[cornerIndex] = nearCorner;
+            receiverCorners[cornerIndex + 4] =
+                Lerp(nearCorner, cameraFarCorner, sliceFarT);
+
+            receiverCenter += receiverCorners[cornerIndex];
+            receiverCenter += receiverCorners[cornerIndex + 4];
+        }
+
+        receiverCenter =
+            receiverCenter * Scalar(1.0f / static_cast<float>(receiverCorners.size()));
+
+        float receiverRadius = 0.0f;
+        for (const Vector3& corner : receiverCorners)
+        {
+            receiverRadius = std::max(
+                receiverRadius,
+                static_cast<float>(Length(corner - receiverCenter)));
+        }
+
+        const float receiverPadding = std::max(receiverRadius * 0.01f, 0.01f);
+        receiverRadius = std::max(receiverRadius + receiverPadding, 0.01f);
+
+        lightDirection = Normalize(lightDirection);
+        shadowCamera.SetLookDirection(lightDirection, Vector3(kZUnitVector));
+        const Quaternion lightRotation = shadowCamera.GetRotation();
+        const Quaternion inverseLightRotation = ~lightRotation;
+
+        const Vector3 receiverCenterLS = inverseLightRotation * receiverCenter;
+        const Vector3 sceneCenterLS =
+            inverseLightRotation * ModelInstanceManager::GetInstanceDistributionCenter();
+        const float sceneRadius = std::max(
+            ModelInstanceManager::GetInstanceDistributionRadius(),
+            receiverRadius);
+
+        const float receiverMinZ =
+            static_cast<float>(receiverCenterLS.GetZ()) - receiverRadius;
+        const float receiverMaxZ =
+            static_cast<float>(receiverCenterLS.GetZ()) + receiverRadius;
+        const float casterMinZ =
+            static_cast<float>(sceneCenterLS.GetZ()) - sceneRadius;
+        const float casterMaxZ =
+            static_cast<float>(sceneCenterLS.GetZ()) + sceneRadius;
+
+        float minZ = std::min(receiverMinZ, casterMinZ);
+        float maxZ = std::max(receiverMaxZ, casterMaxZ);
+        const float depthPadding = std::max((maxZ - minZ) * 0.01f, 0.1f);
+        minZ -= depthPadding;
+        maxZ += depthPadding;
+
+        const float shadowAspect =
+            shadowHeight > 0
+                ? static_cast<float>(shadowWidth) / static_cast<float>(shadowHeight)
+                : 1.0f;
+        float shadowWorldWidth = receiverRadius * 2.0f;
+        float shadowWorldHeight = receiverRadius * 2.0f;
+        if (shadowAspect > 1.0f)
+            shadowWorldWidth *= shadowAspect;
+        else if (shadowAspect > 0.0f)
+            shadowWorldHeight /= shadowAspect;
+
+        const Vector3 shadowCameraPositionLS(
+            receiverCenterLS.GetX(),
+            receiverCenterLS.GetY(),
+            minZ);
+        const Vector3 shadowCameraPosition =
+            lightRotation * shadowCameraPositionLS;
+        const Vector3 shadowBounds(
+            shadowWorldWidth,
+            shadowWorldHeight,
+            std::max(maxZ - minZ, 0.01f));
+
+        shadowCamera.UpdateMatrix(
+            lightDirection,
+            shadowCameraPosition,
+            shadowBounds,
+            shadowWidth,
+            shadowHeight,
+            shadowBufferPrecision);
+    }
+}
 
 class SceneViewer : public GameCore::IGameApp
 {
@@ -86,6 +195,8 @@ int wmain(int /*argc*/, wchar_t** /*argv*/)
 ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 1.0f, -5.0f, 20.0f, 0.1f); // unit: lx
 NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0f, 0.1f );
 NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f);
+NumVar g_SunShadowDistance("Viewer/Lighting/Sun Shadow Distance", 100.0f, 1.0f, 100000.0f, 1.0f);
+BoolVar g_RenderSunShadow("Viewer/Lighting/Render Sun Shadow", false);
 //NumVar g_SunLightSize("Viewer/Lighting/Sun Light Size", 0.5f, 0.0f, 2.0f, 0.1f);
 //NumVar g_SunShadowBias("Viewer/Lighting/Sun Shadow Bias", 4.f, 1.0f, 20.0f, 1.f );
 //BoolVar g_SunShadow("Viewer/Lighting/Sun Shadow", false);
@@ -530,110 +641,106 @@ void SceneViewer::RenderScene( void )
         float sinphi = sinf(g_SunInclination * 3.14159f * 0.5f);
 
         Vector3 SunDirection = Normalize(Vector3( costheta * cosphi, sinphi, sintheta * cosphi ));
-        Vector3 ShadowBounds = Vector3(ModelInstanceManager::GetModelInstance(0).GetRadius());
-        //m_SunShadowCamera.UpdateMatrix(-SunDirection, m_ModelInst.GetCenter(), ShadowBounds,
-        m_SunShadowCamera.UpdateMatrix(-SunDirection, Vector3(0, -5.0f, 0), Vector3(50, 30, 30),
-            (uint32_t)g_ShadowBuffer.GetWidth(), (uint32_t)g_ShadowBuffer.GetHeight(), 16);
+        UpdateDirectionalShadowCamera(
+            m_SunShadowCamera,
+            m_Camera,
+            -SunDirection,
+            static_cast<float>(g_SunShadowDistance),
+            g_ShadowBuffer.GetWidth(),
+            g_ShadowBuffer.GetHeight(),
+            16);
 
-        GlobalConstants globals = {};
-        globals.ViewProjMatrix = m_Camera.GetViewProjMatrix();
-		globals.ProjMatrix = m_Camera.GetProjMatrix();
-		globals.InverseViewProjMatrix = Invert(m_Camera.GetViewProjMatrix());
-        globals.SunShadowMatrix = m_SunShadowCamera.GetShadowMatrix();
-        globals.ViewerPos = m_Camera.GetPosition();
-        globals.SunDirection = SunDirection;
-        globals.SunIntensity = Vector3(Scalar(g_SunLightIntensity));
-
-		globals.PrevViewMatrix = m_PrevCamera.GetViewMatrix();
-		globals.PrevViewProjMatrix = m_PrevCamera.GetViewProjMatrix();
-		globals.PrevProjMatrix = m_PrevCamera.GetProjMatrix();
-		globals.PrevViewerPos = m_PrevCamera.GetPosition();
-		globals.HZBSizeAndInv[0] = (float)Renderer::GetCurrentHZB().GetWidth();
-		globals.HZBSizeAndInv[1] = (float)Renderer::GetCurrentHZB().GetHeight();
-		globals.HZBSizeAndInv[2] = 1.f / (float)Renderer::GetCurrentHZB().GetWidth();
-		globals.HZBSizeAndInv[3] = 1.f / (float)Renderer::GetCurrentHZB().GetHeight();
-
-
-        globals.ShadowTexelSize[0] = 1.0f / g_ShadowBuffer.GetWidth();
-        //globals.ShadowTexelSize[1] = g_SunLightSize;
-        //globals.ShadowTexelSize[2] = g_SunShadowBias;
-        globals.ShadowTexelSize[1] = 0.5f;
-        globals.ShadowTexelSize[2] = 4.f;
-
-        globals.InvTileDim[0] = 1.0f / Lighting::LightGridDim;
-        globals.InvTileDim[1] = 1.0f / Lighting::LightGridDim;
         uint32_t tileCountX = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), Lighting::LightGridDim);
         uint32_t tileCountY = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), Lighting::LightGridDim);
-        globals.TileCount[0] = tileCountX;
-        globals.TileCount[1] = tileCountY;
-        globals.FirstLightIndex[0] = Lighting::m_FirstConeLight;
-        globals.FirstLightIndex[1] = Lighting::m_FirstConeShadowedLight;
 
-        globals.ViewportWidth = g_SceneColorBuffer.GetWidth();
-        globals.ViewportHeight = g_SceneColorBuffer.GetHeight();
-		globals.InvViewportWidth = 1.0f / (float)g_SceneColorBuffer.GetWidth();
-		globals.InvViewportHeight = 1.0f / (float)g_SceneColorBuffer.GetHeight();
+        Renderer::FrameConstants frameConstants;
+        frameConstants.SunShadowMatrix = m_SunShadowCamera.GetShadowMatrix();
+        frameConstants.SunDirection = SunDirection;
+        frameConstants.SunIntensity = Vector3(Scalar(g_SunLightIntensity));
+        frameConstants.ShadowTexelSize = Vector4(
+            1.0f / g_ShadowBuffer.GetWidth(),
+            0.5f,
+            4.0f,
+            0.0f);
+        frameConstants.InvTileDim = Vector4(
+            1.0f / Lighting::LightGridDim,
+            1.0f / Lighting::LightGridDim,
+            0.0f,
+            0.0f);
+        frameConstants.TileCount[0] = tileCountX;
+        frameConstants.TileCount[1] = tileCountY;
+        frameConstants.TileCount[2] = 0;
+        frameConstants.TileCount[3] = 0;
+        frameConstants.FirstLightIndex[0] = Lighting::m_FirstConeLight;
+        frameConstants.FirstLightIndex[1] = Lighting::m_FirstConeShadowedLight;
+        frameConstants.FirstLightIndex[2] = 0;
+        frameConstants.FirstLightIndex[3] = 0;
+        frameConstants.FrameIndexMod2 = TemporalEffects::GetFrameIndexMod2();
+        frameConstants.IBLLutTextureSize = IBL::g_IBLLutSize;
+        frameConstants.IBLSpecularLDMapMipCount = Math::Log2(IBL::g_IBLSpecularLDMapSize) + 1;
+        frameConstants.BindlessResourcesBaseIndex = Renderer::GetBindlessResourcesBaseOffset();
 
-        globals.FrameIndexMod2 = TemporalEffects::GetFrameIndexMod2();
-        globals.IBLLutTextureSize = IBL::g_IBLLutSize;
-        globals.IBLSpecularLDMapMipCount = Math::Log2(IBL::g_IBLSpecularLDMapSize) + 1;
+        {
+            // Shadow
+            ScopedTimer _outerprof(L"Sun Shadow", gfxContext);
+            if (g_RenderSunShadow)
+            {
+                Renderer::RenderView shadowView;
+                shadowView.SetCamera(m_SunShadowCamera);
+                D3D12_VIEWPORT shadowViewport{};
+                shadowViewport.Width = (float)g_ShadowBuffer.GetWidth();
+                shadowViewport.Height = (float)g_ShadowBuffer.GetHeight();
+                shadowViewport.MinDepth = 0.0f;
+                shadowViewport.MaxDepth = 1.0f;
+                shadowView.SetViewport(shadowViewport);
+                D3D12_RECT shadowScissor;
+                shadowScissor.left = 0;
+                shadowScissor.top = 0;
+                shadowScissor.right = (LONG)g_ShadowBuffer.GetWidth();
+                shadowScissor.bottom = (LONG)g_ShadowBuffer.GetHeight();
+                shadowView.SetScissor(shadowScissor);
 
-		globals.BindlessResourcesBaseIndex = Renderer::GetBindlessResourcesBaseOffset();
+                Renderer::RenderSceneDepth(gfxContext, shadowView, frameConstants, g_ShadowBuffer);
+            }
+            else
+            {
+                gfxContext.TransitionResource(g_ShadowBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+                gfxContext.ClearDepth(g_ShadowBuffer);
+            }
+        }
 
         // Begin rendering depth
         gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
         gfxContext.ClearDepth(g_SceneDepthBuffer);
 
-        MeshSorter sorter(MeshSorter::kDefault);
-		sorter.SetCamera(m_Camera);
-		sorter.SetViewport(viewport);
-		sorter.SetScissor(scissor);
-		sorter.SetDepthStencilTarget(g_SceneDepthBuffer);
-		sorter.AddRenderTarget(g_SceneColorBuffer);
+        Renderer::RenderView mainView;
+        mainView.SetCamera(m_Camera);
+        mainView.SetPreviousCamera(m_PrevCamera);
+        mainView.SetViewport(viewport);
+        mainView.SetScissor(scissor);
+        mainView.SetHZBSize(Renderer::GetCurrentHZB());
 
-        ModelInstanceManager::Render(sorter);
-
-        sorter.Sort();
 
         {
+            Renderer::UpdateGlobalDescriptors();
+
             Lighting::FillLightGrid(gfxContext, m_Camera);
             
             ScopedTimer _outerprof(L"Main Render", gfxContext);
 
             gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
             gfxContext.ClearColor(g_SceneColorBuffer);
-            
-            {
-                ScopedTimer _prof(L"Render VBuffer", gfxContext);
-				gfxContext.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
-                gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_READ);
-				gfxContext.ClearColor(g_VisibilityBuffer);
-                sorter.RenderMeshes(MeshSorter::kVBuffer, gfxContext, globals);
-            }
 
-            {
-				gfxContext.TransitionResource(g_GBufferA, D3D12_RESOURCE_STATE_RENDER_TARGET);
-				gfxContext.TransitionResource(g_GBufferB, D3D12_RESOURCE_STATE_RENDER_TARGET);
-				gfxContext.TransitionResource(g_GBufferC, D3D12_RESOURCE_STATE_RENDER_TARGET);
-				gfxContext.TransitionResource(g_GBufferD, D3D12_RESOURCE_STATE_RENDER_TARGET);
-				gfxContext.ClearColor(g_GBufferA);
-				gfxContext.ClearColor(g_GBufferB);
-				gfxContext.ClearColor(g_GBufferC);
-				gfxContext.ClearColor(g_GBufferD);
+            Renderer::RenderVisibility(gfxContext, mainView, frameConstants);
 
-				Renderer::ResolveVBufferToGBuffer(gfxContext, globals);
-            }
+            Renderer::ResolveVBufferToGBuffer(gfxContext, mainView, frameConstants);
 
             XeGTAO::Render(gfxContext, m_Camera);
 
-            Lighting::RenderDeferredLighting(gfxContext, globals);
+            Lighting::RenderDeferredLighting(gfxContext, mainView, frameConstants);
 
-            Renderer::DrawSkybox(gfxContext, m_Camera, viewport, scissor);
+            Renderer::DrawSkybox(gfxContext, mainView, frameConstants);
 
-            {
-                ScopedTimer _prof(L"Draw Transparent", gfxContext);
-                sorter.RenderMeshes(MeshSorter::kTransparent, gfxContext, globals);
-            }
         }
     }
 

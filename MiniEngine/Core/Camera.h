@@ -18,6 +18,12 @@
 
 namespace Math
 {
+    enum class ProjectionType
+    {
+        Perspective,
+        Orthographic
+    };
+
     class BaseCamera
     {
     public:
@@ -48,10 +54,18 @@ namespace Math
         const Matrix4& GetReprojectionMatrix() const { return m_ReprojectMatrix; }
         const Frustum& GetViewSpaceFrustum() const { return m_FrustumVS; }
         const Frustum& GetWorldSpaceFrustum() const { return m_FrustumWS; }
+        ProjectionType GetProjectionType() const { return m_ProjectionType; }
+        bool IsPerspective() const { return m_ProjectionType == ProjectionType::Perspective; }
+        bool IsOrthographic() const { return m_ProjectionType == ProjectionType::Orthographic; }
 
     protected:
 
-        BaseCamera() : m_CameraToWorld(kIdentity), m_Basis(kIdentity) {}
+        explicit BaseCamera(ProjectionType projectionType)
+            : m_CameraToWorld(kIdentity)
+            , m_Basis(kIdentity)
+            , m_ProjectionType(projectionType)
+        {
+        }
 
         void SetProjMatrix( const Matrix4& ProjMat ) { m_ProjMatrix = ProjMat; }
 
@@ -83,6 +97,9 @@ namespace Math
         Frustum m_FrustumVS;		// View-space view frustum
         Frustum m_FrustumWS;		// World-space view frustum
 
+    private:
+
+        ProjectionType m_ProjectionType;
     };
 
     class Camera : public BaseCamera
@@ -138,7 +155,10 @@ namespace Math
         m_Basis = Matrix3(m_CameraToWorld.GetRotation());
     }
 
-    inline Camera::Camera() : m_ReverseZ(true), m_InfiniteZ(false)
+    inline Camera::Camera()
+        : BaseCamera(ProjectionType::Perspective)
+        , m_ReverseZ(true)
+        , m_InfiniteZ(false)
     {
         SetPerspectiveMatrix( XM_PIDIV4, 9.0f / 16.0f, 1.0f, 1000.0f );
     }

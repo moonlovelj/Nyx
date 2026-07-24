@@ -71,33 +71,3 @@ struct MaterialConstants
     uint32_t TextureStartIndex;
     uint32_t SamplerStartIndex;
 };
-
-__declspec(align(256)) struct GlobalConstants
-{
-    Math::Matrix4 ViewMatrix;
-    Math::Vector4 ViewSpaceFrustumPlanes[6];
-    Math::Matrix4 ViewProjMatrix;
-    Math::Matrix4 ProjMatrix;
-    Math::Matrix4 InverseViewProjMatrix;
-	Math::Matrix4 PrevViewMatrix;
-	Math::Matrix4 PrevViewProjMatrix;
-    Math::Matrix4 PrevProjMatrix;
-    Math::Matrix4 SunShadowMatrix;
-    Math::Vector3 ViewerPos;
-    Math::Vector3 PrevViewerPos;
-    Math::Vector3 SunDirection;
-    Math::Vector3 SunIntensity;
-    float ShadowTexelSize[4];
-    float InvTileDim[4];
-    float HZBSizeAndInv[4];
-    uint32_t TileCount[4];
-    uint32_t FirstLightIndex[4];
-    uint32_t ViewportWidth;
-    uint32_t ViewportHeight;
-	float InvViewportWidth;
-	float InvViewportHeight;
-    uint32_t FrameIndexMod2;
-    uint32_t IBLLutTextureSize;
-    uint32_t IBLSpecularLDMapMipCount;
-    uint32_t BindlessResourcesBaseIndex;
-};

@@ -279,12 +279,9 @@ void ModelViewer::RenderScene( void )
         m_SunShadowCamera.UpdateMatrix(-SunDirection, Vector3(0, -500.0f, 0), Vector3(5000, 3000, 3000),
             (uint32_t)g_ShadowBuffer.GetWidth(), (uint32_t)g_ShadowBuffer.GetHeight(), 16);
 
-        GlobalConstants globals;
-        globals.ViewProjMatrix = m_Camera.GetViewProjMatrix();
-        globals.SunShadowMatrix = m_SunShadowCamera.GetShadowMatrix();
-        globals.CameraPos = m_Camera.GetPosition();
-        globals.SunDirection = SunDirection;
-        globals.SunIntensity = Vector3(Scalar(g_SunLightIntensity));
+        Renderer::FrameConstants frameConstants;
+        frameConstants.FrameIndexMod2 = FrameIndex;
+        frameConstants.BindlessResourcesBaseIndex = Renderer::GetBindlessResourcesBaseOffset();
 
         // Begin rendering depth
         gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
@@ -303,7 +300,7 @@ void ModelViewer::RenderScene( void )
 
         {
             ScopedTimer _prof(L"Depth Pre-Pass", gfxContext);
-            sorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);
+            sorter.RenderMeshes(MeshSorter::kZPass, gfxContext, frameConstants);
         }
 
         SSAO::Render(gfxContext, m_Camera);
@@ -322,7 +319,7 @@ void ModelViewer::RenderScene( void )
                 m_ModelInst.Render(shadowSorter);
 
                 shadowSorter.Sort();
-                shadowSorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);
+                shadowSorter.RenderMeshes(MeshSorter::kZPass, gfxContext, frameConstants);
             }
 
             gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
@@ -336,12 +333,12 @@ void ModelViewer::RenderScene( void )
                 gfxContext.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV_DepthReadOnly());
                 gfxContext.SetViewportAndScissor(viewport, scissor);
 
-                sorter.RenderMeshes(MeshSorter::kOpaque, gfxContext, globals);
+                sorter.RenderMeshes(MeshSorter::kOpaque, gfxContext, frameConstants);
             }
 
             Renderer::DrawSkybox(gfxContext, m_Camera, viewport, scissor);
 
-            sorter.RenderMeshes(MeshSorter::kTransparent, gfxContext, globals);
+            sorter.RenderMeshes(MeshSorter::kTransparent, gfxContext, frameConstants);
         }
     }
 

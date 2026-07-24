@@ -20,7 +20,10 @@ class ShadowCamera : public Math::BaseCamera
 {
 public:
 
-    ShadowCamera() {}
+    ShadowCamera()
+        : Math::BaseCamera(Math::ProjectionType::Orthographic)
+    {
+    }
 
     void UpdateMatrix( 
         Math::Vector3 LightDirection,		// Direction parallel to light, in direction of travel

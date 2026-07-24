@@ -40,6 +40,15 @@ namespace
         commonResources["FrameIndexMod2"].Set(frameIndexMod2);
     }
 
+    void SetCommonResources(
+        ProgramBinder& binder,
+        const Renderer::FrameConstants& frame)
+    {
+        ProgramVar commonResources = binder["g_CommonResources"];
+        commonResources["BindlessResourcesBaseIndex"].Set(frame.BindlessResourcesBaseIndex);
+        commonResources["FrameIndexMod2"].Set(frame.FrameIndexMod2);
+    }
+
     bool InitializeFillLightGridProgram(
         ComputePSO& pso,
         std::shared_ptr<Program>& program,
@@ -402,8 +411,10 @@ void Lighting::FillLightGrid(GraphicsContext& gfxContext, const Camera& camera)
     Context.TransitionResource(m_LightGridBitMask, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 }
 
-void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
-    const GlobalConstants& globals)
+void Lighting::RenderDeferredLighting(
+    GraphicsContext& gfxContext,
+    const Renderer::RenderView& view,
+    const Renderer::FrameConstants& frame)
 {
     ScopedTimer _prof(L"DeferredLighting", gfxContext);
 
@@ -441,27 +452,20 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
     Context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
    
+    const Renderer::ViewConstants& viewConstants = view.GetConstants();
     ProgramVar constants = binder["g_DeferredLighting"];
-    constants["InverseViewProjMatrix"].Set(globals.InverseViewProjMatrix);
-    constants["SunShadowMatrix"].Set(globals.SunShadowMatrix);
-    constants["ViewerPos"].Set(globals.ViewerPos);
-    constants["SunDirection"].Set(globals.SunDirection);
-    constants["SunIntensity"].Set(globals.SunIntensity);
-    constants["ShadowTexelSize"].Set(DirectX::XMFLOAT4(
-        globals.ShadowTexelSize[0],
-        globals.ShadowTexelSize[1],
-        globals.ShadowTexelSize[2],
-        globals.ShadowTexelSize[3]));
-    constants["InvTileDim"].Set(DirectX::XMFLOAT4(
-        globals.InvTileDim[0],
-        globals.InvTileDim[1],
-        globals.InvTileDim[2],
-        globals.InvTileDim[3]));
-    constants["ViewportWidth"].Set(globals.ViewportWidth);
-    constants["ViewportHeight"].Set(globals.ViewportHeight);
-    constants["TileCountX"].Set(globals.TileCount[0]);
-    constants["IBLSpecularLDMapMipCount"].Set(globals.IBLSpecularLDMapMipCount);
-    SetCommonResources(binder, globals.FrameIndexMod2);
+    constants["InverseViewProjMatrix"].Set(viewConstants.InverseViewProjMatrix);
+    constants["SunShadowMatrix"].Set(frame.SunShadowMatrix);
+    constants["ViewerPos"].Set(viewConstants.ViewerPos);
+    constants["SunDirection"].Set(frame.SunDirection);
+    constants["SunIntensity"].Set(frame.SunIntensity);
+    constants["ShadowTexelSize"].Set(frame.ShadowTexelSize);
+    constants["InvTileDim"].Set(frame.InvTileDim);
+    constants["ViewportWidth"].Set(viewConstants.ViewportWidth);
+    constants["ViewportHeight"].Set(viewConstants.ViewportHeight);
+    constants["TileCountX"].Set(frame.TileCount[0]);
+    constants["IBLSpecularLDMapMipCount"].Set(frame.IBLSpecularLDMapMipCount);
+    SetCommonResources(binder, frame);
     binder.Apply();
 
     uint32_t groupCountX = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), 8);
@@ -470,28 +474,8 @@ void Lighting::RenderDeferredLighting(GraphicsContext& gfxContext,
     Context.Dispatch(groupCountX, groupCountY, 1);
 }
 
-void Lighting::RenderLightShadows(GraphicsContext& gfxContext, const GlobalConstants& globals)
+void Lighting::RenderLightShadows(
+    GraphicsContext&,
+    const Renderer::FrameConstants&)
 {
-    using namespace Renderer;
-    ScopedTimer _prof(L"RenderLightShadows", gfxContext);
-
-    gfxContext.TransitionResource(m_LightShadowArray, D3D12_RESOURCE_STATE_COPY_DEST);
-
-    for (uint32_t LightIndex = 0; LightIndex < MaxLights; ++LightIndex)
-    {
-        if (m_LightData[LightIndex].type == 2)
-        {
-            std::wstring passName = L"LightIndex: " + std::to_wstring(LightIndex);
-            ScopedTimer _profShadow(passName, gfxContext);
-            MeshSorter shadowSorter(MeshSorter::kShadows);
-            shadowSorter.SetCamera(m_LightCamera[LightIndex]);
-            shadowSorter.SetDepthStencilTarget(m_LightShadowTempBuffer);
-            ModelInstanceManager::Render(shadowSorter);
-            shadowSorter.Sort();
-            shadowSorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);
-            
-            gfxContext.TransitionResource(m_LightShadowTempBuffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
-            gfxContext.CopySubresource(m_LightShadowArray, LightIndex, m_LightShadowTempBuffer, 0);
-        }
-    }
 }

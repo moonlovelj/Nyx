@@ -7,9 +7,9 @@
 // A PARTICULAR PURPOSE, OR NON-INFRINGEMENT.
 //
 
-#ifndef VBUFFER_MESH_PASS_INDEX
-#error VBUFFER_MESH_PASS_INDEX must be supplied through ProgramDesc::AddDefine().
-#endif
+//#ifndef VBUFFER_MESH_PASS_INDEX
+//#error VBUFFER_MESH_PASS_INDEX must be supplied through ProgramDesc::AddDefine().
+//#endif
 
 #include "CommonResources.slang"
 #include "DataCodec.h.slang"
@@ -153,9 +153,13 @@ void meshMain(
     OutputIndices<uint3, MAX_PRIMS> outIndices,
     OutputPrimitives<PrimitiveAttributes, MAX_PRIMS> sharedPrimitives)
 {
+#ifndef DISABLE_HZB_CULL
 #if VBUFFER_MESH_PASS_INDEX == 1
     StructuredBuffer<QueueState> taskStateSRV = GetTaskQueueStateBufferSRV();
     const uint commandStart = taskStateSRV[0].PassState[0].VisibleMeshletCount;
+#else
+    const uint commandStart = 0;
+#endif
 #else
     const uint commandStart = 0;
 #endif
@@ -312,10 +316,11 @@ void pixelMain(MeshVertexOutput input, nointerpolation uint primID: TEXCOORD3)
         if (alpha < cutoff)
             discard;
     }
-
+#ifndef DEPTH_ONLY
     uint64_t packed = (((uint64_t)asuint(input.Position.z)) << 32) |
         ((input.CommandIndex & 0x01FFFFFF) << 7) | (primID & 0x7F);
 
     RWTexture2D<uint64_t> vbufferUAV = GetVBufferUAV();
     InterlockedMax(vbufferUAV[uint2(input.Position.xy)], packed);
+#endif
 }

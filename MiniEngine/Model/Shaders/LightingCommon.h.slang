@@ -13,7 +13,7 @@ SamplerState cubeMapSampler;
 SamplerState linearSampler;
 SamplerState pointSampler;
 
-#define PCSS_SHADOW     1
+#define PCSS_SHADOW     0
 
 static const float3 kDielectricSpecular = float3(0.04, 0.04, 0.04);
 

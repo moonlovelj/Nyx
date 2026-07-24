@@ -1,4 +1,4 @@
-﻿//
+//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -34,8 +34,6 @@
 
 namespace Renderer
 {
-    class MeshSorter;
-
 	inline constexpr uint32_t kPageSizeInBytes = 256u * 1024u;             // 256 KB
 	inline constexpr uint32_t kChunkSizeInBytes = kPageSizeInBytes * 1024u; // 256 MB
 
@@ -136,8 +134,6 @@ public:
 
     ~Model() { Destroy(); }
 
-    void Render(Renderer::MeshSorter& sorter) const;
-
     uint32_t GetNumTotalDraws() const;
 
     Math::BoundingSphere m_BoundingSphere; // Object-space bounding sphere
@@ -196,7 +192,6 @@ public:
     bool IsNull(void) const { return m_Model == nullptr; }
 
     void Update(float deltaTime, MeshConstants* meshConstantsCPU, Joint* jointCPU);
-    void Render(Renderer::MeshSorter& sorter) const;
 	void SetupInstanceData(InstanceConstants* instanceContants) const;
 
     void Resize(float newRadius);

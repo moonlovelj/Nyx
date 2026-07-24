@@ -186,7 +186,9 @@ void GeometryStreaming::Initialize(const std::vector<Renderer::HierarchyNode>& n
 
 	m_PageTableCPU.assign(numPages, PageResidency{});
 
-	m_GeometryStreamingRequestMaskGPU.Create(L"Geometry Streaming Request Mask", (m_GroupCount + 31) / 32, sizeof(uint32_t));
+    const uint32_t requestWordCount = (m_GroupCount + 31) / 32;
+    std::vector<uint32_t> initialRequestMask(requestWordCount, 0u);
+	m_GeometryStreamingRequestMaskGPU.Create(L"Geometry Streaming Request Mask", requestWordCount, sizeof(uint32_t), initialRequestMask.data());
 	Renderer::SetBindlessResourceDescriptor(UAV_GEOMETRY_STREAMING_REQUEST_MASK_BUFFER, m_GeometryStreamingRequestMaskGPU.GetUAV());
 
 	for (int i = 0; i < kNumReadbackBuffers; ++i)

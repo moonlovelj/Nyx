@@ -42,20 +42,6 @@ uint32_t Model::GetNumTotalDraws() const
     return totalDraws;
 }
 
-void Model::Render(
-    MeshSorter& sorter) const
-{
-    sorter;
-}
-
-void ModelInstance::Render(MeshSorter& sorter) const
-{
-    if (m_Model != nullptr)
-    {
-        m_Model->Render(sorter);
-    }
-}
-
 void ModelInstance::SetupInstanceData(InstanceConstants* instanceContants) const
 {
     if (!m_Model) return;

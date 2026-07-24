@@ -22,6 +22,7 @@
 #include "../Core/HierarchicalDepthBuffer.h"
 #include "CommandBucketer.h"
 #include "Shaders/BindlessIndices.h.slang"
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -33,13 +34,201 @@ class RootSignature;
 class DescriptorHeap;
 class ShadowCamera;
 class ShadowBuffer;
-struct GlobalConstants;
+class Program;
 struct Mesh;
 struct Joint;
 
 namespace Renderer
 {
     using namespace Math;
+
+    struct ViewConstants
+    {
+        ViewConstants()
+            : ViewMatrix(kIdentity)
+            , ProjMatrix(kIdentity)
+            , ViewProjMatrix(kIdentity)
+            , InverseViewProjMatrix(kIdentity)
+            , PrevViewMatrix(kIdentity)
+            , PrevProjMatrix(kIdentity)
+            , PrevViewProjMatrix(kIdentity)
+            , ViewerPos(kZero)
+            , PrevViewerPos(kZero)
+            , HZBSizeAndInv(kZero)
+            , Projection(ProjectionType::Perspective)
+            , ViewportWidth(0)
+            , ViewportHeight(0)
+            , InvViewportWidth(0.0f)
+            , InvViewportHeight(0.0f)
+            , LodScale(0.0f)
+        {
+        }
+
+        Matrix4 ViewMatrix;
+        Matrix4 ProjMatrix;
+        Matrix4 ViewProjMatrix;
+        Matrix4 InverseViewProjMatrix;
+
+        Matrix4 PrevViewMatrix;
+        Matrix4 PrevProjMatrix;
+        Matrix4 PrevViewProjMatrix;
+
+        Vector3 ViewerPos;
+        Vector3 PrevViewerPos;
+        Vector4 HZBSizeAndInv;
+
+        ProjectionType Projection;
+        uint32_t ViewportWidth;
+        uint32_t ViewportHeight;
+        float InvViewportWidth;
+        float InvViewportHeight;
+        float LodScale;
+    };
+
+    struct FrameConstants
+    {
+        FrameConstants()
+            : SunShadowMatrix(kIdentity)
+            , SunDirection(kZero)
+            , SunIntensity(kZero)
+            , ShadowTexelSize(kZero)
+            , InvTileDim(kZero)
+            , TileCount{}
+            , FirstLightIndex{}
+            , FrameIndexMod2(0)
+            , IBLLutTextureSize(0)
+            , IBLSpecularLDMapMipCount(0)
+            , BindlessResourcesBaseIndex(0)
+        {
+        }
+
+        Matrix4 SunShadowMatrix;
+        Vector3 SunDirection;
+        Vector3 SunIntensity;
+        Vector4 ShadowTexelSize;
+        Vector4 InvTileDim;
+
+        uint32_t TileCount[4];
+        uint32_t FirstLightIndex[4];
+        uint32_t FrameIndexMod2;
+        uint32_t IBLLutTextureSize;
+        uint32_t IBLSpecularLDMapMipCount;
+        uint32_t BindlessResourcesBaseIndex;
+    };
+
+    class RenderView
+    {
+    public:
+        RenderView()
+            : m_Camera(nullptr)
+            , m_Viewport{}
+            , m_Scissor{}
+        {
+        }
+
+        void SetCamera(const BaseCamera& camera)
+        {
+            m_Camera = &camera;
+
+            m_Constants.ViewMatrix = camera.GetViewMatrix();
+            m_Constants.ProjMatrix = camera.GetProjMatrix();
+            m_Constants.ViewProjMatrix = camera.GetViewProjMatrix();
+            m_Constants.InverseViewProjMatrix = Invert(camera.GetViewProjMatrix());
+            m_Constants.ViewerPos = camera.GetPosition();
+            m_Constants.Projection = camera.GetProjectionType();
+
+            m_Constants.PrevViewMatrix = m_Constants.ViewMatrix;
+            m_Constants.PrevProjMatrix = m_Constants.ProjMatrix;
+            m_Constants.PrevViewProjMatrix = m_Constants.ViewProjMatrix;
+            m_Constants.PrevViewerPos = m_Constants.ViewerPos;
+
+            UpdateLodScale();
+        }
+
+        void SetPreviousCamera(const BaseCamera& camera)
+        {
+            m_Constants.PrevViewMatrix = camera.GetViewMatrix();
+            m_Constants.PrevProjMatrix = camera.GetProjMatrix();
+            m_Constants.PrevViewProjMatrix = camera.GetViewProjMatrix();
+            m_Constants.PrevViewerPos = camera.GetPosition();
+        }
+
+        void SetViewport(const D3D12_VIEWPORT& viewport)
+        {
+            m_Viewport = viewport;
+            m_Constants.ViewportWidth = static_cast<uint32_t>(viewport.Width);
+            m_Constants.ViewportHeight = static_cast<uint32_t>(viewport.Height);
+            m_Constants.InvViewportWidth = viewport.Width > 0.0f ? 1.0f / viewport.Width : 0.0f;
+            m_Constants.InvViewportHeight = viewport.Height > 0.0f ? 1.0f / viewport.Height : 0.0f;
+
+            UpdateLodScale();
+        }
+
+        void SetScissor(const D3D12_RECT& scissor)
+        {
+            m_Scissor = scissor;
+        }
+
+        void SetHZBSize(uint32_t width, uint32_t height)
+        {
+            const float widthF = static_cast<float>(width);
+            const float heightF = static_cast<float>(height);
+            m_Constants.HZBSizeAndInv = Vector4(
+                widthF,
+                heightF,
+                width > 0 ? 1.0f / widthF : 0.0f,
+                height > 0 ? 1.0f / heightF : 0.0f);
+        }
+
+        void SetHZBSize(const HierarchicalDepthBuffer& hzb)
+        {
+            SetHZBSize(hzb.GetWidth(), hzb.GetHeight());
+        }
+
+        const ViewConstants& GetConstants() const
+        {
+            return m_Constants;
+        }
+
+        const BaseCamera* GetCamera() const
+        {
+            return m_Camera;
+        }
+
+        const D3D12_VIEWPORT& GetViewport() const
+        {
+            return m_Viewport;
+        }
+
+        const D3D12_RECT& GetScissor() const
+        {
+            return m_Scissor;
+        }
+
+    private:
+        void UpdateLodScale()
+        {
+            const float scaleX = std::fabs(static_cast<float>(m_Constants.ProjMatrix.GetX().GetX()));
+            const float scaleY = std::fabs(static_cast<float>(m_Constants.ProjMatrix.GetY().GetY()));
+
+            if (scaleX > 0.0f && scaleY > 0.0f && m_Viewport.Width > 0.0f && m_Viewport.Height > 0.0f)
+            {
+                const float lodScaleX = 2.0f / (scaleX * m_Viewport.Width);
+                const float lodScaleY = 2.0f / (scaleY * m_Viewport.Height);
+
+                m_Constants.LodScale = std::min(lodScaleX, lodScaleY);
+            }
+            else
+            {
+                m_Constants.LodScale = 0.0f;
+            }
+        }
+
+        ViewConstants m_Constants;
+        const BaseCamera* m_Camera;
+        D3D12_VIEWPORT m_Viewport;
+        D3D12_RECT m_Scissor;
+    };
 
     //extern RootSignature m_RootSig;
     extern DescriptorHeap s_TextureHeap;
@@ -70,116 +259,48 @@ namespace Renderer
     void SetIBLTextures();
     void SetIBLBias(float LODBias);
     void UpdateGlobalDescriptors(void);
-    void DrawSkybox( GraphicsContext& gfxContext, const Camera& camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor );
+    void DrawSkybox(GraphicsContext& gfxContext,
+        const RenderView& view,
+        const FrameConstants& frame);
 
-	void InstanceCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, uint32_t cullPassIdx);
-	void DAGCull(GraphicsContext& gfxContext, const GlobalConstants& inGlobals, const BaseCamera* camera,
-		const D3D12_VIEWPORT& viewport, uint32_t cullPassIdx);
+    void InstanceCull(
+        GraphicsContext& gfxContext,
+        const RenderView& view,
+        const FrameConstants& frame,
+        const Program* program,
+        const ComputePSO& pso,
+        bool disableHZBCull = false);
+    void DAGCull(
+        GraphicsContext& gfxContext,
+        const RenderView& view,
+        const FrameConstants& frame,
+        const Program* program,
+        const ComputePSO& pso,
+        bool disableHZBCull = false);
 
     uint32_t GetBindlessResourcesBaseOffset();
 	void SetBindlessResourceDescriptor(uint32_t bindlessIndex, const D3D12_CPU_DESCRIPTOR_HANDLE& handle);
 
-	void ExportDepth(GraphicsContext& gfxContext, const GlobalConstants& inGlobals,
-		const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor);
-	void ResolveVBufferToGBuffer(GraphicsContext& gfxContext, const GlobalConstants& inGlobals);
+    void ExportDepth(
+        GraphicsContext& gfxContext,
+        const RenderView& view,
+        const FrameConstants& frame);
+    void ResolveVBufferToGBuffer(
+        GraphicsContext& gfxContext,
+        const RenderView& view,
+        const FrameConstants& frame);
+
+    void RenderVisibility(
+        GraphicsContext& gfxContext,
+        const RenderView& view,
+        const FrameConstants& frame);
 
 	HierarchicalDepthBuffer& GetPrevHZB();
 	HierarchicalDepthBuffer& GetCurrentHZB();
 
-
-    class MeshSorter
-    {
-    public:
-		enum BatchType { kDefault, kShadows };
-        enum DrawPass { kZPass, kOpaque, kVBuffer, kGBuffer, kTransparent, kNumPasses };
-
-		MeshSorter(BatchType type)
-		{
-			m_BatchType = type;
-			m_Camera = nullptr;
-			m_Viewport = {};
-			m_Scissor = {};
-			m_NumRTVs = 0;
-			m_DSV = nullptr;
-			m_SortObjects.clear();
-			m_SortKeys.clear();
-			std::memset(m_PassCounts, 0, sizeof(m_PassCounts));
-			//m_CurrentPass = kZPass;
-			m_CurrentDraw = 0;
-			m_IBV = {};
-		}
-
-		void SetIndexBuffer(const D3D12_INDEX_BUFFER_VIEW& ibv) { m_IBV = ibv; }
-		void SetCamera( const BaseCamera& camera ) { m_Camera = &camera; }
-		void SetViewport( const D3D12_VIEWPORT& viewport ) { m_Viewport = viewport; }
-		void SetScissor( const D3D12_RECT& scissor ) { m_Scissor = scissor; }
-		void AddRenderTarget( ColorBuffer& RTV )
-		{ 
-			ASSERT(m_NumRTVs < 8);
-			m_RTV[m_NumRTVs++] = &RTV;
-		}
-		void SetDepthStencilTarget( DepthBuffer& DSV ) { m_DSV = &DSV; }
-
-        const Frustum& GetWorldFrustum() const { return m_Camera->GetWorldSpaceFrustum(); }
-        const Frustum& GetViewFrustum() const { return m_Camera->GetViewSpaceFrustum(); }
-        const Matrix4& GetViewMatrix() const { return m_Camera->GetViewMatrix(); }
-
-   //     void AddMesh( const Mesh& mesh, float distance,
-   //         D3D12_GPU_VIRTUAL_ADDRESS meshCBV,
-   //         D3D12_GPU_VIRTUAL_ADDRESS materialCBV,
-   //         D3D12_GPU_VIRTUAL_ADDRESS bufferPtr,
-   //         D3D12_GPU_VIRTUAL_ADDRESS meshJoints,
-			//const IndirectArgsBuffer& indirectArgsBuffer,
-			//uint32_t indirectArgsOffset);
-
-        void Sort();
-
-        void RenderMeshes(DrawPass pass, GraphicsContext& context, const GlobalConstants& inGlobals);
-
-    private:
-		void RenderMeshedInternal(GraphicsContext& context,
-			const GlobalConstants& inGlobals);
-
-        struct SortKey
-        {
-            union
-            {
-                uint64_t value;
-                struct
-                {
-                    uint64_t objectIdx : 16;
-                    uint64_t psoIdx : 12;
-                    uint64_t key : 32;
-                    uint64_t passID : 4;
-                };
-            };
-        };
-
-        struct SortObject
-        {
-            const Mesh* mesh;
-            D3D12_GPU_VIRTUAL_ADDRESS meshJoints;
-            D3D12_GPU_VIRTUAL_ADDRESS meshCBV;
-            D3D12_GPU_VIRTUAL_ADDRESS materialCBV;
-            D3D12_GPU_VIRTUAL_ADDRESS bufferPtr;
-			const IndirectArgsBuffer& indirectArgsBuffer;
-			uint32_t indirectArgsOffset;
-        };
-
-        std::vector<SortObject> m_SortObjects;
-        std::vector<uint64_t> m_SortKeys;
-		BatchType m_BatchType;
-        uint32_t m_PassCounts[kNumPasses];
-        //DrawPass m_CurrentPass;
-        uint32_t m_CurrentDraw;
-
-		const BaseCamera* m_Camera;
-		D3D12_VIEWPORT m_Viewport;
-		D3D12_RECT m_Scissor;
-		uint32_t m_NumRTVs;
-		ColorBuffer* m_RTV[8];
-		DepthBuffer* m_DSV;
-		D3D12_INDEX_BUFFER_VIEW m_IBV;
-	};
-
+    void RenderSceneDepth(
+        GraphicsContext& gfxContext,
+        const RenderView& view,
+        const FrameConstants& frame,
+        DepthBuffer& depthTarget);
 } // namespace Renderer
