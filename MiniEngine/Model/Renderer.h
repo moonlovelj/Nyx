@@ -116,6 +116,22 @@ namespace Renderer
         uint32_t BindlessResourcesBaseIndex;
     };
 
+    struct HZBResources
+    {
+        HierarchicalDepthBuffer* Previous = nullptr;
+        HierarchicalDepthBuffer* Current = nullptr;
+        uint32_t PreviousSRVIndex = UINT32_MAX;
+        uint32_t CurrentSRVIndex = UINT32_MAX;
+
+        bool IsValid() const
+        {
+            return Previous != nullptr &&
+                Current != nullptr &&
+                PreviousSRVIndex != UINT32_MAX &&
+                CurrentSRVIndex != UINT32_MAX;
+        }
+    };
+
     class RenderView
     {
     public:
@@ -269,6 +285,7 @@ namespace Renderer
         const FrameConstants& frame,
         const Program* program,
         const ComputePSO& pso,
+        const HZBResources* hzbResources,
         bool disableHZBCull = false);
     void DAGCull(
         GraphicsContext& gfxContext,
@@ -276,6 +293,7 @@ namespace Renderer
         const FrameConstants& frame,
         const Program* program,
         const ComputePSO& pso,
+        const HZBResources* hzbResources,
         bool disableHZBCull = false);
 
     uint32_t GetBindlessResourcesBaseOffset();
@@ -297,10 +315,13 @@ namespace Renderer
 
 	HierarchicalDepthBuffer& GetPrevHZB();
 	HierarchicalDepthBuffer& GetCurrentHZB();
+    HZBResources GetSceneHZBResources();
+    HZBResources GetShadowHZBResources();
 
     void RenderSceneDepth(
         GraphicsContext& gfxContext,
         const RenderView& view,
         const FrameConstants& frame,
+        HZBResources* hzbResources,
         DepthBuffer& depthTarget);
 } // namespace Renderer

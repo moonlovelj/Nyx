@@ -15,7 +15,7 @@
 
 #include "DepthBuffer.h"
 
-#define SHADOW_FORMAT DXGI_FORMAT_D16_UNORM
+#define SHADOW_FORMAT DXGI_FORMAT_D32_FLOAT
 
 class EsramAllocator;
 

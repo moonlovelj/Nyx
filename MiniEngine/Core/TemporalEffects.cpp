@@ -162,6 +162,11 @@ void TemporalEffects::ResolveImage( CommandContext& BaseContext )
         TriggerReset = false;
     }
 
+    if (!EnableTAA)
+    {
+        return;
+    }
+
     uint32_t Src = s_FrameIndexMod2;
     uint32_t Dst = Src ^ 1;
 

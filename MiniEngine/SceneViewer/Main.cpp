@@ -179,6 +179,7 @@ private:
     D3D12_RECT m_MainScissor;
 
     ShadowCamera m_SunShadowCamera;
+    ShadowCamera m_PrevSunShadowCamera;
 
     bool m_ShowLoadingUI = false;
     bool m_LoadPending = false;
@@ -192,7 +193,7 @@ int wmain(int /*argc*/, wchar_t** /*argv*/)
     return GameCore::RunApplication(SceneViewer(), L"SceneViewer", GetModuleHandle(nullptr), SW_SHOWDEFAULT);
 }
 
-ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 1.0f, -5.0f, 20.0f, 0.1f); // unit: lx
+ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 6.0f, -5.0f, 20.0f, 0.1f); // unit: lx
 NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0f, 0.1f );
 NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f);
 NumVar g_SunShadowDistance("Viewer/Lighting/Sun Shadow Distance", 100.0f, 1.0f, 100000.0f, 1.0f);
@@ -648,7 +649,7 @@ void SceneViewer::RenderScene( void )
             static_cast<float>(g_SunShadowDistance),
             g_ShadowBuffer.GetWidth(),
             g_ShadowBuffer.GetHeight(),
-            16);
+            32);
 
         uint32_t tileCountX = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), Lighting::LightGridDim);
         uint32_t tileCountY = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), Lighting::LightGridDim);
@@ -700,7 +701,11 @@ void SceneViewer::RenderScene( void )
                 shadowScissor.bottom = (LONG)g_ShadowBuffer.GetHeight();
                 shadowView.SetScissor(shadowScissor);
 
-                Renderer::RenderSceneDepth(gfxContext, shadowView, frameConstants, g_ShadowBuffer);
+                shadowView.SetPreviousCamera(m_PrevSunShadowCamera);
+                shadowView.SetHZBSize(*Renderer::GetShadowHZBResources().Current);
+
+                Renderer::HZBResources hzbResources = Renderer::GetShadowHZBResources();
+                Renderer::RenderSceneDepth(gfxContext, shadowView, frameConstants, &hzbResources, g_ShadowBuffer);
             }
             else
             {
@@ -762,6 +767,7 @@ void SceneViewer::RenderScene( void )
         MotionBlur::RenderObjectBlur(gfxContext, g_VelocityBuffer);
 
     m_PrevCamera = m_Camera;
+    m_PrevSunShadowCamera = m_SunShadowCamera;
     gfxContext.Finish();
 }
 

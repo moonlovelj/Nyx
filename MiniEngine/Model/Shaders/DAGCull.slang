@@ -34,6 +34,8 @@ struct DAGCullConstants
 #ifndef DISABLE_HZB_CULL
     float4x4 PrevViewProjMatrix;
     float4 HZBSizeAndInv;
+    DescriptorHandle<Texture2D<float>> PreviousHZB;
+    DescriptorHandle<Texture2D<float>> CurrentHZB;
 #endif
 };
 
@@ -130,7 +132,7 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
         childNode.BBoxMin, childNode.BBoxMax,
         meshInstance.WorldMatrix,
         g_DAGCull.PrevViewProjMatrix,
-        GetPrevSceneHZBSRV(),
+        g_DAGCull.PreviousHZB,
         g_HZBSampler,
         cullContext);
 #endif
@@ -139,7 +141,7 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
         childNode.BBoxMin, childNode.BBoxMax,
         meshInstance.WorldMatrix,
         g_DAGCull.ViewProjMatrix,
-        GetCurrentSceneHZBSRV(),
+        g_DAGCull.CurrentHZB,
         g_HZBSampler,
         cullContext);
 #endif
@@ -320,7 +322,7 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
             meshletHeader.BBoxMax,
             meshInstance.WorldMatrix,
             g_DAGCull.PrevViewProjMatrix,
-            GetPrevSceneHZBSRV(),
+            g_DAGCull.PreviousHZB,
             g_HZBSampler,
             cullContext);
         
@@ -330,7 +332,7 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
                 meshletHeader.BBoxMax,
                 meshInstance.WorldMatrix,
                 g_DAGCull.ViewProjMatrix,
-                GetCurrentSceneHZBSRV(),
+                g_DAGCull.CurrentHZB,
                 g_HZBSampler,
                 cullContext);
 #endif

@@ -24,6 +24,8 @@ struct InstanceCullConstants
 #ifndef DISABLE_HZB_CULL
     float4x4 PrevViewProjMatrix;
     float4 HZBSizeAndInv;
+    DescriptorHandle<Texture2D<float>> PreviousHZB;
+    DescriptorHandle<Texture2D<float>> CurrentHZB;
 #endif
 };
 
@@ -50,11 +52,11 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
 #if INSTANCE_CULL_PASS_INDEX == 1
     const uint passIndex = 1;
     const float4x4 viewProjMatrix = g_InstanceCull.ViewProjMatrix;
-    Texture2D<float> hzbTexture = GetCurrentSceneHZBSRV();
+    Texture2D<float> hzbTexture = g_InstanceCull.CurrentHZB;
 #else
     const uint passIndex = 0;
     const float4x4 viewProjMatrix = g_InstanceCull.PrevViewProjMatrix;
-    Texture2D<float> hzbTexture = GetPrevSceneHZBSRV();
+    Texture2D<float> hzbTexture = g_InstanceCull.PreviousHZB;
 #endif
 
     CullCommonContext cullContext;

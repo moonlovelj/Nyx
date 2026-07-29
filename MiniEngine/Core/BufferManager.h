@@ -41,6 +41,7 @@ namespace Graphics
 
     extern ColorBuffer g_VelocityBuffer;    // R10G10B10  (3D velocity)
     extern ShadowBuffer g_ShadowBuffer;
+    extern HierarchicalDepthBuffer g_ShadowHZBBuffer[2];
 
     extern ColorBuffer g_SSAOFullScreen;	// R8_UNORM
     extern ColorBuffer g_LinearDepth[2];	// Normalized planar distance (0 at eye, 1 at far plane) computed from the SceneDepthBuffer
