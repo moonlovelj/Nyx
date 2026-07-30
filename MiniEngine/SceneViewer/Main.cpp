@@ -16,6 +16,7 @@
 #include "GameInput.h"
 #include "glTF.h"
 #include "Renderer.h"
+#include "VirtualShadowMap.h"
 #include "Model.h"
 #include "ModelLoader.h"
 #include "ShadowCamera.h"
@@ -46,7 +47,7 @@ using namespace std;
 
 namespace
 {
-    void UpdateDirectionalShadowCamera(
+    Vector3 UpdateDirectionalShadowCamera(
         ShadowCamera& shadowCamera,
         const Camera& viewCamera,
         Vector3 lightDirection,
@@ -150,6 +151,8 @@ namespace
             shadowWidth,
             shadowHeight,
             shadowBufferPrecision);
+
+        return receiverCenter;
     }
 }
 
@@ -642,7 +645,7 @@ void SceneViewer::RenderScene( void )
         float sinphi = sinf(g_SunInclination * 3.14159f * 0.5f);
 
         Vector3 SunDirection = Normalize(Vector3( costheta * cosphi, sinphi, sintheta * cosphi ));
-        UpdateDirectionalShadowCamera(
+        const Vector3 sunShadowFocus = UpdateDirectionalShadowCamera(
             m_SunShadowCamera,
             m_Camera,
             -SunDirection,
@@ -656,6 +659,11 @@ void SceneViewer::RenderScene( void )
 
         Renderer::FrameConstants frameConstants;
         frameConstants.SunShadowMatrix = m_SunShadowCamera.GetShadowMatrix();
+        Renderer::VirtualShadowMap::DirectionalVsmAddressDesc vsmAddressDesc;
+        vsmAddressDesc.WorldToLightRotation = Matrix3(~m_SunShadowCamera.GetRotation());
+        vsmAddressDesc.FocusPositionWS = sunShadowFocus;
+        frameConstants.SunVsmAddress =
+            Renderer::VirtualShadowMap::BuildDirectionalVsmAddressConstants(vsmAddressDesc);
         frameConstants.SunDirection = SunDirection;
         frameConstants.SunIntensity = Vector3(Scalar(g_SunLightIntensity));
         frameConstants.ShadowTexelSize = Vector4(

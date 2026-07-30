@@ -21,6 +21,7 @@
 #include "../Core/TextureManager.h"
 #include "../Core/HierarchicalDepthBuffer.h"
 #include "CommandBucketer.h"
+#include "VirtualShadowMapShared.h"
 #include "Shaders/BindlessIndices.h.slang"
 #include <cmath>
 #include <cstdint>
@@ -103,6 +104,7 @@ namespace Renderer
         }
 
         Matrix4 SunShadowMatrix;
+        VirtualShadowMap::DirectionalVsmAddressConstants SunVsmAddress;
         Vector3 SunDirection;
         Vector3 SunIntensity;
         Vector4 ShadowTexelSize;

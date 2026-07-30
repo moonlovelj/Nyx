@@ -109,6 +109,9 @@
     <ClCompile Include="ModelInstanceManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="VirtualShadowMap.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
@@ -188,6 +191,12 @@
     <ClInclude Include="..\ThirdParty\cgltf\cgltf.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="VirtualShadowMap.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="VirtualShadowMapShared.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="Shaders\FillLightGrid.slang">
@@ -246,6 +255,9 @@
       <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\GeometryCommon.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
+    <None Include="Shaders\VirtualShadowMap.h.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
   </ItemGroup>

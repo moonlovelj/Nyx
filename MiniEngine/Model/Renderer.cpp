@@ -150,8 +150,10 @@ namespace Renderer
 	NumVar PixelErrorThreshold("Renderer/Pixel Error Threshold", 1.0f, 0.5f, 10.0f, 0.25f);
 	BoolVar FreezeCull("Renderer/Freeze Cull", false);
     
-	const char* ViewModeLabels[] = { "Lit", "MeshletLOD", "MeshletID", "MeshletTriangle", "MeshID", "InstanceID", "MaterialID"};
-	EnumVar ViewMode("Visualize/View Mode", 0, _countof(ViewModeLabels), ViewModeLabels);
+    const char* ViewModeLabels[] = {
+        "Lit", "MeshletLOD", "MeshletID", "MeshletTriangle", "MeshID", "InstanceID", "MaterialID", "VSMAddress"
+    };
+    EnumVar ViewMode("Visualize/View Mode", 0, _countof(ViewModeLabels), ViewModeLabels);
 
     bool s_Initialized = false;
 

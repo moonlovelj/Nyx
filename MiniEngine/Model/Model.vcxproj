@@ -126,6 +126,8 @@
     <ClInclude Include="Renderer.h" />
     <ClInclude Include="StructsIO.h" />
     <ClInclude Include="TextureConvert.h" />
+    <ClInclude Include="VirtualShadowMap.h" />
+    <ClInclude Include="VirtualShadowMapShared.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\ThirdParty\meshoptimizer\allocator.cpp" />
@@ -164,6 +166,7 @@
     <ClCompile Include="ParticleEffects.cpp" />
     <ClCompile Include="Renderer.cpp" />
     <ClCompile Include="TextureConvert.cpp" />
+    <ClCompile Include="VirtualShadowMap.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
@@ -185,6 +188,7 @@
     <None Include="Shaders\Skybox.slang" />
     <None Include="Shaders\VBufferMesh.slang" />
     <None Include="Shaders\ViewMode.h.slang" />
+    <None Include="Shaders\VirtualShadowMap.h.slang" />
     <None Include="Shaders\WaveUtil.h.slang" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

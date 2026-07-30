@@ -8,6 +8,7 @@
 //
 
 #include "CommonResources.slang"
+#include "VirtualShadowMap.h.slang"
 #include "ViewMode.h.slang"
 
 struct DeferredLightingConstants
@@ -23,6 +24,7 @@ struct DeferredLightingConstants
     uint ViewportHeight;
     uint TileCountX;
     uint IBLSpecularLDMapMipCount;
+    DirectionalVsmAddressConstants VsmAddress;
 };
 
 ConstantBuffer<DeferredLightingConstants> g_DeferredLighting;
@@ -64,7 +66,23 @@ void computeMain(
         RWTexture2D<float4> sceneColor = GetSceneColorUAV();
         Texture2D<float4> gBufferD = GetGBufferDSRV();
         uint viewMode = (uint)gBufferD[DTid].a;
-        if (viewMode == VIEW_MODE_LIT)
+        if (viewMode == VIEW_MODE_SHOW_VSM_ADDRESS)
+        {
+            Texture2D<float> sceneDepth = GetSceneDepthSRV();
+            float3 worldPosition = ConvertPixelToWorldPos(DTid, sceneDepth);
+            VsmVirtualAddress address = GetDirectionalVsmVirtualAddress(worldPosition, g_DeferredLighting.VsmAddress);
+            float3 addressColor = Uint2ToColorR16G16B16(asuint(address.GlobalPage));
+            bool pageBorder = any(address.TexelInPage < uint2(2u)) ||
+                any(address.TexelInPage >= uint2(VSM_PAGE_SIZE - 2u));
+
+            if (pageBorder)
+                addressColor = float3(0.0f);
+            if (address.InsideWindow == 0u)
+                addressColor = float3(1.0f, 0.0f, 0.0f);
+
+            sceneColor[DTid] = float4(addressColor, 1.0f);
+        }
+        else if (viewMode == VIEW_MODE_LIT)
         {
             Texture2D<float4> gBufferA = GetGBufferASRV();
             Texture2D<float4> gBufferB = GetGBufferBSRV();

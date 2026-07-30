@@ -20,6 +20,7 @@
 #include "BufferManager.h"
 #include "Model.h"
 #include "Renderer.h"
+#include "VirtualShadowMap.h"
 #include "TemporalEffects.h"
 #include "ConstantBuffers.h"
 #include "IBL.h"
@@ -465,6 +466,7 @@ void Lighting::RenderDeferredLighting(
     constants["ViewportHeight"].Set(viewConstants.ViewportHeight);
     constants["TileCountX"].Set(frame.TileCount[0]);
     constants["IBLSpecularLDMapMipCount"].Set(frame.IBLSpecularLDMapMipCount);
+    Renderer::VirtualShadowMap::SetDirectionalVsmAddressConstants(constants["VsmAddress"], frame.SunVsmAddress);
     SetCommonResources(binder, frame);
     binder.Apply();
 
