@@ -153,6 +153,9 @@ void Lighting::InitializeResources( void )
         Renderer::GetModelShaderPath("DeferredLighting.slang"),
         "computeMain",
         ProgramUtils::BindlessMode::ResourceHeap);
+    deferredLightingDesc.AddRootBufferSRV("g_VsmShadowViews");
+    deferredLightingDesc.AddRootBufferSRV("g_DirectionalVsmAddresses");
+    deferredLightingDesc.AddRootBufferSRV("g_VsmPageRequestMask");
 
     SamplerDesc cubeMapSamplerDesc;
     cubeMapSamplerDesc.MaxAnisotropy = 8;
@@ -466,7 +469,8 @@ void Lighting::RenderDeferredLighting(
     constants["ViewportHeight"].Set(viewConstants.ViewportHeight);
     constants["TileCountX"].Set(frame.TileCount[0]);
     constants["IBLSpecularLDMapMipCount"].Set(frame.IBLSpecularLDMapMipCount);
-    Renderer::VirtualShadowMap::SetDirectionalVsmAddressConstants(constants["VsmAddress"], frame.SunVsmAddress);
+    constants["VsmViewId"].Set(frame.SunVsmViewId);
+    Renderer::VirtualShadowMap::BindPageRequestDebugResources(binder);
     SetCommonResources(binder, frame);
     binder.Apply();
 

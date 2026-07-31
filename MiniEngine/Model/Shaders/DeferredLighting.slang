@@ -8,6 +8,7 @@
 //
 
 #include "CommonResources.slang"
+#include "ViewCommon.h.slang"
 #include "VirtualShadowMap.h.slang"
 #include "ViewMode.h.slang"
 
@@ -24,10 +25,13 @@ struct DeferredLightingConstants
     uint ViewportHeight;
     uint TileCountX;
     uint IBLSpecularLDMapMipCount;
-    DirectionalVsmAddressConstants VsmAddress;
+    uint VsmViewId;
 };
 
 ConstantBuffer<DeferredLightingConstants> g_DeferredLighting;
+StructuredBuffer<VsmShadowView> g_VsmShadowViews;
+StructuredBuffer<DirectionalVsmAddressGpu> g_DirectionalVsmAddresses;
+ByteAddressBuffer g_VsmPageRequestMask;
 
 #define InverseViewProjMatrix g_DeferredLighting.InverseViewProjMatrix
 #define SunShadowMatrix g_DeferredLighting.SunShadowMatrix
@@ -43,14 +47,46 @@ ConstantBuffer<DeferredLightingConstants> g_DeferredLighting;
 
 #include "LightingCommon.h.slang"
 
-float3 ConvertPixelToWorldPos(uint2 Pixel, Texture2D<float> sceneDepth)
+float3 VisualizeDirectionalVsmAddress(uint2 pixelPosition)
 {
-    float NDCX = (Pixel.x + 0.5) / ViewportWidth * 2.0 - 1.0;
-    float NDCY = 1.0 - (Pixel.y + 0.5) / ViewportHeight * 2.0;
-    float SceneDepth = sceneDepth[Pixel];
-    float4 Result = mul(InverseViewProjMatrix, float4(NDCX, NDCY, SceneDepth, 1.0));
+    if (g_DeferredLighting.VsmViewId == VSM_INVALID_VIEW_ID)
+        return float3(1.0f, 0.0f, 1.0f);
 
-    return Result.xyz / Result.w;
+    VsmShadowView shadowView = g_VsmShadowViews[g_DeferredLighting.VsmViewId];
+    if (shadowView.AddressType != VSM_ADDRESS_TYPE_DIRECTIONAL_CLIPMAP)
+        return float3(1.0f, 0.0f, 1.0f);
+
+    Texture2D<float> sceneDepth = GetSceneDepthSRV();
+    float depth = sceneDepth[pixelPosition];
+    if (depth == 0.0f)
+        return float3(0.15f);
+
+    float3 worldPosition = ReconstructWorldPosition(
+        pixelPosition,
+        depth,
+        uint2(ViewportWidth, ViewportHeight),
+        InverseViewProjMatrix);
+    DirectionalVsmAddressGpu addressData = g_DirectionalVsmAddresses[shadowView.AddressDataIndex];
+    VsmVirtualAddress address = GetDirectionalVsmVirtualAddress(worldPosition, addressData);
+    float3 addressColor = float3(0.0f, 0.5f, 1.0f);
+    bool pageBorder = any(address.TexelInPage < uint2(2u)) ||
+        any(address.TexelInPage >= uint2(VSM_PAGE_SIZE - 2u));
+
+    if (pageBorder)
+        addressColor = float3(0.0f);
+
+    if (address.InsideWindow != 0u)
+    {
+        // Yellow means a visible receiver mapped to a page that the request pass missed.
+        if (!IsVsmPageRequested(g_VsmPageRequestMask, shadowView, address.PageTableCoord))
+            addressColor = float3(1.0f, 1.0f, 0.0f);
+    }
+    else
+    {
+        addressColor = float3(1.0f, 0.0f, 0.0f);
+    }
+
+    return addressColor;
 }
 
 [shader("compute")]
@@ -68,19 +104,7 @@ void computeMain(
         uint viewMode = (uint)gBufferD[DTid].a;
         if (viewMode == VIEW_MODE_SHOW_VSM_ADDRESS)
         {
-            Texture2D<float> sceneDepth = GetSceneDepthSRV();
-            float3 worldPosition = ConvertPixelToWorldPos(DTid, sceneDepth);
-            VsmVirtualAddress address = GetDirectionalVsmVirtualAddress(worldPosition, g_DeferredLighting.VsmAddress);
-            float3 addressColor = Uint2ToColorR16G16B16(asuint(address.GlobalPage));
-            bool pageBorder = any(address.TexelInPage < uint2(2u)) ||
-                any(address.TexelInPage >= uint2(VSM_PAGE_SIZE - 2u));
-
-            if (pageBorder)
-                addressColor = float3(0.0f);
-            if (address.InsideWindow == 0u)
-                addressColor = float3(1.0f, 0.0f, 0.0f);
-
-            sceneColor[DTid] = float4(addressColor, 1.0f);
+            sceneColor[DTid] = float4(VisualizeDirectionalVsmAddress(DTid), 1.0f);
         }
         else if (viewMode == VIEW_MODE_LIT)
         {
@@ -94,7 +118,11 @@ void computeMain(
             {
                 float2 ScreenUV = (float2(0.5, 0.5) + DTid) / float2(ViewportWidth, ViewportHeight);
                 float4 colorAccum = sceneColor[DTid];
-                float3 posW = ConvertPixelToWorldPos(DTid, gSceneDepth);
+                float3 posW = ReconstructWorldPosition(
+                    DTid,
+                    gSceneDepth[DTid],
+                    uint2(ViewportWidth, ViewportHeight),
+                    InverseViewProjMatrix);
                 float3 normal = gBufferA[DTid].xyz;
                 float3 baseColor = gBufferB[DTid].xyz;
                 float3 metallicRoughnessOcclusion = gBufferC[DTid].xyz;

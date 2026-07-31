@@ -90,6 +90,7 @@ namespace Renderer
     {
         FrameConstants()
             : SunShadowMatrix(kIdentity)
+            , SunVsmViewId(VirtualShadowMap::kInvalidViewId)
             , SunDirection(kZero)
             , SunIntensity(kZero)
             , ShadowTexelSize(kZero)
@@ -104,7 +105,7 @@ namespace Renderer
         }
 
         Matrix4 SunShadowMatrix;
-        VirtualShadowMap::DirectionalVsmAddressConstants SunVsmAddress;
+        uint32_t SunVsmViewId;
         Vector3 SunDirection;
         Vector3 SunIntensity;
         Vector4 ShadowTexelSize;

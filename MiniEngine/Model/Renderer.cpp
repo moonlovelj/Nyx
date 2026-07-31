@@ -29,6 +29,7 @@
 
 #include "CommandBucketer.h"
 #include "GeometryStreaming.h"
+#include "VirtualShadowMap.h"
 
 #include <filesystem>
 
@@ -383,6 +384,8 @@ void Renderer::Initialize(void)
     s_SamplerHeap.Create(L"Scene Sampler Descriptors", D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 2048);
 
     Lighting::InitializeResources();
+    if (!VirtualShadowMap::Initialize())
+        return;
 
     g_SSAOFullScreenID = g_SSAOFullScreen.GetVersionID();
     g_ShadowBufferID = g_ShadowBuffer.GetVersionID();
@@ -596,6 +599,7 @@ void Renderer::SetIBLBias(float LODBias)
 
 void Renderer::Shutdown(void)
 {
+    VirtualShadowMap::Shutdown();
     s_RadianceCubeMap = nullptr;
     s_IrradianceCubeMap = nullptr;
     TextureManager::Shutdown();

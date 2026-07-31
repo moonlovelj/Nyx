@@ -209,6 +209,9 @@
     <None Include="Shaders\LightingCommon.h.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
+    <None Include="Shaders\MarkVsmPages.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
     <None Include="Shaders\PCSS.h.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
@@ -255,6 +258,9 @@
       <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\GeometryCommon.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
+    <None Include="Shaders\ViewCommon.h.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\VirtualShadowMap.h.slang">

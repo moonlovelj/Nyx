@@ -2,10 +2,18 @@
 
 #include "VirtualShadowMapShared.h"
 
-class ProgramVar;
+class GraphicsContext;
+class ProgramBinder;
+
+namespace Renderer
+{
+    class RenderView;
+}
 
 namespace Renderer::VirtualShadowMap
 {
+    inline constexpr uint32_t kMaxShadowViews = 256;
+
     struct DirectionalVsmAddressDesc
     {
         Math::Matrix3 WorldToLightRotation = Math::Matrix3(Math::kIdentity);
@@ -15,13 +23,23 @@ namespace Renderer::VirtualShadowMap
         float LevelWorldExtent = 256.0f;
 
         uint32_t LightIndex = 0;
+        uint32_t StableShadowMapId = 0;
         uint32_t ClipmapLevel = 0;
         uint32_t AddressGeneration = 0;
     };
 
     DirectionalVsmAddressConstants BuildDirectionalVsmAddressConstants(const DirectionalVsmAddressDesc& desc);
 
-    // Binding is field-based. Do not raw-copy this structure into a constant buffer because Math::Vector3 uses a
-    // SIMD-sized C++ representation.
-    void SetDirectionalVsmAddressConstants(const ProgramVar& variable, const DirectionalVsmAddressConstants& addressConstants);
+    bool Initialize();
+    void Shutdown();
+
+    void BeginFrame();
+    uint32_t AddDirectionalView(const DirectionalVsmAddressDesc& desc);
+    void MarkRequestedPages(GraphicsContext& gfxContext, const Renderer::RenderView& receiverView);
+
+    void BindPageRequestDebugResources(ProgramBinder& binder);
+
+    bool IsInitialized();
+    uint32_t GetViewCount();
+    const VsmShadowView& GetView(uint32_t viewId);
 } // namespace Renderer::VirtualShadowMap

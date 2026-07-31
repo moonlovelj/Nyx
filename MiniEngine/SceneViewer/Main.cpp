@@ -659,11 +659,12 @@ void SceneViewer::RenderScene( void )
 
         Renderer::FrameConstants frameConstants;
         frameConstants.SunShadowMatrix = m_SunShadowCamera.GetShadowMatrix();
+        Renderer::VirtualShadowMap::BeginFrame();
+
         Renderer::VirtualShadowMap::DirectionalVsmAddressDesc vsmAddressDesc;
         vsmAddressDesc.WorldToLightRotation = Matrix3(~m_SunShadowCamera.GetRotation());
         vsmAddressDesc.FocusPositionWS = sunShadowFocus;
-        frameConstants.SunVsmAddress =
-            Renderer::VirtualShadowMap::BuildDirectionalVsmAddressConstants(vsmAddressDesc);
+        frameConstants.SunVsmViewId = Renderer::VirtualShadowMap::AddDirectionalView(vsmAddressDesc);
         frameConstants.SunDirection = SunDirection;
         frameConstants.SunIntensity = Vector3(Scalar(g_SunLightIntensity));
         frameConstants.ShadowTexelSize = Vector4(
@@ -745,6 +746,8 @@ void SceneViewer::RenderScene( void )
             gfxContext.ClearColor(g_SceneColorBuffer);
 
             Renderer::RenderVisibility(gfxContext, mainView, frameConstants);
+
+            Renderer::VirtualShadowMap::MarkRequestedPages(gfxContext, mainView);
 
             Renderer::ResolveVBufferToGBuffer(gfxContext, mainView, frameConstants);
 
