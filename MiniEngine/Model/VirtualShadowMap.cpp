@@ -3,6 +3,7 @@
 #include "Renderer.h"
 #include "TemporalEffects.h"
 #include "../Core/BufferManager.h"
+#include "../Core/DepthBuffer.h"
 #include "../Core/EngineProfiling.h"
 #include "../Core/GpuBuffer.h"
 #include "../Core/PipelineState.h"
@@ -26,11 +27,17 @@ namespace Renderer::VirtualShadowMap
 
         ComputePSO s_MarkRequestedPagesPSO(L"VSM: Mark Requested Pages");
         std::shared_ptr<Program> s_MarkRequestedPagesProgram;
+        ComputePSO s_AllocateRequestedPagesPSO(L"VSM: Allocate Requested Pages");
+        std::shared_ptr<Program> s_AllocateRequestedPagesProgram;
 
         StructuredBuffer s_ShadowViewsGpu;
         StructuredBuffer s_DirectionalAddressesGpu;
         ByteAddressBuffer s_PageRequestMaskGpu;
         ByteAddressBuffer s_RequestStatisticsGpu;
+        StructuredBuffer s_PageTableGpu;
+        StructuredBuffer s_PageRenderRequestsGpu;
+        ByteAddressBuffer s_AllocationStatisticsGpu;
+        DepthBuffer s_PhysicalPagePool;
 
         std::vector<VsmShadowView> s_Views;
         std::vector<DirectionalVsmAddressGpu> s_DirectionalAddressesGpuData;
@@ -171,6 +178,23 @@ namespace Renderer::VirtualShadowMap
         ProgramUtils::SetProgram(s_MarkRequestedPagesPSO, *s_MarkRequestedPagesProgram);
         s_MarkRequestedPagesPSO.Finalize();
 
+        ProgramDesc allocateRequestedPagesDesc = ProgramUtils::MakeComputeDesc(
+            Renderer::GetModelShaderPath("AllocateVsmPages.slang"),
+            "computeMain");
+        allocateRequestedPagesDesc.AddRootBufferSRV("g_VsmShadowViews");
+        allocateRequestedPagesDesc.AddRootBufferSRV("g_VsmPageRequestMask");
+        allocateRequestedPagesDesc.AddRootBufferUAV("g_VsmPageTable");
+        allocateRequestedPagesDesc.AddRootBufferUAV("g_VsmPageRenderRequests");
+        allocateRequestedPagesDesc.AddRootBufferUAV("g_VsmAllocationStatistics");
+        s_AllocateRequestedPagesProgram = ProgramUtils::GetProgram(
+            allocateRequestedPagesDesc,
+            "VSM: Allocate Requested Pages");
+        if (!s_AllocateRequestedPagesProgram)
+            return false;
+
+        ProgramUtils::SetProgram(s_AllocateRequestedPagesPSO, *s_AllocateRequestedPagesProgram);
+        s_AllocateRequestedPagesPSO.Finalize();
+
         s_ShadowViewsGpu.Create(
             L"VSM Shadow Views",
             kMaxShadowViews,
@@ -187,6 +211,23 @@ namespace Renderer::VirtualShadowMap
             L"VSM Request Statistics",
             kMaxShadowViews,
             VSM_REQUEST_STATISTICS_STRIDE);
+        s_PageTableGpu.Create(
+            L"VSM Page Table",
+            kMaxShadowViews * kPagesPerView,
+            sizeof(uint32_t));
+        s_PageRenderRequestsGpu.Create(
+            L"VSM Page Render Requests",
+            kPhysicalPageCapacity,
+            sizeof(VsmPageRenderRequest));
+        s_AllocationStatisticsGpu.Create(
+            L"VSM Allocation Statistics",
+            1,
+            VSM_ALLOCATION_STATISTICS_STRIDE);
+        s_PhysicalPagePool.Create(
+            L"VSM Physical Page Pool",
+            kPhysicalPoolResolution,
+            kPhysicalPoolResolution,
+            DXGI_FORMAT_D32_FLOAT);
 
         s_Views.reserve(kMaxShadowViews);
         s_DirectionalAddressesGpuData.reserve(kMaxShadowViews);
@@ -203,7 +244,12 @@ namespace Renderer::VirtualShadowMap
         s_DirectionalAddressesGpu.Destroy();
         s_PageRequestMaskGpu.Destroy();
         s_RequestStatisticsGpu.Destroy();
+        s_PageTableGpu.Destroy();
+        s_PageRenderRequestsGpu.Destroy();
+        s_AllocationStatisticsGpu.Destroy();
+        s_PhysicalPagePool.Destroy();
         s_MarkRequestedPagesProgram.reset();
+        s_AllocateRequestedPagesProgram.reset();
         s_Initialized = false;
     }
 
@@ -325,6 +371,53 @@ namespace Renderer::VirtualShadowMap
         context.TransitionResource(s_RequestStatisticsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     }
 
+    void AllocateRequestedPages(GraphicsContext& gfxContext)
+    {
+        ASSERT(s_Initialized, "VirtualShadowMap must be initialized before allocating pages.");
+        ASSERT(s_AllocateRequestedPagesProgram != nullptr);
+        if (!s_Initialized || !s_AllocateRequestedPagesProgram || s_Views.empty())
+            return;
+
+        ScopedTimer timer(L"VSM: Allocate Requested Pages", gfxContext);
+
+        // The temporary allocator has no cross-frame cache, so every physical page starts empty.
+        gfxContext.TransitionResource(s_PhysicalPagePool, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+        gfxContext.ClearDepth(s_PhysicalPagePool);
+
+        ComputeContext& context = gfxContext.GetComputeContext();
+        const size_t pageTableBytes = s_Views.size() * kPagesPerView * sizeof(uint32_t);
+        context.ClearBufferUAV(s_PageTableGpu, pageTableBytes, kInvalidPhysicalPage);
+        context.ClearBufferUAV(s_AllocationStatisticsGpu, VSM_ALLOCATION_STATISTICS_STRIDE, 0);
+        context.InsertUAVBarrier(s_PageTableGpu);
+        context.InsertUAVBarrier(s_AllocationStatisticsGpu);
+
+        context.TransitionResource(s_ShadowViewsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_PageRequestMaskGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_PageTableGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        context.TransitionResource(s_PageRenderRequestsGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        context.TransitionResource(s_AllocationStatisticsGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+        ProgramBinder binder(*s_AllocateRequestedPagesProgram, context);
+        binder.SetRootSignature();
+        context.SetPipelineState(s_AllocateRequestedPagesPSO);
+
+        binder.SetRootBufferSRV("g_VsmShadowViews", s_ShadowViewsGpu);
+        binder.SetRootBufferSRV("g_VsmPageRequestMask", s_PageRequestMaskGpu);
+        binder.SetRootBufferUAV("g_VsmPageTable", s_PageTableGpu);
+        binder.SetRootBufferUAV("g_VsmPageRenderRequests", s_PageRenderRequestsGpu);
+        binder.SetRootBufferUAV("g_VsmAllocationStatistics", s_AllocationStatisticsGpu);
+        binder.Apply();
+
+        constexpr uint32_t kAllocationThreadCount = 64;
+        constexpr uint32_t kAllocationGroupCount =
+            (kRequestMaskWordCountPerView + kAllocationThreadCount - 1u) / kAllocationThreadCount;
+        context.Dispatch(kAllocationGroupCount, static_cast<uint32_t>(s_Views.size()), 1);
+
+        context.TransitionResource(s_PageTableGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_PageRenderRequestsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_AllocationStatisticsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    }
+
     void BindPageRequestDebugResources(ProgramBinder& binder)
     {
         ASSERT(s_Initialized, "VirtualShadowMap must be initialized before binding request resources.");
@@ -334,5 +427,6 @@ namespace Renderer::VirtualShadowMap
         binder.SetRootBufferSRV("g_VsmShadowViews", s_ShadowViewsGpu);
         binder.SetRootBufferSRV("g_DirectionalVsmAddresses", s_DirectionalAddressesGpu);
         binder.SetRootBufferSRV("g_VsmPageRequestMask", s_PageRequestMaskGpu);
+        binder.SetRootBufferSRV("g_VsmPageTable", s_PageTableGpu);
     }
 } // namespace Renderer::VirtualShadowMap

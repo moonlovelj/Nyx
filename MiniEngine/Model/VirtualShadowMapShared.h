@@ -12,6 +12,12 @@
 #define VSM_VIRTUAL_RESOLUTION (VSM_PAGE_SIZE * VSM_PAGE_TABLE_DIM)
 #define VSM_PAGES_PER_VIEW (VSM_PAGE_TABLE_DIM * VSM_PAGE_TABLE_DIM)
 
+#define VSM_PHYSICAL_POOL_DIM_PAGES_LOG2 5u
+#define VSM_PHYSICAL_POOL_DIM_PAGES (1u << VSM_PHYSICAL_POOL_DIM_PAGES_LOG2)
+#define VSM_PHYSICAL_PAGE_CAPACITY (VSM_PHYSICAL_POOL_DIM_PAGES * VSM_PHYSICAL_POOL_DIM_PAGES)
+#define VSM_PHYSICAL_POOL_RESOLUTION (VSM_PHYSICAL_POOL_DIM_PAGES * VSM_PAGE_SIZE)
+#define VSM_INVALID_PHYSICAL_PAGE 0xffffffffu
+
 #define VSM_REQUEST_MASK_WORD_LOG2 5u
 #define VSM_REQUEST_MASK_WORD_BITS (1u << VSM_REQUEST_MASK_WORD_LOG2)
 #define VSM_REQUEST_MASK_WORD_BIT_MASK (VSM_REQUEST_MASK_WORD_BITS - 1u)
@@ -24,6 +30,11 @@
 #define VSM_REQUEST_STATISTICS_STRIDE 16u
 #define VSM_REQUESTED_PAGE_COUNT_OFFSET 0u
 #define VSM_OUT_OF_WINDOW_PIXEL_COUNT_OFFSET 4u
+
+#define VSM_ALLOCATION_STATISTICS_STRIDE 16u
+#define VSM_ALLOCATION_REQUESTED_PAGE_COUNT_OFFSET 0u
+#define VSM_ALLOCATED_PAGE_COUNT_OFFSET 4u
+#define VSM_OVERFLOW_PAGE_COUNT_OFFSET 8u
 
 #ifdef __cplusplus
 
@@ -53,11 +64,20 @@ namespace Renderer::VirtualShadowMap
 
     inline constexpr uint32_t kVirtualResolution = VSM_VIRTUAL_RESOLUTION;
     inline constexpr uint32_t kPagesPerView = VSM_PAGES_PER_VIEW;
+
+    inline constexpr uint32_t kPhysicalPoolDimPagesLog2 = VSM_PHYSICAL_POOL_DIM_PAGES_LOG2;
+    inline constexpr uint32_t kPhysicalPoolDimPages = VSM_PHYSICAL_POOL_DIM_PAGES;
+    inline constexpr uint32_t kPhysicalPageCapacity = VSM_PHYSICAL_PAGE_CAPACITY;
+    inline constexpr uint32_t kPhysicalPoolResolution = VSM_PHYSICAL_POOL_RESOLUTION;
+    inline constexpr uint32_t kInvalidPhysicalPage = VSM_INVALID_PHYSICAL_PAGE;
+
     inline constexpr uint32_t kRequestMaskWordBits = VSM_REQUEST_MASK_WORD_BITS;
     inline constexpr uint32_t kRequestMaskWordCountPerView = VSM_REQUEST_MASK_WORD_COUNT_PER_VIEW;
     inline constexpr uint32_t kInvalidViewId = VSM_INVALID_VIEW_ID;
 
     static_assert(kPagesPerView % kRequestMaskWordBits == 0);
+    static_assert(kPhysicalPageCapacity == 1024);
+    static_assert(kPhysicalPoolResolution == 4096);
 
 #else
 
@@ -143,9 +163,19 @@ namespace Renderer::VirtualShadowMap
         VSM_UINT InsideWindow;
     };
 
+    // One entry in the dense frame-local list consumed by the future shadow render pass.
+    struct VSM_ALIGN_16 VsmPageRenderRequest
+    {
+        VSM_UINT ViewId;
+        VSM_UINT PageTableIndex;
+        VSM_UINT PhysicalPageIndex;
+        VSM_UINT Padding;
+    };
+
 #ifdef __cplusplus
     static_assert(sizeof(VsmShadowView) == 32);
     static_assert(sizeof(DirectionalVsmAddressGpu) == 80);
+    static_assert(sizeof(VsmPageRenderRequest) == 16);
 }
 #endif
 

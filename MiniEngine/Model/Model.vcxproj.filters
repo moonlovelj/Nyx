@@ -266,5 +266,8 @@
     <None Include="Shaders\VirtualShadowMap.h.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
+    <None Include="Shaders\AllocateVsmPages.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
   </ItemGroup>
 </Project>

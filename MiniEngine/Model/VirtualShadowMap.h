@@ -20,7 +20,7 @@ namespace Renderer::VirtualShadowMap
         Math::Vector3 FocusPositionWS = Math::Vector3(Math::kZero);
 
         // Full world-space width and height covered by this clipmap level.
-        float LevelWorldExtent = 256.0f;
+        float LevelWorldExtent = 1024.0f;
 
         uint32_t LightIndex = 0;
         uint32_t StableShadowMapId = 0;
@@ -36,6 +36,7 @@ namespace Renderer::VirtualShadowMap
     void BeginFrame();
     uint32_t AddDirectionalView(const DirectionalVsmAddressDesc& desc);
     void MarkRequestedPages(GraphicsContext& gfxContext, const Renderer::RenderView& receiverView);
+    void AllocateRequestedPages(GraphicsContext& gfxContext);
 
     void BindPageRequestDebugResources(ProgramBinder& binder);
 

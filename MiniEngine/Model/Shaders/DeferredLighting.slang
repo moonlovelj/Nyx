@@ -32,6 +32,7 @@ ConstantBuffer<DeferredLightingConstants> g_DeferredLighting;
 StructuredBuffer<VsmShadowView> g_VsmShadowViews;
 StructuredBuffer<DirectionalVsmAddressGpu> g_DirectionalVsmAddresses;
 ByteAddressBuffer g_VsmPageRequestMask;
+StructuredBuffer<uint> g_VsmPageTable;
 
 #define InverseViewProjMatrix g_DeferredLighting.InverseViewProjMatrix
 #define SunShadowMatrix g_DeferredLighting.SunShadowMatrix
@@ -79,7 +80,15 @@ float3 VisualizeDirectionalVsmAddress(uint2 pixelPosition)
     {
         // Yellow means a visible receiver mapped to a page that the request pass missed.
         if (!IsVsmPageRequested(g_VsmPageRequestMask, shadowView, address.PageTableCoord))
+        {
             addressColor = float3(1.0f, 1.0f, 0.0f);
+        }
+        // Magenta means the request could not obtain a physical page.
+        else if (GetVsmPhysicalPageIndex(g_VsmPageTable, shadowView, address.PageTableCoord) ==
+                 VSM_INVALID_PHYSICAL_PAGE)
+        {
+            addressColor = float3(1.0f, 0.0f, 1.0f);
+        }
     }
     else
     {

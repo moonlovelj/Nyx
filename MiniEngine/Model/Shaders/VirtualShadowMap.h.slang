@@ -24,6 +24,21 @@ uint GetVsmPageTableIndex(uint2 pageTableCoord)
     return pageTableCoord.y * VSM_PAGE_TABLE_DIM + pageTableCoord.x;
 }
 
+uint GetVsmPageTableEntryIndex(VsmShadowView shadowView, uint pageTableIndex)
+{
+    return shadowView.PageTableBase + pageTableIndex;
+}
+
+uint GetVsmPageTableEntryIndex(VsmShadowView shadowView, uint2 pageTableCoord)
+{
+    return GetVsmPageTableEntryIndex(shadowView, GetVsmPageTableIndex(pageTableCoord));
+}
+
+uint GetVsmRequestMaskWordByteAddress(VsmShadowView shadowView, uint wordIndex)
+{
+    return (shadowView.RequestMaskWordBase + wordIndex) * sizeof(uint);
+}
+
 struct VsmRequestMaskLocation
 {
     uint ByteAddress;
@@ -36,7 +51,7 @@ VsmRequestMaskLocation GetVsmRequestMaskLocation(VsmShadowView shadowView, uint2
 
     VsmRequestMaskLocation location;
     location.ByteAddress =
-        (shadowView.RequestMaskWordBase + (pageTableIndex >> VSM_REQUEST_MASK_WORD_LOG2)) * sizeof(uint);
+        GetVsmRequestMaskWordByteAddress(shadowView, pageTableIndex >> VSM_REQUEST_MASK_WORD_LOG2);
     location.BitMask = 1u << (pageTableIndex & VSM_REQUEST_MASK_WORD_BIT_MASK);
     return location;
 }
@@ -60,6 +75,14 @@ bool IsVsmPageRequested(
 {
     VsmRequestMaskLocation location = GetVsmRequestMaskLocation(shadowView, pageTableCoord);
     return (requestMask.Load(location.ByteAddress) & location.BitMask) != 0u;
+}
+
+uint GetVsmPhysicalPageIndex(
+    StructuredBuffer<uint> pageTable,
+    VsmShadowView shadowView,
+    uint2 pageTableCoord)
+{
+    return pageTable[GetVsmPageTableEntryIndex(shadowView, pageTableCoord)];
 }
 
 bool IsVsmPageInsideWindow(int2 globalPage, int2 windowOriginPage)
