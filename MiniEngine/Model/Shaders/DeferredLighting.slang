@@ -33,6 +33,7 @@ StructuredBuffer<VsmShadowView> g_VsmShadowViews;
 StructuredBuffer<DirectionalVsmAddressGpu> g_DirectionalVsmAddresses;
 ByteAddressBuffer g_VsmPageRequestMask;
 StructuredBuffer<uint> g_VsmPageTable;
+StructuredBuffer<VsmPhysicalPageView> g_VsmPhysicalPageViews;
 
 #define InverseViewProjMatrix g_DeferredLighting.InverseViewProjMatrix
 #define SunShadowMatrix g_DeferredLighting.SunShadowMatrix
@@ -83,7 +84,7 @@ float3 VisualizeDirectionalVsmAddress(uint2 pixelPosition)
     bool pageBorder = any(address.TexelInPage < uint2(2u)) ||
         any(address.TexelInPage >= uint2(VSM_PAGE_SIZE - 2u));
 
-    if (address.InsideWindow != 0u)
+    if (address.Valid != 0u)
     {
         // Yellow means a visible receiver mapped to a page that the request pass missed.
         if (!IsVsmPageRequested(g_VsmPageRequestMask, shadowView, address.PageTableCoord))
@@ -100,7 +101,16 @@ float3 VisualizeDirectionalVsmAddress(uint2 pixelPosition)
             }
             else
             {
-                addressColor = pageBorder ? float3(0.0f) : GetVsmPhysicalPageDebugColor(physicalPageIndex);
+                VsmPhysicalPageView pageView = g_VsmPhysicalPageViews[physicalPageIndex];
+                bool pageViewValid = pageView.ViewId == g_DeferredLighting.VsmViewId &&
+                    pageView.PhysicalPageIndex == physicalPageIndex &&
+                    all(pageView.PhysicalPageCoord == GetVsmPhysicalPageCoord(physicalPageIndex)) &&
+                    all(pageView.VirtualPage == address.VirtualPage);
+
+                // Orange indicates that page-view generation disagrees with the address/page-table mapping.
+                addressColor = !pageViewValid
+                    ? float3(1.0f, 0.25f, 0.0f)
+                    : pageBorder ? float3(0.0f) : GetVsmPhysicalPageDebugColor(physicalPageIndex);
             }
         }
     }

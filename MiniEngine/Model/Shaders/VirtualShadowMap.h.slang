@@ -24,6 +24,86 @@ uint GetVsmPageTableIndex(uint2 pageTableCoord)
     return pageTableCoord.y * VSM_PAGE_TABLE_DIM + pageTableCoord.x;
 }
 
+uint2 GetVsmPhysicalPageCoord(uint physicalPageIndex)
+{
+    return uint2(
+        physicalPageIndex & VSM_PHYSICAL_POOL_DIM_PAGES_MASK,
+        physicalPageIndex >> VSM_PHYSICAL_POOL_DIM_PAGES_LOG2);
+}
+
+struct VsmProjectionRows
+{
+    float4 Row0;
+    float4 Row1;
+    float4 Row2;
+    float4 Row3;
+};
+
+VsmProjectionRows GetVsmProjectionRows(VsmProjectionGpu projection)
+{
+    VsmProjectionRows rows;
+    rows.Row0 = projection.ViewProjRow0;
+    rows.Row1 = projection.ViewProjRow1;
+    rows.Row2 = projection.ViewProjRow2;
+    rows.Row3 = projection.ViewProjRow3;
+    return rows;
+}
+
+VsmProjectionRows GetPreviousVsmProjectionRows(VsmProjectionGpu projection)
+{
+    VsmProjectionRows rows;
+    rows.Row0 = projection.PrevViewProjRow0;
+    rows.Row1 = projection.PrevViewProjRow1;
+    rows.Row2 = projection.PrevViewProjRow2;
+    rows.Row3 = projection.PrevViewProjRow3;
+    return rows;
+}
+
+// pageCoord is relative to the full projection's virtual-page origin and may be signed.
+VsmProjectionRows BuildVsmPageProjection(VsmProjectionRows projection, int2 pageCoord)
+{
+    float dimension = float(VSM_PAGE_TABLE_DIM);
+    float biasX = dimension - 2.0f * float(pageCoord.x) - 1.0f;
+    float biasY = 2.0f * float(pageCoord.y) + 1.0f - dimension;
+
+    VsmProjectionRows pageProjection;
+    pageProjection.Row0 = dimension * projection.Row0 + biasX * projection.Row3;
+    pageProjection.Row1 = dimension * projection.Row1 + biasY * projection.Row3;
+    pageProjection.Row2 = projection.Row2;
+    pageProjection.Row3 = projection.Row3;
+    return pageProjection;
+}
+
+float4 ProjectWorldToVsmClip(VsmProjectionRows projection, float3 worldPosition)
+{
+    float4 position = float4(worldPosition, 1.0f);
+    return float4(
+        dot(projection.Row0, position),
+        dot(projection.Row1, position),
+        dot(projection.Row2, position),
+        dot(projection.Row3, position));
+}
+
+float4 ProjectWorldToVsmPageClip(VsmPhysicalPageView pageView, float3 worldPosition)
+{
+    float4 position = float4(worldPosition, 1.0f);
+    return float4(
+        dot(pageView.ViewProjRow0, position),
+        dot(pageView.ViewProjRow1, position),
+        dot(pageView.ViewProjRow2, position),
+        dot(pageView.ViewProjRow3, position));
+}
+
+float4 ProjectWorldToPreviousVsmPageClip(VsmPhysicalPageView pageView, float3 worldPosition)
+{
+    float4 position = float4(worldPosition, 1.0f);
+    return float4(
+        dot(pageView.PrevViewProjRow0, position),
+        dot(pageView.PrevViewProjRow1, position),
+        dot(pageView.PrevViewProjRow2, position),
+        dot(pageView.PrevViewProjRow3, position));
+}
+
 uint2 GetVsmPageTableCoord(uint pageTableIndex)
 {
     return uint2(pageTableIndex & VSM_PAGE_TABLE_DIM_MASK, pageTableIndex >> VSM_PAGE_TABLE_DIM_LOG2);
@@ -118,12 +198,12 @@ VsmVirtualAddress GetDirectionalVsmVirtualAddress(float3 worldPosition, Directio
     float2 fractionInPage = relativePagePosition - relativePageFloor;
 
     VsmVirtualAddress address;
-    address.GlobalPage = addressConstants.AddressOriginPage + int2(relativePageFloor);
-    address.LocalPage = address.GlobalPage - addressConstants.WindowOriginPage;
-    address.PageTableCoord = GetVsmPageTableCoord(address.GlobalPage);
+    address.VirtualPage = addressConstants.AddressOriginPage + int2(relativePageFloor);
+    address.LocalPage = address.VirtualPage - addressConstants.WindowOriginPage;
+    address.PageTableCoord = GetVsmPageTableCoord(address.VirtualPage);
     address.TexelInPage = min(uint2(floor(fractionInPage * float(VSM_PAGE_SIZE))), uint2(VSM_PAGE_SIZE - 1u));
     address.LocalVirtualTexel = address.LocalPage * int(VSM_PAGE_SIZE) + int2(address.TexelInPage);
-    address.InsideWindow = IsVsmPageInsideWindow(address.GlobalPage, addressConstants.WindowOriginPage) ? 1u : 0u;
+    address.Valid = IsVsmPageInsideWindow(address.VirtualPage, addressConstants.WindowOriginPage) ? 1u : 0u;
 
     return address;
 }
@@ -148,13 +228,50 @@ VsmVirtualAddress GetDirectionalVsmVirtualAddress(float3 worldPosition, Directio
     int2 windowOriginPage = addressData.AddressAndWindowOriginPage.zw;
 
     VsmVirtualAddress address;
-    address.GlobalPage = addressOriginPage + int2(relativePageFloor);
-    address.LocalPage = address.GlobalPage - windowOriginPage;
-    address.PageTableCoord = GetVsmPageTableCoord(address.GlobalPage);
+    address.VirtualPage = addressOriginPage + int2(relativePageFloor);
+    address.LocalPage = address.VirtualPage - windowOriginPage;
+    address.PageTableCoord = GetVsmPageTableCoord(address.VirtualPage);
     address.TexelInPage = min(uint2(floor(fractionInPage * float(VSM_PAGE_SIZE))), uint2(VSM_PAGE_SIZE - 1u));
     address.LocalVirtualTexel = address.LocalPage * int(VSM_PAGE_SIZE) + int2(address.TexelInPage);
-    address.InsideWindow = IsVsmPageInsideWindow(address.GlobalPage, windowOriginPage) ? 1u : 0u;
+    address.Valid = IsVsmPageInsideWindow(address.VirtualPage, windowOriginPage) ? 1u : 0u;
 
+    return address;
+}
+
+VsmVirtualAddress GetLocalVsmVirtualAddress(float3 worldPosition, VsmProjectionGpu projectionData)
+{
+    VsmVirtualAddress address;
+    address.VirtualPage = int2(0);
+    address.LocalPage = int2(0);
+    address.LocalVirtualTexel = int2(0);
+    address.PageTableCoord = uint2(0u);
+    address.TexelInPage = uint2(0u);
+    address.Valid = 0u;
+
+    float4 clipPosition = ProjectWorldToVsmClip(GetVsmProjectionRows(projectionData), worldPosition);
+    if (clipPosition.w <= 0.0f)
+        return address;
+
+    float3 ndcPosition = clipPosition.xyz / clipPosition.w;
+    bool insideProjection = all(ndcPosition.xy >= float2(-1.0f)) &&
+        all(ndcPosition.xy <= float2(1.0f)) &&
+        ndcPosition.z >= 0.0f && ndcPosition.z <= 1.0f;
+    if (!insideProjection)
+        return address;
+
+    float2 virtualUv = float2(
+        ndcPosition.x * 0.5f + 0.5f,
+        0.5f - ndcPosition.y * 0.5f);
+    uint2 virtualTexel = min(
+        uint2(floor(virtualUv * float(VSM_VIRTUAL_RESOLUTION))),
+        uint2(VSM_VIRTUAL_RESOLUTION - 1u));
+
+    address.PageTableCoord = virtualTexel >> VSM_PAGE_SIZE_LOG2;
+    address.VirtualPage = int2(address.PageTableCoord);
+    address.LocalPage = address.VirtualPage;
+    address.LocalVirtualTexel = int2(virtualTexel);
+    address.TexelInPage = virtualTexel & VSM_PAGE_SIZE_MASK;
+    address.Valid = 1u;
     return address;
 }
 

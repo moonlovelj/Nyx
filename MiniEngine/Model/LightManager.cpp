@@ -157,6 +157,7 @@ void Lighting::InitializeResources( void )
     deferredLightingDesc.AddRootBufferSRV("g_DirectionalVsmAddresses");
     deferredLightingDesc.AddRootBufferSRV("g_VsmPageRequestMask");
     deferredLightingDesc.AddRootBufferSRV("g_VsmPageTable");
+    deferredLightingDesc.AddRootBufferSRV("g_VsmPhysicalPageViews");
 
     SamplerDesc cubeMapSamplerDesc;
     cubeMapSamplerDesc.MaxAnisotropy = 8;

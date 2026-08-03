@@ -670,6 +670,8 @@ void SceneViewer::RenderScene( void )
         Renderer::VirtualShadowMap::DirectionalVsmAddressDesc vsmAddressDesc;
         vsmAddressDesc.WorldToLightRotation = Matrix3(~m_SunShadowCamera.GetRotation());
         vsmAddressDesc.FocusPositionWS = sunShadowFocus;
+        vsmAddressDesc.ViewProjMatrix = m_SunShadowCamera.GetViewProjMatrix();
+        vsmAddressDesc.PrevViewProjMatrix = m_PrevSunShadowCamera.GetViewProjMatrix();
         if (!m_HasSunVsmAddressGeneration || sunOrientation != m_PreviousSunOrientation ||
             sunInclination != m_PreviousSunInclination)
         {
@@ -764,6 +766,7 @@ void SceneViewer::RenderScene( void )
 
             Renderer::VirtualShadowMap::MarkRequestedPages(gfxContext, mainView);
             Renderer::VirtualShadowMap::AllocateRequestedPages(gfxContext);
+            Renderer::VirtualShadowMap::BuildPhysicalPageViews(gfxContext);
 
             Renderer::ResolveVBufferToGBuffer(gfxContext, mainView, frameConstants);
 

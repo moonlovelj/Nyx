@@ -14,6 +14,7 @@
 
 #define VSM_PHYSICAL_POOL_DIM_PAGES_LOG2 5u
 #define VSM_PHYSICAL_POOL_DIM_PAGES (1u << VSM_PHYSICAL_POOL_DIM_PAGES_LOG2)
+#define VSM_PHYSICAL_POOL_DIM_PAGES_MASK (VSM_PHYSICAL_POOL_DIM_PAGES - 1u)
 #define VSM_PHYSICAL_PAGE_CAPACITY (VSM_PHYSICAL_POOL_DIM_PAGES * VSM_PHYSICAL_POOL_DIM_PAGES)
 #define VSM_PHYSICAL_POOL_RESOLUTION (VSM_PHYSICAL_POOL_DIM_PAGES * VSM_PAGE_SIZE)
 #define VSM_INVALID_PHYSICAL_PAGE 0xffffffffu
@@ -30,10 +31,11 @@
 #define VSM_INVALID_VIEW_ID 0xffffffffu
 #define VSM_ADDRESS_TYPE_INVALID 0u
 #define VSM_ADDRESS_TYPE_DIRECTIONAL_CLIPMAP 1u
+#define VSM_ADDRESS_TYPE_LOCAL_PERSPECTIVE 2u
 
 #define VSM_REQUEST_STATISTICS_STRIDE 16u
 #define VSM_REQUESTED_PAGE_COUNT_OFFSET 0u
-#define VSM_OUT_OF_WINDOW_PIXEL_COUNT_OFFSET 4u
+#define VSM_INVALID_ADDRESS_PIXEL_COUNT_OFFSET 4u
 
 #define VSM_PAGE_MANAGEMENT_COUNTERS_SIZE 32u
 #define VSM_RENDER_REQUEST_COUNT_OFFSET 0u
@@ -74,6 +76,7 @@ namespace Renderer::VirtualShadowMap
 
     inline constexpr uint32_t kPhysicalPoolDimPagesLog2 = VSM_PHYSICAL_POOL_DIM_PAGES_LOG2;
     inline constexpr uint32_t kPhysicalPoolDimPages = VSM_PHYSICAL_POOL_DIM_PAGES;
+    inline constexpr uint32_t kPhysicalPoolDimPagesMask = VSM_PHYSICAL_POOL_DIM_PAGES_MASK;
     inline constexpr uint32_t kPhysicalPageCapacity = VSM_PHYSICAL_PAGE_CAPACITY;
     inline constexpr uint32_t kPhysicalPoolResolution = VSM_PHYSICAL_POOL_RESOLUTION;
     inline constexpr uint32_t kInvalidPhysicalPage = VSM_INVALID_PHYSICAL_PAGE;
@@ -117,8 +120,8 @@ namespace Renderer::VirtualShadowMap
         VSM_UINT Layer;
 
         VSM_UINT LightIndex;
-        VSM_UINT Padding0;
-        VSM_UINT Padding1;
+        VSM_UINT ProjectionDataIndex;
+        float LodScale;
         VSM_UINT Padding2;
     };
 
@@ -165,15 +168,32 @@ namespace Renderer::VirtualShadowMap
         VSM_INT4 AddressAndWindowOriginPage;
     };
 
+    // Full virtual shadow projection used to derive page-local projections.
+    // Rows are explicit to keep the C++ and Slang layouts unambiguous.
+    struct VSM_ALIGN_16 VsmProjectionGpu
+    {
+        VSM_FLOAT4 ViewProjRow0;
+        VSM_FLOAT4 ViewProjRow1;
+        VSM_FLOAT4 ViewProjRow2;
+        VSM_FLOAT4 ViewProjRow3;
+
+        VSM_FLOAT4 PrevViewProjRow0;
+        VSM_FLOAT4 PrevViewProjRow1;
+        VSM_FLOAT4 PrevViewProjRow2;
+        VSM_FLOAT4 PrevViewProjRow3;
+    };
+
     // Address-only result. It intentionally contains no physical-page state.
     struct VsmVirtualAddress
     {
-        VSM_INT2 GlobalPage;
+        // Stable page identity within the owning shadow view. Directional views
+        // use a global page; local views use their projection-space page.
+        VSM_INT2 VirtualPage;
         VSM_INT2 LocalPage;
         VSM_INT2 LocalVirtualTexel;
         VSM_UINT2 PageTableCoord;
         VSM_UINT2 TexelInPage;
-        VSM_UINT InsideWindow;
+        VSM_UINT Valid;
     };
 
     // One entry in the dense frame-local list consumed by the future shadow render pass.
@@ -194,16 +214,43 @@ namespace Renderer::VirtualShadowMap
         VSM_UINT AddressType;
         VSM_UINT Layer;
 
-        VSM_INT2 GlobalPage;
+        VSM_INT2 VirtualPage;
         VSM_UINT Flags;
         VSM_UINT Padding;
+    };
+
+    // Render and cull data indexed directly by PhysicalPageIndex.
+    struct VSM_ALIGN_16 VsmPhysicalPageView
+    {
+        VSM_FLOAT4 ViewProjRow0;
+        VSM_FLOAT4 ViewProjRow1;
+        VSM_FLOAT4 ViewProjRow2;
+        VSM_FLOAT4 ViewProjRow3;
+
+        VSM_FLOAT4 PrevViewProjRow0;
+        VSM_FLOAT4 PrevViewProjRow1;
+        VSM_FLOAT4 PrevViewProjRow2;
+        VSM_FLOAT4 PrevViewProjRow3;
+
+        // xy = page UV scale in the HZB atlas, zw = page UV bias.
+        VSM_FLOAT4 HzbUvScaleBias;
+
+        VSM_INT2 VirtualPage;
+        VSM_UINT PhysicalPageIndex;
+        VSM_UINT Flags;
+
+        VSM_UINT2 PhysicalPageCoord;
+        VSM_UINT ViewId;
+        float LodScale;
     };
 
 #ifdef __cplusplus
     static_assert(sizeof(VsmShadowView) == 48);
     static_assert(sizeof(DirectionalVsmAddressGpu) == 80);
+    static_assert(sizeof(VsmProjectionGpu) == 128);
     static_assert(sizeof(VsmPageRenderRequest) == 16);
     static_assert(sizeof(VsmPhysicalPageMetadata) == 32);
+    static_assert(sizeof(VsmPhysicalPageView) == 176);
 }
 #endif
 

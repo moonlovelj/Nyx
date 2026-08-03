@@ -18,6 +18,8 @@ namespace Renderer::VirtualShadowMap
     {
         Math::Matrix3 WorldToLightRotation = Math::Matrix3(Math::kIdentity);
         Math::Vector3 FocusPositionWS = Math::Vector3(Math::kZero);
+        Math::Matrix4 ViewProjMatrix = Math::Matrix4(Math::kIdentity);
+        Math::Matrix4 PrevViewProjMatrix = Math::Matrix4(Math::kIdentity);
 
         // Full world-space width and height covered by this clipmap level.
         float LevelWorldExtent = 1024.0f;
@@ -28,6 +30,19 @@ namespace Renderer::VirtualShadowMap
         uint32_t AddressGeneration = 0;
     };
 
+    // One perspective shadow projection: a spot light, or one point-light cube face/mip.
+    struct LocalVsmViewDesc
+    {
+        Math::Matrix4 ProjMatrix = Math::Matrix4(Math::kIdentity);
+        Math::Matrix4 ViewProjMatrix = Math::Matrix4(Math::kIdentity);
+        Math::Matrix4 PrevViewProjMatrix = Math::Matrix4(Math::kIdentity);
+
+        uint32_t LightIndex = 0;
+        uint32_t StableShadowMapId = 0;
+        uint32_t Layer = 0;
+        uint32_t AddressGeneration = 0;
+    };
+
     DirectionalVsmAddressConstants BuildDirectionalVsmAddressConstants(const DirectionalVsmAddressDesc& desc);
 
     bool Initialize();
@@ -35,8 +50,10 @@ namespace Renderer::VirtualShadowMap
 
     void BeginFrame();
     uint32_t AddDirectionalView(const DirectionalVsmAddressDesc& desc);
+    uint32_t AddLocalView(const LocalVsmViewDesc& desc);
     void MarkRequestedPages(GraphicsContext& gfxContext, const Renderer::RenderView& receiverView);
     void AllocateRequestedPages(GraphicsContext& gfxContext);
+    void BuildPhysicalPageViews(GraphicsContext& gfxContext);
 
     void BindPageRequestDebugResources(ProgramBinder& binder);
 

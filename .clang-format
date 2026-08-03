@@ -15,7 +15,11 @@ SpaceInEmptyParentheses: false
 PointerAlignment: Left
 ReferenceAlignment: Left
 DerivePointerAlignment: false
-ColumnLimit: 0
+# Line-length policy:
+# - Prefer 120 columns for normal code.
+# - Up to 140 columns is acceptable and is the automatic formatting limit.
+# - 160 columns is the manual hard limit; clang-format supports only one limit.
+ColumnLimit: 140
 SortIncludes: false
 NamespaceIndentation: All
 

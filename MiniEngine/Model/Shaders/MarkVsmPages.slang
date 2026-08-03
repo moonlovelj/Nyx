@@ -14,19 +14,23 @@ ConstantBuffer<MarkVsmPagesConstants> g_MarkVsmPages;
 
 StructuredBuffer<VsmShadowView> g_VsmShadowViews;
 StructuredBuffer<DirectionalVsmAddressGpu> g_DirectionalVsmAddresses;
+StructuredBuffer<VsmProjectionGpu> g_VsmProjections;
 RWByteAddressBuffer g_VsmPageRequestMask;
 RWByteAddressBuffer g_VsmRequestStatistics;
 
 void MarkRequestedPage(uint viewId, VsmShadowView shadowView, VsmVirtualAddress address)
 {
     uint statisticsBase = viewId * VSM_REQUEST_STATISTICS_STRIDE;
-    if (address.InsideWindow == 0u)
+    if (address.Valid == 0u)
     {
-        uint originalValue;
-        g_VsmRequestStatistics.InterlockedAdd(
-            statisticsBase + VSM_OUT_OF_WINDOW_PIXEL_COUNT_OFFSET,
-            1u,
-            originalValue);
+        if (shadowView.AddressType == VSM_ADDRESS_TYPE_DIRECTIONAL_CLIPMAP)
+        {
+            uint originalValue;
+            g_VsmRequestStatistics.InterlockedAdd(
+                statisticsBase + VSM_INVALID_ADDRESS_PIXEL_COUNT_OFFSET,
+                1u,
+                originalValue);
+        }
         return;
     }
 
@@ -56,15 +60,27 @@ void computeMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
 
     VsmShadowView shadowView = g_VsmShadowViews[g_MarkVsmPages.ViewId];
-    if (shadowView.AddressType != VSM_ADDRESS_TYPE_DIRECTIONAL_CLIPMAP)
-        return;
-
     float3 worldPosition = ReconstructWorldPosition(
         pixelPosition,
         sceneDepth,
         g_MarkVsmPages.ViewportSize,
         g_MarkVsmPages.InverseViewProjMatrix);
-    DirectionalVsmAddressGpu addressData = g_DirectionalVsmAddresses[shadowView.AddressDataIndex];
-    VsmVirtualAddress address = GetDirectionalVsmVirtualAddress(worldPosition, addressData);
+
+    VsmVirtualAddress address;
+    if (shadowView.AddressType == VSM_ADDRESS_TYPE_DIRECTIONAL_CLIPMAP)
+    {
+        DirectionalVsmAddressGpu addressData = g_DirectionalVsmAddresses[shadowView.AddressDataIndex];
+        address = GetDirectionalVsmVirtualAddress(worldPosition, addressData);
+    }
+    else if (shadowView.AddressType == VSM_ADDRESS_TYPE_LOCAL_PERSPECTIVE)
+    {
+        VsmProjectionGpu projectionData = g_VsmProjections[shadowView.ProjectionDataIndex];
+        address = GetLocalVsmVirtualAddress(worldPosition, projectionData);
+    }
+    else
+    {
+        return;
+    }
+
     MarkRequestedPage(g_MarkVsmPages.ViewId, shadowView, address);
 }

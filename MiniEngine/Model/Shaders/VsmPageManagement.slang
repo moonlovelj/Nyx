@@ -20,33 +20,46 @@ uint GetRequestedPageTableIndex(uint wordIndex, uint bitIndex)
     return wordIndex * VSM_REQUEST_MASK_WORD_BITS + bitIndex;
 }
 
-int2 GetRequestedGlobalPage(VsmShadowView shadowView, uint pageTableIndex)
+bool TryGetRequestedVirtualPage(VsmShadowView shadowView, uint pageTableIndex, out int2 virtualPage)
 {
-    DirectionalVsmAddressGpu addressData = g_DirectionalVsmAddresses[shadowView.AddressDataIndex];
-    return GetDirectionalVsmGlobalPage(pageTableIndex, addressData);
+    if (shadowView.AddressType == VSM_ADDRESS_TYPE_DIRECTIONAL_CLIPMAP)
+    {
+        DirectionalVsmAddressGpu addressData = g_DirectionalVsmAddresses[shadowView.AddressDataIndex];
+        virtualPage = GetDirectionalVsmGlobalPage(pageTableIndex, addressData);
+        return true;
+    }
+
+    if (shadowView.AddressType == VSM_ADDRESS_TYPE_LOCAL_PERSPECTIVE)
+    {
+        virtualPage = int2(GetVsmPageTableCoord(pageTableIndex));
+        return true;
+    }
+
+    virtualPage = int2(0);
+    return false;
 }
 
 bool IsPhysicalPageMetadataMatch(
     VsmPhysicalPageMetadata metadata,
     VsmShadowView shadowView,
-    int2 globalPage)
+    int2 virtualPage)
 {
     return (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_VALID) != 0u &&
         metadata.StableShadowMapId == shadowView.StableShadowMapId &&
         metadata.AddressGeneration == shadowView.AddressGeneration &&
         metadata.AddressType == shadowView.AddressType &&
         metadata.Layer == shadowView.Layer &&
-        all(metadata.GlobalPage == globalPage);
+        all(metadata.VirtualPage == virtualPage);
 }
 
-VsmPhysicalPageMetadata MakePhysicalPageMetadata(VsmShadowView shadowView, int2 globalPage)
+VsmPhysicalPageMetadata MakePhysicalPageMetadata(VsmShadowView shadowView, int2 virtualPage)
 {
     VsmPhysicalPageMetadata metadata;
     metadata.StableShadowMapId = shadowView.StableShadowMapId;
     metadata.AddressGeneration = shadowView.AddressGeneration;
     metadata.AddressType = shadowView.AddressType;
     metadata.Layer = shadowView.Layer;
-    metadata.GlobalPage = globalPage;
+    metadata.VirtualPage = virtualPage;
     metadata.Flags = VSM_PHYSICAL_PAGE_METADATA_VALID;
     metadata.Padding = 0u;
     return metadata;
@@ -101,9 +114,12 @@ void reuseRequestedPages(uint3 dispatchThreadId : SV_DispatchThreadID)
         if (physicalPageIndex >= VSM_PHYSICAL_PAGE_CAPACITY)
             continue;
 
-        int2 globalPage = GetRequestedGlobalPage(shadowView, pageTableIndex);
+        int2 virtualPage;
+        if (!TryGetRequestedVirtualPage(shadowView, pageTableIndex, virtualPage))
+            continue;
+
         VsmPhysicalPageMetadata metadata = g_VsmPhysicalPageMetadataSRV[physicalPageIndex];
-        if (!IsPhysicalPageMetadataMatch(metadata, shadowView, globalPage) || !TryClaimPhysicalPage(physicalPageIndex))
+        if (!IsPhysicalPageMetadataMatch(metadata, shadowView, virtualPage) || !TryClaimPhysicalPage(physicalPageIndex))
             continue;
 
         g_VsmCurrentPageTable[shadowView.PageTableBase + pageTableIndex] = physicalPageIndex;
@@ -157,6 +173,10 @@ void allocateNewPages(uint3 dispatchThreadId : SV_DispatchThreadID)
         if (g_VsmCurrentPageTable[pageTableEntryIndex] != VSM_INVALID_PHYSICAL_PAGE)
             continue;
 
+        int2 virtualPage;
+        if (!TryGetRequestedVirtualPage(shadowView, pageTableIndex, virtualPage))
+            continue;
+
         uint freePageIndex;
         g_VsmPageManagementCounters.InterlockedAdd(VSM_FREE_PAGE_READ_OFFSET, 1u, freePageIndex);
         if (freePageIndex >= g_VsmPageManagementCounters.Load(VSM_FREE_PAGE_COUNT_OFFSET))
@@ -167,8 +187,7 @@ void allocateNewPages(uint3 dispatchThreadId : SV_DispatchThreadID)
         }
 
         uint physicalPageIndex = g_VsmFreePhysicalPagesSRV[freePageIndex];
-        int2 globalPage = GetRequestedGlobalPage(shadowView, pageTableIndex);
-        g_VsmPhysicalPageMetadataUAV[physicalPageIndex] = MakePhysicalPageMetadata(shadowView, globalPage);
+        g_VsmPhysicalPageMetadataUAV[physicalPageIndex] = MakePhysicalPageMetadata(shadowView, virtualPage);
         g_VsmCurrentPageTable[pageTableEntryIndex] = physicalPageIndex;
         AppendRenderRequest(viewId, pageTableIndex, physicalPageIndex, 0u);
 
