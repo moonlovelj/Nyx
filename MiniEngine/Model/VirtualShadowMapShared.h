@@ -17,6 +17,10 @@
 #define VSM_PHYSICAL_PAGE_CAPACITY (VSM_PHYSICAL_POOL_DIM_PAGES * VSM_PHYSICAL_POOL_DIM_PAGES)
 #define VSM_PHYSICAL_POOL_RESOLUTION (VSM_PHYSICAL_POOL_DIM_PAGES * VSM_PAGE_SIZE)
 #define VSM_INVALID_PHYSICAL_PAGE 0xffffffffu
+#define VSM_INVALID_PAGE_TABLE_BASE 0xffffffffu
+
+#define VSM_PHYSICAL_PAGE_METADATA_VALID 0x1u
+#define VSM_PAGE_RENDER_REQUEST_HISTORY_VALID 0x1u
 
 #define VSM_REQUEST_MASK_WORD_LOG2 5u
 #define VSM_REQUEST_MASK_WORD_BITS (1u << VSM_REQUEST_MASK_WORD_LOG2)
@@ -31,10 +35,13 @@
 #define VSM_REQUESTED_PAGE_COUNT_OFFSET 0u
 #define VSM_OUT_OF_WINDOW_PIXEL_COUNT_OFFSET 4u
 
-#define VSM_ALLOCATION_STATISTICS_STRIDE 16u
-#define VSM_ALLOCATION_REQUESTED_PAGE_COUNT_OFFSET 0u
-#define VSM_ALLOCATED_PAGE_COUNT_OFFSET 4u
-#define VSM_OVERFLOW_PAGE_COUNT_OFFSET 8u
+#define VSM_PAGE_MANAGEMENT_COUNTERS_SIZE 32u
+#define VSM_RENDER_REQUEST_COUNT_OFFSET 0u
+#define VSM_REUSED_PAGE_COUNT_OFFSET 4u
+#define VSM_NEW_PAGE_COUNT_OFFSET 8u
+#define VSM_OVERFLOW_PAGE_COUNT_OFFSET 12u
+#define VSM_FREE_PAGE_COUNT_OFFSET 16u
+#define VSM_FREE_PAGE_READ_OFFSET 20u
 
 #ifdef __cplusplus
 
@@ -70,6 +77,7 @@ namespace Renderer::VirtualShadowMap
     inline constexpr uint32_t kPhysicalPageCapacity = VSM_PHYSICAL_PAGE_CAPACITY;
     inline constexpr uint32_t kPhysicalPoolResolution = VSM_PHYSICAL_POOL_RESOLUTION;
     inline constexpr uint32_t kInvalidPhysicalPage = VSM_INVALID_PHYSICAL_PAGE;
+    inline constexpr uint32_t kInvalidPageTableBase = VSM_INVALID_PAGE_TABLE_BASE;
 
     inline constexpr uint32_t kRequestMaskWordBits = VSM_REQUEST_MASK_WORD_BITS;
     inline constexpr uint32_t kRequestMaskWordCountPerView = VSM_REQUEST_MASK_WORD_COUNT_PER_VIEW;
@@ -105,8 +113,13 @@ namespace Renderer::VirtualShadowMap
         // measured in page-table entries.
         VSM_UINT RequestMaskWordBase;
         VSM_UINT PageTableBase;
+        VSM_UINT PreviousPageTableBase;
         VSM_UINT Layer;
+
         VSM_UINT LightIndex;
+        VSM_UINT Padding0;
+        VSM_UINT Padding1;
+        VSM_UINT Padding2;
     };
 
     // Describes one directional-light clipmap level's stable address space.
@@ -169,13 +182,28 @@ namespace Renderer::VirtualShadowMap
         VSM_UINT ViewId;
         VSM_UINT PageTableIndex;
         VSM_UINT PhysicalPageIndex;
+        VSM_UINT Flags;
+    };
+
+    // Reverse mapping used to prove that a cached physical page still contains
+    // the same virtual page requested by the current frame.
+    struct VSM_ALIGN_16 VsmPhysicalPageMetadata
+    {
+        VSM_UINT StableShadowMapId;
+        VSM_UINT AddressGeneration;
+        VSM_UINT AddressType;
+        VSM_UINT Layer;
+
+        VSM_INT2 GlobalPage;
+        VSM_UINT Flags;
         VSM_UINT Padding;
     };
 
 #ifdef __cplusplus
-    static_assert(sizeof(VsmShadowView) == 32);
+    static_assert(sizeof(VsmShadowView) == 48);
     static_assert(sizeof(DirectionalVsmAddressGpu) == 80);
     static_assert(sizeof(VsmPageRenderRequest) == 16);
+    static_assert(sizeof(VsmPhysicalPageMetadata) == 32);
 }
 #endif
 

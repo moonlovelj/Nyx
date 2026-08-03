@@ -48,6 +48,16 @@ StructuredBuffer<uint> g_VsmPageTable;
 
 #include "LightingCommon.h.slang"
 
+float3 GetVsmPhysicalPageDebugColor(uint physicalPageIndex)
+{
+    uint hash = physicalPageIndex * 747796405u + 2891336453u;
+    hash = ((hash >> ((hash >> 28u) + 4u)) ^ hash) * 277803737u;
+    hash = (hash >> 22u) ^ hash;
+
+    float3 color = float3(hash & 0xffu, (hash >> 8u) & 0xffu, (hash >> 16u) & 0xffu) / 255.0f;
+    return color * 0.7f + 0.3f;
+}
+
 float3 VisualizeDirectionalVsmAddress(uint2 pixelPosition)
 {
     if (g_DeferredLighting.VsmViewId == VSM_INVALID_VIEW_ID)
@@ -69,12 +79,9 @@ float3 VisualizeDirectionalVsmAddress(uint2 pixelPosition)
         InverseViewProjMatrix);
     DirectionalVsmAddressGpu addressData = g_DirectionalVsmAddresses[shadowView.AddressDataIndex];
     VsmVirtualAddress address = GetDirectionalVsmVirtualAddress(worldPosition, addressData);
-    float3 addressColor = float3(0.0f, 0.5f, 1.0f);
+    float3 addressColor = float3(0.0f);
     bool pageBorder = any(address.TexelInPage < uint2(2u)) ||
         any(address.TexelInPage >= uint2(VSM_PAGE_SIZE - 2u));
-
-    if (pageBorder)
-        addressColor = float3(0.0f);
 
     if (address.InsideWindow != 0u)
     {
@@ -84,10 +91,17 @@ float3 VisualizeDirectionalVsmAddress(uint2 pixelPosition)
             addressColor = float3(1.0f, 1.0f, 0.0f);
         }
         // Magenta means the request could not obtain a physical page.
-        else if (GetVsmPhysicalPageIndex(g_VsmPageTable, shadowView, address.PageTableCoord) ==
-                 VSM_INVALID_PHYSICAL_PAGE)
+        else
         {
-            addressColor = float3(1.0f, 0.0f, 1.0f);
+            uint physicalPageIndex = GetVsmPhysicalPageIndex(g_VsmPageTable, shadowView, address.PageTableCoord);
+            if (physicalPageIndex == VSM_INVALID_PHYSICAL_PAGE)
+            {
+                addressColor = float3(1.0f, 0.0f, 1.0f);
+            }
+            else
+            {
+                addressColor = pageBorder ? float3(0.0f) : GetVsmPhysicalPageDebugColor(physicalPageIndex);
+            }
         }
     }
     else

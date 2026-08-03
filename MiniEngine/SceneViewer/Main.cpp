@@ -183,6 +183,10 @@ private:
 
     ShadowCamera m_SunShadowCamera;
     ShadowCamera m_PrevSunShadowCamera;
+    float m_PreviousSunOrientation = 0.0f;
+    float m_PreviousSunInclination = 0.0f;
+    uint32_t m_SunVsmAddressGeneration = 0;
+    bool m_HasSunVsmAddressGeneration = false;
 
     bool m_ShowLoadingUI = false;
     bool m_LoadPending = false;
@@ -639,10 +643,12 @@ void SceneViewer::RenderScene( void )
         IBL::Precompute(gfxContext);
         
          // Update global constants
-        float costheta = cosf(g_SunOrientation);
-        float sintheta = sinf(g_SunOrientation);
-        float cosphi = cosf(g_SunInclination * 3.14159f * 0.5f);
-        float sinphi = sinf(g_SunInclination * 3.14159f * 0.5f);
+        const float sunOrientation = g_SunOrientation;
+        const float sunInclination = g_SunInclination;
+        float costheta = cosf(sunOrientation);
+        float sintheta = sinf(sunOrientation);
+        float cosphi = cosf(sunInclination * 3.14159f * 0.5f);
+        float sinphi = sinf(sunInclination * 3.14159f * 0.5f);
 
         Vector3 SunDirection = Normalize(Vector3( costheta * cosphi, sinphi, sintheta * cosphi ));
         const Vector3 sunShadowFocus = UpdateDirectionalShadowCamera(
@@ -664,6 +670,15 @@ void SceneViewer::RenderScene( void )
         Renderer::VirtualShadowMap::DirectionalVsmAddressDesc vsmAddressDesc;
         vsmAddressDesc.WorldToLightRotation = Matrix3(~m_SunShadowCamera.GetRotation());
         vsmAddressDesc.FocusPositionWS = sunShadowFocus;
+        if (!m_HasSunVsmAddressGeneration || sunOrientation != m_PreviousSunOrientation ||
+            sunInclination != m_PreviousSunInclination)
+        {
+            ++m_SunVsmAddressGeneration;
+            m_PreviousSunOrientation = sunOrientation;
+            m_PreviousSunInclination = sunInclination;
+            m_HasSunVsmAddressGeneration = true;
+        }
+        vsmAddressDesc.AddressGeneration = m_SunVsmAddressGeneration;
         frameConstants.SunVsmViewId = Renderer::VirtualShadowMap::AddDirectionalView(vsmAddressDesc);
         frameConstants.SunDirection = SunDirection;
         frameConstants.SunIntensity = Vector3(Scalar(g_SunLightIntensity));

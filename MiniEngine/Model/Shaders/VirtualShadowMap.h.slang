@@ -24,6 +24,11 @@ uint GetVsmPageTableIndex(uint2 pageTableCoord)
     return pageTableCoord.y * VSM_PAGE_TABLE_DIM + pageTableCoord.x;
 }
 
+uint2 GetVsmPageTableCoord(uint pageTableIndex)
+{
+    return uint2(pageTableIndex & VSM_PAGE_TABLE_DIM_MASK, pageTableIndex >> VSM_PAGE_TABLE_DIM_LOG2);
+}
+
 uint GetVsmPageTableEntryIndex(VsmShadowView shadowView, uint pageTableIndex)
 {
     return shadowView.PageTableBase + pageTableIndex;
@@ -83,6 +88,15 @@ uint GetVsmPhysicalPageIndex(
     uint2 pageTableCoord)
 {
     return pageTable[GetVsmPageTableEntryIndex(shadowView, pageTableCoord)];
+}
+
+int2 GetDirectionalVsmGlobalPage(uint pageTableIndex, DirectionalVsmAddressGpu addressData)
+{
+    int2 windowOriginPage = addressData.AddressAndWindowOriginPage.zw;
+    int2 windowOriginCoord = VsmFloorMod(windowOriginPage, int(VSM_PAGE_TABLE_DIM));
+    int2 pageTableCoord = int2(GetVsmPageTableCoord(pageTableIndex));
+    int2 localPage = VsmFloorMod(pageTableCoord - windowOriginCoord, int(VSM_PAGE_TABLE_DIM));
+    return windowOriginPage + localPage;
 }
 
 bool IsVsmPageInsideWindow(int2 globalPage, int2 windowOriginPage)

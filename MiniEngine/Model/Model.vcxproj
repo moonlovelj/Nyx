@@ -170,7 +170,6 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
-    <None Include="Shaders\AllocateVsmPages.slang" />
     <None Include="Shaders\BindlessIndices.h.slang" />
     <None Include="Shaders\CullCommon.slang" />
     <None Include="Shaders\DataCodec.h.slang" />
@@ -192,6 +191,7 @@
     <None Include="Shaders\ViewCommon.h.slang" />
     <None Include="Shaders\ViewMode.h.slang" />
     <None Include="Shaders\VirtualShadowMap.h.slang" />
+    <None Include="Shaders\VsmPageManagement.slang" />
     <None Include="Shaders\WaveUtil.h.slang" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
