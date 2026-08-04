@@ -772,6 +772,7 @@ void SceneViewer::RenderScene( void )
 
             Renderer::VirtualShadowMap::ClearRequestedPhysicalPage(gfxContext, 0);
             Renderer::VirtualShadowMap::RenderRequestedPhysicalPageDepth(gfxContext, frameConstants, 0);
+            Renderer::VirtualShadowMap::GeneratePhysicalHZB(gfxContext);
 
             XeGTAO::Render(gfxContext, m_Camera);
 

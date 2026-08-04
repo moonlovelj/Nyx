@@ -8,6 +8,7 @@
 #include "../Core/DepthBuffer.h"
 #include "../Core/EngineProfiling.h"
 #include "../Core/GpuBuffer.h"
+#include "../Core/HierarchicalDepthBuffer.h"
 #include "../Core/PipelineState.h"
 #include "../Core/ProgramBinder.h"
 #include "../Core/ProgramUtils.h"
@@ -62,12 +63,14 @@ namespace Renderer::VirtualShadowMap
         ByteAddressBuffer s_PageManagementCountersGpu;
         StructuredBuffer s_PhysicalPageViewsGpu;
         DepthBuffer s_PhysicalPagePool;
+        std::array<HierarchicalDepthBuffer, 2> s_PhysicalHZBs;
 
         std::vector<VsmShadowView> s_Views;
         std::vector<VsmShadowView> s_PreviousViews;
         std::vector<DirectionalVsmAddressGpu> s_DirectionalAddressesGpuData;
         std::vector<VsmProjectionGpu> s_ProjectionsGpuData;
         uint32_t s_CurrentPageTableIndex = 0;
+        uint32_t s_CurrentPhysicalHZBIndex = 0;
         bool s_PhysicalPagePoolInitialized = false;
 
         void AddPhysicalPagePassRootSRVs(ProgramDesc& desc)
@@ -100,6 +103,11 @@ namespace Renderer::VirtualShadowMap
         StructuredBuffer& GetPreviousPageTable()
         {
             return s_PageTablesGpu[s_CurrentPageTableIndex ^ 1u];
+        }
+
+        HierarchicalDepthBuffer& GetCurrentPhysicalHZB()
+        {
+            return s_PhysicalHZBs[s_CurrentPhysicalHZBIndex];
         }
 
         uint32_t FindPreviousPageTableBase(uint32_t stableShadowMapId, uint32_t addressType, uint32_t layer)
@@ -554,12 +562,25 @@ namespace Renderer::VirtualShadowMap
             kPhysicalPoolResolution,
             kPhysicalPoolResolution,
             DXGI_FORMAT_D32_FLOAT);
+        s_PhysicalHZBs[0].Create(
+            L"VSM Physical HZB 0",
+            kPhysicalPoolResolution,
+            kPhysicalPoolResolution,
+            DXGI_FORMAT_R32_FLOAT);
+        s_PhysicalHZBs[1].Create(
+            L"VSM Physical HZB 1",
+            kPhysicalPoolResolution,
+            kPhysicalPoolResolution,
+            DXGI_FORMAT_R32_FLOAT);
+        Renderer::SetBindlessResourceDescriptor(SRV_VSM_PHYSICAL_HZB0, s_PhysicalHZBs[0].GetSRV());
+        Renderer::SetBindlessResourceDescriptor(SRV_VSM_PHYSICAL_HZB1, s_PhysicalHZBs[1].GetSRV());
 
         s_Views.reserve(kMaxShadowViews);
         s_PreviousViews.reserve(kMaxShadowViews);
         s_DirectionalAddressesGpuData.reserve(kMaxShadowViews);
         s_ProjectionsGpuData.reserve(kMaxShadowViews);
         s_CurrentPageTableIndex = 0;
+        s_CurrentPhysicalHZBIndex = 0;
         s_PhysicalPagePoolInitialized = false;
         s_Initialized = true;
         return true;
@@ -586,6 +607,8 @@ namespace Renderer::VirtualShadowMap
         s_PageManagementCountersGpu.Destroy();
         s_PhysicalPageViewsGpu.Destroy();
         s_PhysicalPagePool.Destroy();
+        s_PhysicalHZBs[0].Destroy();
+        s_PhysicalHZBs[1].Destroy();
         s_MarkRequestedPagesProgram.reset();
         s_ReuseRequestedPagesProgram.reset();
         s_BuildFreePhysicalPageListProgram.reset();
@@ -597,6 +620,7 @@ namespace Renderer::VirtualShadowMap
         s_PhysicalPageMeshBufferGenProgram.reset();
         s_PhysicalPageDepthProgram.reset();
         s_CurrentPageTableIndex = 0;
+        s_CurrentPhysicalHZBIndex = 0;
         s_PhysicalPagePoolInitialized = false;
         s_Initialized = false;
     }
@@ -612,6 +636,7 @@ namespace Renderer::VirtualShadowMap
         s_DirectionalAddressesGpuData.clear();
         s_ProjectionsGpuData.clear();
         s_CurrentPageTableIndex ^= 1u;
+        s_CurrentPhysicalHZBIndex ^= 1u;
     }
 
     uint32_t AddDirectionalView(const DirectionalVsmAddressDesc& desc)
@@ -1119,6 +1144,17 @@ namespace Renderer::VirtualShadowMap
             DrawCommandManager::GetIndirectDispatchMeshGPU(),
             0,
             1);
+    }
+
+    void GeneratePhysicalHZB(GraphicsContext& gfxContext)
+    {
+        ASSERT(s_Initialized, "VirtualShadowMap must be initialized before generating the physical HZB.");
+        if (!s_Initialized || !s_PhysicalPagePoolInitialized)
+            return;
+
+        ScopedTimer timer(L"VSM: Generate Physical HZB", gfxContext);
+        gfxContext.TransitionResource(s_PhysicalPagePool, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        GetCurrentPhysicalHZB().GenerateHZB(gfxContext, s_PhysicalPagePool);
     }
 
     void BindPageRequestDebugResources(ProgramBinder& binder)

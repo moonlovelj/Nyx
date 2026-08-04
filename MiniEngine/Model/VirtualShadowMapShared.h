@@ -17,6 +17,11 @@
 #define VSM_PHYSICAL_POOL_DIM_PAGES_MASK (VSM_PHYSICAL_POOL_DIM_PAGES - 1u)
 #define VSM_PHYSICAL_PAGE_CAPACITY (VSM_PHYSICAL_POOL_DIM_PAGES * VSM_PHYSICAL_POOL_DIM_PAGES)
 #define VSM_PHYSICAL_POOL_RESOLUTION (VSM_PHYSICAL_POOL_DIM_PAGES * VSM_PAGE_SIZE)
+
+// The shared HZB generator starts at half source resolution. Mips above this
+// page-local range combine texels from adjacent physical pages.
+#define VSM_PHYSICAL_HZB_PAGE_SIZE (VSM_PAGE_SIZE >> 1u)
+#define VSM_PHYSICAL_HZB_MAX_PAGE_MIP (VSM_PAGE_SIZE_LOG2 - 1u)
 #define VSM_INVALID_PHYSICAL_PAGE 0xffffffffu
 #define VSM_INVALID_PAGE_TABLE_BASE 0xffffffffu
 
@@ -82,6 +87,8 @@ namespace Renderer::VirtualShadowMap
     inline constexpr uint32_t kPhysicalPoolDimPagesMask = VSM_PHYSICAL_POOL_DIM_PAGES_MASK;
     inline constexpr uint32_t kPhysicalPageCapacity = VSM_PHYSICAL_PAGE_CAPACITY;
     inline constexpr uint32_t kPhysicalPoolResolution = VSM_PHYSICAL_POOL_RESOLUTION;
+    inline constexpr uint32_t kPhysicalHZBPageSize = VSM_PHYSICAL_HZB_PAGE_SIZE;
+    inline constexpr uint32_t kPhysicalHZBMaxPageMip = VSM_PHYSICAL_HZB_MAX_PAGE_MIP;
     inline constexpr uint32_t kInvalidPhysicalPage = VSM_INVALID_PHYSICAL_PAGE;
     inline constexpr uint32_t kInvalidPageTableBase = VSM_INVALID_PAGE_TABLE_BASE;
 

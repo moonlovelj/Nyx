@@ -61,6 +61,7 @@ namespace Renderer::VirtualShadowMap
         GraphicsContext& gfxContext,
         const Renderer::FrameConstants& frame,
         uint32_t renderRequestIndex);
+    void GeneratePhysicalHZB(GraphicsContext& gfxContext);
 
     void BindPageRequestDebugResources(ProgramBinder& binder);
 
