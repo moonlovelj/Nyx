@@ -54,6 +54,7 @@ namespace Renderer::VirtualShadowMap
     void MarkRequestedPages(GraphicsContext& gfxContext, const Renderer::RenderView& receiverView);
     void AllocateRequestedPages(GraphicsContext& gfxContext);
     void BuildPhysicalPageViews(GraphicsContext& gfxContext);
+    void ClearRequestedPhysicalPage(GraphicsContext& gfxContext, uint32_t renderRequestIndex);
 
     void BindPageRequestDebugResources(ProgramBinder& binder);
 

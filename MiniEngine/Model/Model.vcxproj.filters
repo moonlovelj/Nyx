@@ -272,5 +272,8 @@
     <None Include="Shaders\BuildVsmPhysicalPageViews.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
+    <None Include="Shaders\ClearVsmPhysicalPage.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
   </ItemGroup>
 </Project>

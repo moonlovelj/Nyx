@@ -767,6 +767,7 @@ void SceneViewer::RenderScene( void )
             Renderer::VirtualShadowMap::MarkRequestedPages(gfxContext, mainView);
             Renderer::VirtualShadowMap::AllocateRequestedPages(gfxContext);
             Renderer::VirtualShadowMap::BuildPhysicalPageViews(gfxContext);
+            Renderer::VirtualShadowMap::ClearRequestedPhysicalPage(gfxContext, 0);
 
             Renderer::ResolveVBufferToGBuffer(gfxContext, mainView, frameConstants);
 

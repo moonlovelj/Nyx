@@ -32,10 +32,12 @@ namespace Renderer::VirtualShadowMap
         ComputePSO s_BuildFreePhysicalPageListPSO(L"VSM: Build Free Physical Page List");
         ComputePSO s_AllocateNewPagesPSO(L"VSM: Allocate New Pages");
         ComputePSO s_BuildPhysicalPageViewsPSO(L"VSM: Build Physical Page Views");
+        GraphicsPSO s_ClearRequestedPhysicalPagePSO(L"VSM: Clear Requested Physical Page");
         std::shared_ptr<Program> s_ReuseRequestedPagesProgram;
         std::shared_ptr<Program> s_BuildFreePhysicalPageListProgram;
         std::shared_ptr<Program> s_AllocateNewPagesProgram;
         std::shared_ptr<Program> s_BuildPhysicalPageViewsProgram;
+        std::shared_ptr<Program> s_ClearRequestedPhysicalPageProgram;
 
         StructuredBuffer s_ShadowViewsGpu;
         StructuredBuffer s_DirectionalAddressesGpu;
@@ -375,6 +377,28 @@ namespace Renderer::VirtualShadowMap
         ProgramUtils::SetProgram(s_BuildPhysicalPageViewsPSO, *s_BuildPhysicalPageViewsProgram);
         s_BuildPhysicalPageViewsPSO.Finalize();
 
+        ProgramDesc clearRequestedPhysicalPageDesc = ProgramUtils::MakeGraphicsDesc(
+            Renderer::GetModelShaderPath("ClearVsmPhysicalPage.slang"),
+            "vertexMain",
+            "");
+        clearRequestedPhysicalPageDesc.AddRootBufferSRV("g_VsmPageRenderRequests");
+        clearRequestedPhysicalPageDesc.AddRootBufferSRV("g_VsmPageManagementCounters");
+        s_ClearRequestedPhysicalPageProgram =
+            ProgramUtils::GetProgram(clearRequestedPhysicalPageDesc, "VSM: Clear Requested Physical Page");
+        if (!s_ClearRequestedPhysicalPageProgram)
+            return false;
+
+        D3D12_DEPTH_STENCIL_DESC clearDepthState = DepthStateReadWrite;
+        clearDepthState.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+        s_ClearRequestedPhysicalPagePSO.SetRasterizerState(RasterizerTwoSided);
+        s_ClearRequestedPhysicalPagePSO.SetDepthStencilState(clearDepthState);
+        s_ClearRequestedPhysicalPagePSO.SetBlendState(BlendDisable);
+        s_ClearRequestedPhysicalPagePSO.SetInputLayout(0, nullptr);
+        s_ClearRequestedPhysicalPagePSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
+        s_ClearRequestedPhysicalPagePSO.SetDepthTargetFormat(DXGI_FORMAT_D32_FLOAT);
+        ProgramUtils::SetProgram(s_ClearRequestedPhysicalPagePSO, *s_ClearRequestedPhysicalPageProgram);
+        s_ClearRequestedPhysicalPagePSO.Finalize();
+
         s_ShadowViewsGpu.Create(
             L"VSM Shadow Views",
             kMaxShadowViews,
@@ -457,6 +481,7 @@ namespace Renderer::VirtualShadowMap
         s_BuildFreePhysicalPageListProgram.reset();
         s_AllocateNewPagesProgram.reset();
         s_BuildPhysicalPageViewsProgram.reset();
+        s_ClearRequestedPhysicalPageProgram.reset();
         s_CurrentPageTableIndex = 0;
         s_PhysicalPagePoolInitialized = false;
         s_Initialized = false;
@@ -787,6 +812,37 @@ namespace Renderer::VirtualShadowMap
         context.Dispatch1D(kPhysicalPageCapacity);
         context.TransitionResource(s_PhysicalPageViewsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.FlushResourceBarriers();
+    }
+
+    void ClearRequestedPhysicalPage(GraphicsContext& gfxContext, uint32_t renderRequestIndex)
+    {
+        ASSERT(s_Initialized, "VirtualShadowMap must be initialized before clearing a physical page.");
+        ASSERT(s_ClearRequestedPhysicalPageProgram != nullptr);
+        if (!s_Initialized || !s_ClearRequestedPhysicalPageProgram || s_Views.empty())
+            return;
+
+        ScopedTimer timer(L"VSM: Clear Requested Physical Page", gfxContext);
+
+        constexpr D3D12_RESOURCE_STATES kGraphicsShaderResourceState =
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        gfxContext.TransitionResource(s_PageRenderRequestsGpu, kGraphicsShaderResourceState);
+        gfxContext.TransitionResource(s_PageManagementCountersGpu, kGraphicsShaderResourceState);
+        gfxContext.TransitionResource(s_PhysicalPagePool, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+        gfxContext.FlushResourceBarriers();
+
+        ProgramBinder binder(*s_ClearRequestedPhysicalPageProgram, gfxContext);
+        binder.SetRootSignature();
+        gfxContext.SetPipelineState(s_ClearRequestedPhysicalPagePSO);
+        gfxContext.SetDepthStencilTarget(s_PhysicalPagePool.GetDSV());
+        gfxContext.SetViewportAndScissor(0, 0, kPhysicalPoolResolution, kPhysicalPoolResolution);
+        gfxContext.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+        binder.SetRootBufferSRV("g_VsmPageRenderRequests", s_PageRenderRequestsGpu);
+        binder.SetRootBufferSRV("g_VsmPageManagementCounters", s_PageManagementCountersGpu);
+        binder["g_ClearVsmPhysicalPage"]["RenderRequestIndex"].Set(renderRequestIndex);
+        binder.Apply();
+
+        gfxContext.Draw(6);
     }
 
     void BindPageRequestDebugResources(ProgramBinder& binder)

@@ -171,6 +171,7 @@
   <ItemGroup>
     <None Include="packages.config" />
     <None Include="Shaders\BuildVsmPhysicalPageViews.slang" />
+    <None Include="Shaders\ClearVsmPhysicalPage.slang" />
     <None Include="Shaders\BindlessIndices.h.slang" />
     <None Include="Shaders\CullCommon.slang" />
     <None Include="Shaders\DataCodec.h.slang" />
