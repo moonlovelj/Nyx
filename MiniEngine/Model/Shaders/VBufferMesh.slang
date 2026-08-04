@@ -16,6 +16,9 @@
 #include "GeometryCommon.slang"
 #include "WaveUtil.h.slang"
 #include "CullCommon.slang"
+#ifdef VSM_PHYSICAL_PAGE_PASS
+#include "VsmPhysicalPagePass.h.slang"
+#endif
 
 #define MAX_VERTS 128
 #define MAX_PRIMS 128
@@ -31,6 +34,12 @@ struct VBufferMeshConstants
 struct MeshVertexOutput
 {
     float4 Position : SV_POSITION;
+#ifdef VSM_PHYSICAL_PAGE_PASS
+    float PageClipDistance0 : SV_ClipDistance0;
+    float PageClipDistance1 : SV_ClipDistance1;
+    float PageClipDistance2 : SV_ClipDistance2;
+    float PageClipDistance3 : SV_ClipDistance3;
+#endif
     float2 UV0 : TEXCOORD0;
     nointerpolation uint CommandIndex : TEXCOORD1;
     nointerpolation uint PackedMaterialInfo : TEXCOORD2;
@@ -77,7 +86,8 @@ MeshVertexOutput BuildVertexOutput(
     uint vertexByteOffset,
     uint vertexStride,
     uint localVertexID,
-    uint commandIndex)
+    uint commandIndex,
+    float4x4 viewProjMatrix)
 {
     uint vertexOffset = vertexByteOffset + vertexStride * localVertexID;
     float4 position = float4(asfloat(geometryChunksBuffer.Load3(vertexOffset)), 1.0);
@@ -130,7 +140,7 @@ MeshVertexOutput BuildVertexOutput(
     //}
 
     float3 worldPos = mul(meshInstance.WorldMatrix, position).xyz;
-    float4 clipPos = mul(g_VBufferMesh.ViewProjMatrix, float4(worldPos, 1.0));
+    float4 clipPos = mul(viewProjMatrix, float4(worldPos, 1.0));
 
     uint packedMaterialInfo = (meshletHeader.GetMaterialBufferIndex() & 0xFFFF)
         | ((mat.flags & 0xFF) << 16);
@@ -153,6 +163,14 @@ void meshMain(
     OutputIndices<uint3, MAX_PRIMS> outIndices,
     OutputPrimitives<PrimitiveAttributes, MAX_PRIMS> sharedPrimitives)
 {
+#ifdef VSM_PHYSICAL_PAGE_PASS
+    VsmPhysicalPageView pageView;
+    TryGetVsmPhysicalPageView(pageView);
+    float4x4 viewProjMatrix = GetVsmPhysicalPageViewProj(pageView);
+#else
+    float4x4 viewProjMatrix = g_VBufferMesh.ViewProjMatrix;
+#endif
+
 #ifndef DISABLE_HZB_CULL
 #if VBUFFER_MESH_PASS_INDEX == 1
     StructuredBuffer<QueueState> taskStateSRV = GetTaskQueueStateBufferSRV();
@@ -211,9 +229,12 @@ void meshMain(
         {
             triIndices = LoadAndUnpackTriangle(geometryChunksBuffer, indexByteOffset, primitiveID);
 
-            float4 h0 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.x, meshInstance.WorldMatrix, g_VBufferMesh.ViewProjMatrix);
-            float4 h1 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.y, meshInstance.WorldMatrix, g_VBufferMesh.ViewProjMatrix);
-            float4 h2 = GetClipPosition(geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.z, meshInstance.WorldMatrix, g_VBufferMesh.ViewProjMatrix);
+            float4 h0 = GetClipPosition(
+                geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.x, meshInstance.WorldMatrix, viewProjMatrix);
+            float4 h1 = GetClipPosition(
+                geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.y, meshInstance.WorldMatrix, viewProjMatrix);
+            float4 h2 = GetClipPosition(
+                geometryChunksBuffer, vertexByteOffset, vertexStride, triIndices.z, meshInstance.WorldMatrix, viewProjMatrix);
 
             bool logicalFrontFacing = IsFrontFacing(h0, h1, h2) != isWorldFlipped;
             isVisible = twoSided || logicalFrontFacing;
@@ -258,7 +279,7 @@ void meshMain(
         const uint vertexID = i + gtid;
         if (vertexID < vertexCount)
         {
-            verts[vertexID] = BuildVertexOutput(
+            MeshVertexOutput vertexOutput = BuildVertexOutput(
                 geometryChunksBuffer,
                 meshletHeader,
                 mat,
@@ -266,7 +287,17 @@ void meshMain(
                 vertexByteOffset,
                 vertexStride,
                 vertexID,
-                commandIndex);
+                commandIndex,
+                viewProjMatrix);
+#ifdef VSM_PHYSICAL_PAGE_PASS
+            float4 pageClipDistances = GetVsmPageClipDistances(vertexOutput.Position);
+            vertexOutput.PageClipDistance0 = pageClipDistances.x;
+            vertexOutput.PageClipDistance1 = pageClipDistances.y;
+            vertexOutput.PageClipDistance2 = pageClipDistances.z;
+            vertexOutput.PageClipDistance3 = pageClipDistances.w;
+            vertexOutput.Position = TransformVsmPageClipToPhysicalAtlas(pageView, vertexOutput.Position);
+#endif
+            verts[vertexID] = vertexOutput;
         }
     }
 

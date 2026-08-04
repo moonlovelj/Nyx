@@ -13,6 +13,9 @@
 
 #include "CullCommon.slang"
 #include "CommonResources.slang"
+#ifdef VSM_PHYSICAL_PAGE_PASS
+#include "VsmPhysicalPagePass.h.slang"
+#endif
 
 struct InstanceCullConstants
 {
@@ -76,12 +79,21 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
     CullCommonContext cullContext;
     cullContext.ViewportWidth = g_InstanceCull.ViewportWidth;
     cullContext.ViewportHeight = g_InstanceCull.ViewportHeight;
+#ifdef VSM_PHYSICAL_PAGE_PASS
+    VsmPhysicalPageView pageView;
+    if (!TryGetVsmPhysicalPageView(pageView))
+        return;
+
+    float4x4 viewProjMatrix = GetVsmPhysicalPageViewProj(pageView);
+#else
+    float4x4 viewProjMatrix = g_InstanceCull.ViewProjMatrix;
+#endif
     const uint passIndex = 0;
     bool visible = EvaluateBoundsInFrustum(
         instanceConstant.BBoxMin,
         instanceConstant.BBoxMax,
         meshConstant.WorldMatrix,
-        g_InstanceCull.ViewProjMatrix,
+        viewProjMatrix,
         cullContext);
 #endif
 

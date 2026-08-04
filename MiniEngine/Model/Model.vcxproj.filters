@@ -266,6 +266,9 @@
     <None Include="Shaders\VirtualShadowMap.h.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
+    <None Include="Shaders\VsmPhysicalPagePass.h.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
     <None Include="Shaders\VsmPageManagement.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>

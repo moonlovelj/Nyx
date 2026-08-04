@@ -1,5 +1,7 @@
 #include "VirtualShadowMap.h"
 
+#include "CommandBucketer.h"
+#include "GeometryStreaming.h"
 #include "Renderer.h"
 #include "TemporalEffects.h"
 #include "../Core/BufferManager.h"
@@ -32,12 +34,20 @@ namespace Renderer::VirtualShadowMap
         ComputePSO s_BuildFreePhysicalPageListPSO(L"VSM: Build Free Physical Page List");
         ComputePSO s_AllocateNewPagesPSO(L"VSM: Allocate New Pages");
         ComputePSO s_BuildPhysicalPageViewsPSO(L"VSM: Build Physical Page Views");
+        ComputePSO s_PhysicalPageInstanceCullPSO(L"VSM: Physical Page Instance Cull");
+        ComputePSO s_PhysicalPageDAGCullPSO(L"VSM: Physical Page DAG Cull");
+        ComputePSO s_PhysicalPageMeshBufferGenPSO(L"VSM: Physical Page Mesh Buffer Gen");
         GraphicsPSO s_ClearRequestedPhysicalPagePSO(L"VSM: Clear Requested Physical Page");
+        MeshShaderPSO s_PhysicalPageDepthPSO(L"VSM: Physical Page Depth");
         std::shared_ptr<Program> s_ReuseRequestedPagesProgram;
         std::shared_ptr<Program> s_BuildFreePhysicalPageListProgram;
         std::shared_ptr<Program> s_AllocateNewPagesProgram;
         std::shared_ptr<Program> s_BuildPhysicalPageViewsProgram;
         std::shared_ptr<Program> s_ClearRequestedPhysicalPageProgram;
+        std::shared_ptr<Program> s_PhysicalPageInstanceCullProgram;
+        std::shared_ptr<Program> s_PhysicalPageDAGCullProgram;
+        std::shared_ptr<Program> s_PhysicalPageMeshBufferGenProgram;
+        std::shared_ptr<Program> s_PhysicalPageDepthProgram;
 
         StructuredBuffer s_ShadowViewsGpu;
         StructuredBuffer s_DirectionalAddressesGpu;
@@ -59,6 +69,28 @@ namespace Renderer::VirtualShadowMap
         std::vector<VsmProjectionGpu> s_ProjectionsGpuData;
         uint32_t s_CurrentPageTableIndex = 0;
         bool s_PhysicalPagePoolInitialized = false;
+
+        void AddPhysicalPagePassRootSRVs(ProgramDesc& desc)
+        {
+            desc.AddRootBufferSRV("g_VsmPageRenderRequests");
+            desc.AddRootBufferSRV("g_VsmPageManagementCounters");
+            desc.AddRootBufferSRV("g_VsmPhysicalPageViews");
+        }
+
+        void BindPhysicalPagePassResources(ProgramBinder& binder, uint32_t renderRequestIndex)
+        {
+            binder.SetRootBufferSRV("g_VsmPageRenderRequests", s_PageRenderRequestsGpu);
+            binder.SetRootBufferSRV("g_VsmPageManagementCounters", s_PageManagementCountersGpu);
+            binder.SetRootBufferSRV("g_VsmPhysicalPageViews", s_PhysicalPageViewsGpu);
+            binder["g_VsmPhysicalPagePass"]["RenderRequestIndex"].Set(renderRequestIndex);
+        }
+
+        void SetCommonResources(ProgramBinder& binder, const Renderer::FrameConstants& frame)
+        {
+            ProgramVar commonResources = binder["g_CommonResources"];
+            commonResources["BindlessResourcesBaseIndex"].Set(frame.BindlessResourcesBaseIndex);
+            commonResources["FrameIndexMod2"].Set(frame.FrameIndexMod2);
+        }
 
         StructuredBuffer& GetCurrentPageTable()
         {
@@ -168,7 +200,9 @@ namespace Renderer::VirtualShadowMap
 
         VsmProjectionGpu BuildVsmProjectionGpu(
             const Math::Matrix4& viewProjMatrix,
-            const Math::Matrix4& prevViewProjMatrix)
+            const Math::Matrix4& prevViewProjMatrix,
+            Math::Vector3 viewerPosition,
+            uint32_t projectionType)
         {
             const Math::Matrix4 viewProjRows = Math::Transpose(viewProjMatrix);
             const Math::Matrix4 prevViewProjRows = Math::Transpose(prevViewProjMatrix);
@@ -182,6 +216,8 @@ namespace Renderer::VirtualShadowMap
             projectionData.PrevViewProjRow1 = PackFloat4(prevViewProjRows.GetY());
             projectionData.PrevViewProjRow2 = PackFloat4(prevViewProjRows.GetZ());
             projectionData.PrevViewProjRow3 = PackFloat4(prevViewProjRows.GetW());
+            projectionData.ViewerPositionAndProjectionType =
+                PackFloat4(viewerPosition, static_cast<float>(projectionType));
             return projectionData;
         }
 
@@ -189,7 +225,11 @@ namespace Renderer::VirtualShadowMap
             const DirectionalVsmAddressDesc& desc,
             const DirectionalVsmAddressGpu& addressData)
         {
-            VsmProjectionGpu projectionData = BuildVsmProjectionGpu(desc.ViewProjMatrix, desc.PrevViewProjMatrix);
+            VsmProjectionGpu projectionData = BuildVsmProjectionGpu(
+                desc.ViewProjMatrix,
+                desc.PrevViewProjMatrix,
+                desc.FocusPositionWS,
+                VSM_PROJECTION_TYPE_ORTHOGRAPHIC);
             projectionData.ViewProjRow0 = BuildDirectionalVirtualProjectionRow(
                 addressData.WorldToLightRow0,
                 addressData.AddressOriginAndInvWorldUnitsPerPage,
@@ -399,6 +439,76 @@ namespace Renderer::VirtualShadowMap
         ProgramUtils::SetProgram(s_ClearRequestedPhysicalPagePSO, *s_ClearRequestedPhysicalPageProgram);
         s_ClearRequestedPhysicalPagePSO.Finalize();
 
+        ProgramDesc physicalPageInstanceCullDesc = ProgramUtils::MakeComputeDesc(
+            Renderer::GetModelShaderPath("InstanceCull.slang"),
+            "computeMain",
+            ProgramUtils::BindlessMode::ResourceHeap);
+        physicalPageInstanceCullDesc.AddDefine("DISABLE_HZB_CULL");
+        physicalPageInstanceCullDesc.AddDefine("VSM_PHYSICAL_PAGE_PASS");
+        AddPhysicalPagePassRootSRVs(physicalPageInstanceCullDesc);
+        s_PhysicalPageInstanceCullProgram =
+            ProgramUtils::GetProgram(physicalPageInstanceCullDesc, "VSM: Physical Page Instance Cull");
+        if (!s_PhysicalPageInstanceCullProgram)
+            return false;
+
+        ProgramUtils::SetProgram(s_PhysicalPageInstanceCullPSO, *s_PhysicalPageInstanceCullProgram);
+        s_PhysicalPageInstanceCullPSO.Finalize();
+
+        ProgramDesc physicalPageDAGCullDesc = ProgramUtils::MakeComputeDesc(
+            Renderer::GetModelShaderPath("DAGCull.slang"),
+            "computeMain",
+            ProgramUtils::BindlessMode::ResourceHeap);
+        physicalPageDAGCullDesc.AddDefine("DAG_CULL_PASS_INDEX", "0");
+        physicalPageDAGCullDesc.AddDefine("DISABLE_HZB_CULL");
+        physicalPageDAGCullDesc.AddDefine("VSM_PHYSICAL_PAGE_PASS");
+        AddPhysicalPagePassRootSRVs(physicalPageDAGCullDesc);
+        physicalPageDAGCullDesc.AddRootBufferUAV("g_TaskQueueStateUAV");
+        physicalPageDAGCullDesc.AddRootBufferUAV("g_TaskQueueUAV");
+        physicalPageDAGCullDesc.AddRootBufferUAV("g_MeshletBatchUAV");
+        physicalPageDAGCullDesc.AddRootBufferUAV("g_CandidateMeshletUAV");
+        s_PhysicalPageDAGCullProgram =
+            ProgramUtils::GetProgram(physicalPageDAGCullDesc, "VSM: Physical Page DAG Cull");
+        if (!s_PhysicalPageDAGCullProgram)
+            return false;
+
+        ProgramUtils::SetProgram(s_PhysicalPageDAGCullPSO, *s_PhysicalPageDAGCullProgram);
+        s_PhysicalPageDAGCullPSO.Finalize();
+
+        ProgramDesc physicalPageMeshBufferGenDesc = ProgramUtils::MakeComputeDesc(
+            Renderer::GetModelShaderPath("MeshBufferGen.slang"),
+            "computeMain",
+            ProgramUtils::BindlessMode::ResourceHeap);
+        s_PhysicalPageMeshBufferGenProgram =
+            ProgramUtils::GetProgram(physicalPageMeshBufferGenDesc, "VSM: Physical Page Mesh Buffer Gen");
+        if (!s_PhysicalPageMeshBufferGenProgram)
+            return false;
+
+        ProgramUtils::SetProgram(s_PhysicalPageMeshBufferGenPSO, *s_PhysicalPageMeshBufferGenProgram);
+        s_PhysicalPageMeshBufferGenPSO.Finalize();
+
+        ProgramDesc physicalPageDepthDesc = ProgramUtils::MakeGraphicsDesc(
+            Renderer::GetModelShaderPath("VBufferMesh.slang"),
+            "",
+            "pixelMain",
+            "meshMain",
+            ProgramUtils::BindlessMode::ResourceAndSamplerHeap);
+        physicalPageDepthDesc.AddDefine("VBUFFER_MESH_PASS_INDEX", "0");
+        physicalPageDepthDesc.AddDefine("DISABLE_HZB_CULL");
+        physicalPageDepthDesc.AddDefine("DEPTH_ONLY");
+        physicalPageDepthDesc.AddDefine("VSM_PHYSICAL_PAGE_PASS");
+        AddPhysicalPagePassRootSRVs(physicalPageDepthDesc);
+        s_PhysicalPageDepthProgram =
+            ProgramUtils::GetProgram(physicalPageDepthDesc, "VSM: Physical Page Depth");
+        if (!s_PhysicalPageDepthProgram)
+            return false;
+
+        s_PhysicalPageDepthPSO.SetRasterizerState(RasterizerShadowTwoSided);
+        s_PhysicalPageDepthPSO.SetDepthStencilState(DepthStateReadWrite);
+        s_PhysicalPageDepthPSO.SetBlendState(BlendDisable);
+        s_PhysicalPageDepthPSO.SetRenderTargetFormats(0, {}, DXGI_FORMAT_D32_FLOAT);
+        ProgramUtils::SetProgram(s_PhysicalPageDepthPSO, *s_PhysicalPageDepthProgram);
+        s_PhysicalPageDepthPSO.Finalize();
+
         s_ShadowViewsGpu.Create(
             L"VSM Shadow Views",
             kMaxShadowViews,
@@ -482,6 +592,10 @@ namespace Renderer::VirtualShadowMap
         s_AllocateNewPagesProgram.reset();
         s_BuildPhysicalPageViewsProgram.reset();
         s_ClearRequestedPhysicalPageProgram.reset();
+        s_PhysicalPageInstanceCullProgram.reset();
+        s_PhysicalPageDAGCullProgram.reset();
+        s_PhysicalPageMeshBufferGenProgram.reset();
+        s_PhysicalPageDepthProgram.reset();
         s_CurrentPageTableIndex = 0;
         s_PhysicalPagePoolInitialized = false;
         s_Initialized = false;
@@ -572,7 +686,11 @@ namespace Renderer::VirtualShadowMap
         view.LodScale = ComputePerspectiveVsmLodScale(desc.ProjMatrix);
 
         s_Views.push_back(view);
-        s_ProjectionsGpuData.push_back(BuildVsmProjectionGpu(desc.ViewProjMatrix, desc.PrevViewProjMatrix));
+        s_ProjectionsGpuData.push_back(BuildVsmProjectionGpu(
+            desc.ViewProjMatrix,
+            desc.PrevViewProjMatrix,
+            desc.ViewerPositionWS,
+            VSM_PROJECTION_TYPE_PERSPECTIVE));
         return viewId;
     }
 
@@ -843,6 +961,164 @@ namespace Renderer::VirtualShadowMap
         binder.Apply();
 
         gfxContext.Draw(6);
+    }
+
+    void RenderRequestedPhysicalPageDepth(
+        GraphicsContext& gfxContext,
+        const Renderer::FrameConstants& frame,
+        uint32_t renderRequestIndex)
+    {
+        ASSERT(s_Initialized, "VirtualShadowMap must be initialized before rendering a physical page.");
+        ASSERT(s_PhysicalPageInstanceCullProgram != nullptr);
+        ASSERT(s_PhysicalPageDAGCullProgram != nullptr);
+        ASSERT(s_PhysicalPageMeshBufferGenProgram != nullptr);
+        ASSERT(s_PhysicalPageDepthProgram != nullptr);
+        if (!s_Initialized || !s_PhysicalPageInstanceCullProgram || !s_PhysicalPageDAGCullProgram ||
+            !s_PhysicalPageMeshBufferGenProgram || !s_PhysicalPageDepthProgram || s_Views.empty() ||
+            DrawCommandManager::GetNumPotentialDrawItems() == 0)
+        {
+            return;
+        }
+
+        ScopedTimer timer(L"VSM: Render Requested Physical Page Depth", gfxContext);
+        ComputeContext& context = gfxContext.GetComputeContext();
+
+        for (GpuBuffer& geometryChunk : GeometryStreaming::m_GeometryChunksGPU)
+            context.TransitionResource(geometryChunk, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+
+        context.TransitionResource(
+            GeometryStreaming::m_GroupDataLocationGPU,
+            D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+        context.ClearBufferUAV(
+            DrawCommandManager::GetTaskQueueStateGPU(),
+            DrawCommandManager::GetTaskQueueStateGPU().GetBufferSize(),
+            0);
+        gfxContext.TransitionResource(DrawCommandManager::GetTaskQueueGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        gfxContext.ClearUAV(DrawCommandManager::GetTaskQueueGPU(), 0xffffffffu);
+        gfxContext.TransitionResource(DrawCommandManager::GetMeshletBatchGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        gfxContext.ClearUAV(DrawCommandManager::GetMeshletBatchGPU(), 0);
+        context.InsertUAVBarrier(DrawCommandManager::GetTaskQueueStateGPU());
+        context.InsertUAVBarrier(DrawCommandManager::GetTaskQueueGPU());
+        context.InsertUAVBarrier(DrawCommandManager::GetMeshletBatchGPU());
+
+        context.TransitionResource(
+            GeometryStreaming::m_GeometryStreamingRequestMaskGPU,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        context.TransitionResource(
+            DrawCommandManager::GetPotentialDrawItemsGPU(),
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_PageRenderRequestsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_PageManagementCountersGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_PhysicalPageViewsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.FlushResourceBarriers();
+
+        context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Renderer::s_TextureHeap.GetHeapPointer());
+        context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, Renderer::s_SamplerHeap.GetHeapPointer());
+
+        {
+            ProgramBinder binder(*s_PhysicalPageInstanceCullProgram, context);
+            binder.SetRootSignature();
+            context.SetPipelineState(s_PhysicalPageInstanceCullPSO);
+
+            ProgramVar constants = binder["g_InstanceCull"];
+            constants["ViewportWidth"].Set(kPageSize);
+            constants["ViewportHeight"].Set(kPageSize);
+            constants["MaxCommands"].Set(DrawCommandManager::GetNumPotentialDrawItems());
+            BindPhysicalPagePassResources(binder, renderRequestIndex);
+            SetCommonResources(binder, frame);
+            binder.Apply();
+
+            context.Dispatch1D(DrawCommandManager::GetNumPotentialDrawItems());
+        }
+
+        context.TransitionResource(DrawCommandManager::GetTaskQueueGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        context.TransitionResource(DrawCommandManager::GetTaskQueueStateGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        context.TransitionResource(
+            DrawCommandManager::GetVisibleMeshletBufferGPU(),
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        context.TransitionResource(DrawCommandManager::GetMeshletBatchGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        context.TransitionResource(DrawCommandManager::GetCandidateMeshletGPU(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        context.FlushResourceBarriers();
+
+        {
+            ProgramBinder binder(*s_PhysicalPageDAGCullProgram, context);
+            binder.SetRootSignature();
+            context.SetPipelineState(s_PhysicalPageDAGCullPSO);
+
+            ProgramVar constants = binder["g_DAGCull"];
+            constants["PixelErrorThreshold"].Set(Renderer::GetPixelErrorThreshold());
+            constants["ViewportWidth"].Set(kPageSize);
+            constants["ViewportHeight"].Set(kPageSize);
+            BindPhysicalPagePassResources(binder, renderRequestIndex);
+            SetCommonResources(binder, frame);
+            binder.SetRootBufferUAV("g_TaskQueueStateUAV", DrawCommandManager::GetTaskQueueStateGPU());
+            binder.SetRootBufferUAV("g_TaskQueueUAV", DrawCommandManager::GetTaskQueueGPU());
+            binder.SetRootBufferUAV("g_MeshletBatchUAV", DrawCommandManager::GetMeshletBatchGPU());
+            binder.SetRootBufferUAV("g_CandidateMeshletUAV", DrawCommandManager::GetCandidateMeshletGPU());
+            binder.Apply();
+
+            constexpr uint32_t kDAGCullGroupSize = DAG_CULL_GROUP_SIZE;
+            context.Dispatch1D(
+                Renderer::GetDAGCullGroupCount() * kDAGCullGroupSize,
+                kDAGCullGroupSize);
+        }
+
+        context.TransitionResource(
+            DrawCommandManager::GetTaskQueueStateGPU(),
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(
+            DrawCommandManager::GetIndirectDispatchMeshGPU(),
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        context.FlushResourceBarriers();
+
+        {
+            ProgramBinder binder(*s_PhysicalPageMeshBufferGenProgram, context);
+            binder.SetRootSignature();
+            context.SetPipelineState(s_PhysicalPageMeshBufferGenPSO);
+            binder["g_MeshBufferGen"]["PassIndex"].Set(0u);
+            SetCommonResources(binder, frame);
+            binder.Apply();
+            context.Dispatch1D(1, 1);
+        }
+
+        constexpr D3D12_RESOURCE_STATES kGraphicsShaderResourceState =
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        gfxContext.TransitionResource(
+            DrawCommandManager::GetIndirectDispatchMeshGPU(),
+            D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+        gfxContext.TransitionResource(
+            DrawCommandManager::GetVisibleMeshletBufferGPU(),
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        gfxContext.TransitionResource(s_PageRenderRequestsGpu, kGraphicsShaderResourceState);
+        gfxContext.TransitionResource(s_PageManagementCountersGpu, kGraphicsShaderResourceState);
+        gfxContext.TransitionResource(s_PhysicalPageViewsGpu, kGraphicsShaderResourceState);
+        gfxContext.TransitionResource(s_PhysicalPagePool, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+        gfxContext.FlushResourceBarriers();
+
+        gfxContext.SetDescriptorHeap(
+            D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+            Renderer::s_TextureHeap.GetHeapPointer());
+        gfxContext.SetDescriptorHeap(
+            D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
+            Renderer::s_SamplerHeap.GetHeapPointer());
+        gfxContext.SetDepthStencilTarget(s_PhysicalPagePool.GetDSV());
+        gfxContext.SetViewportAndScissor(0, 0, kPhysicalPoolResolution, kPhysicalPoolResolution);
+        gfxContext.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+        ProgramBinder binder(*s_PhysicalPageDepthProgram, gfxContext);
+        binder.SetRootSignature();
+        gfxContext.SetPipelineState(s_PhysicalPageDepthPSO);
+        binder["g_VBufferMesh"]["ViewportWidth"].Set(kPageSize);
+        binder["g_VBufferMesh"]["ViewportHeight"].Set(kPageSize);
+        BindPhysicalPagePassResources(binder, renderRequestIndex);
+        SetCommonResources(binder, frame);
+        binder.Apply();
+
+        gfxContext.ExecuteIndirect(
+            Renderer::GPUDrivenDrawIndirectCommandSignature,
+            DrawCommandManager::GetIndirectDispatchMeshGPU(),
+            0,
+            1);
     }
 
     void BindPageRequestDebugResources(ProgramBinder& binder)

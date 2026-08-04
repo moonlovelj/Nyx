@@ -767,9 +767,11 @@ void SceneViewer::RenderScene( void )
             Renderer::VirtualShadowMap::MarkRequestedPages(gfxContext, mainView);
             Renderer::VirtualShadowMap::AllocateRequestedPages(gfxContext);
             Renderer::VirtualShadowMap::BuildPhysicalPageViews(gfxContext);
-            Renderer::VirtualShadowMap::ClearRequestedPhysicalPage(gfxContext, 0);
 
             Renderer::ResolveVBufferToGBuffer(gfxContext, mainView, frameConstants);
+
+            Renderer::VirtualShadowMap::ClearRequestedPhysicalPage(gfxContext, 0);
+            Renderer::VirtualShadowMap::RenderRequestedPhysicalPageDepth(gfxContext, frameConstants, 0);
 
             XeGTAO::Render(gfxContext, m_Camera);
 

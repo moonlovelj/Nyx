@@ -299,6 +299,9 @@ namespace Renderer
         const HZBResources* hzbResources,
         bool disableHZBCull = false);
 
+    uint32_t GetDAGCullGroupCount();
+    float GetPixelErrorThreshold();
+
     uint32_t GetBindlessResourcesBaseOffset();
 	void SetBindlessResourceDescriptor(uint32_t bindlessIndex, const D3D12_CPU_DESCRIPTOR_HANDLE& handle);
 

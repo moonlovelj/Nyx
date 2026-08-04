@@ -702,7 +702,7 @@ void Renderer::InstanceCull(
 	context.Dispatch1D( DrawCommandManager::GetNumPotentialDrawItems());
 }
 
- static uint32_t GetDAGCullGroupCount()
+uint32_t Renderer::GetDAGCullGroupCount()
 {
     static uint32_t s_GroupCount = 0;
     if (s_GroupCount != 0)
@@ -726,6 +726,11 @@ void Renderer::InstanceCull(
         s_GroupCount = 768;
 
     return s_GroupCount;
+}
+
+float Renderer::GetPixelErrorThreshold()
+{
+    return static_cast<float>(PixelErrorThreshold);
 }
 
 void Renderer::DAGCull(

@@ -56,8 +56,10 @@ void computeMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     pageView.PrevViewProjRow2 = previousPageProjection.Row2;
     pageView.PrevViewProjRow3 = previousPageProjection.Row3;
 
-    float hzbUvScale = 1.0f / float(VSM_PHYSICAL_POOL_DIM_PAGES);
-    pageView.HzbUvScaleBias = float4(float2(hzbUvScale), float2(physicalPageCoord) * hzbUvScale);
+    float physicalAtlasUvScale = 1.0f / float(VSM_PHYSICAL_POOL_DIM_PAGES);
+    pageView.PhysicalAtlasUvScaleBias =
+        float4(float2(physicalAtlasUvScale), float2(physicalPageCoord) * physicalAtlasUvScale);
+    pageView.ViewerPositionAndProjectionType = projectionData.ViewerPositionAndProjectionType;
     pageView.VirtualPage = virtualPage;
     pageView.PhysicalPageIndex = request.PhysicalPageIndex;
     pageView.Flags = request.Flags;

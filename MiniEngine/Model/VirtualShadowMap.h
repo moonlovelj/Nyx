@@ -7,6 +7,7 @@ class ProgramBinder;
 
 namespace Renderer
 {
+    struct FrameConstants;
     class RenderView;
 }
 
@@ -36,6 +37,7 @@ namespace Renderer::VirtualShadowMap
         Math::Matrix4 ProjMatrix = Math::Matrix4(Math::kIdentity);
         Math::Matrix4 ViewProjMatrix = Math::Matrix4(Math::kIdentity);
         Math::Matrix4 PrevViewProjMatrix = Math::Matrix4(Math::kIdentity);
+        Math::Vector3 ViewerPositionWS = Math::Vector3(Math::kZero);
 
         uint32_t LightIndex = 0;
         uint32_t StableShadowMapId = 0;
@@ -55,6 +57,10 @@ namespace Renderer::VirtualShadowMap
     void AllocateRequestedPages(GraphicsContext& gfxContext);
     void BuildPhysicalPageViews(GraphicsContext& gfxContext);
     void ClearRequestedPhysicalPage(GraphicsContext& gfxContext, uint32_t renderRequestIndex);
+    void RenderRequestedPhysicalPageDepth(
+        GraphicsContext& gfxContext,
+        const Renderer::FrameConstants& frame,
+        uint32_t renderRequestIndex);
 
     void BindPageRequestDebugResources(ProgramBinder& binder);
 

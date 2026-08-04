@@ -20,6 +20,9 @@
 #include "CommonResources.slang"
 #include "CullCommon.slang"
 #include "WaveUtil.h.slang"
+#ifdef VSM_PHYSICAL_PAGE_PASS
+#include "VsmPhysicalPagePass.h.slang"
+#endif
 
 struct DAGCullConstants
 {
@@ -80,6 +83,33 @@ CullCommonContext GetCullCommonContext()
     return context;
 }
 
+struct DAGCullViewData
+{
+    float4x4 ViewProjMatrix;
+    float3 ViewerPosition;
+    float LodScale;
+    bool IsPerspective;
+};
+
+DAGCullViewData GetDAGCullViewData()
+{
+    DAGCullViewData view;
+#ifdef VSM_PHYSICAL_PAGE_PASS
+    VsmPhysicalPageView pageView;
+    TryGetVsmPhysicalPageView(pageView);
+    view.ViewProjMatrix = GetVsmPhysicalPageViewProj(pageView);
+    view.ViewerPosition = pageView.ViewerPositionAndProjectionType.xyz;
+    view.LodScale = pageView.LodScale;
+    view.IsPerspective = uint(pageView.ViewerPositionAndProjectionType.w) == VSM_PROJECTION_TYPE_PERSPECTIVE;
+#else
+    view.ViewProjMatrix = g_DAGCull.ViewProjMatrix;
+    view.ViewerPosition = g_DAGCull.ViewerPos;
+    view.LodScale = g_DAGCull.LodScale;
+    view.IsPerspective = g_DAGCull.ProjectionType == 0;
+#endif
+    return view;
+}
+
 uint FindLeafIndexForFlatMeshlet(uint flatIndex, uint leafCount)
 {
     uint lo = 0u;
@@ -97,6 +127,7 @@ uint FindLeafIndexForFlatMeshlet(uint flatIndex, uint leafCount)
 
 void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
 {
+    DAGCullViewData cullView = GetDAGCullViewData();
     // Each thread maps to (node slot in batch, child slot within that node).
     const uint nodeSlotInBatch = (groupIndex >> MAX_BVH_NODE_CHILDREN_BITS_NUM);
     const uint childSlotInNode = groupIndex & (MAX_BVH_NODE_CHILDREN_NUM - 1u);
@@ -149,19 +180,19 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
     bVisible = bVisible && EvaluateBoundsInFrustum(
         childNode.BBoxMin, childNode.BBoxMax,
         meshInstance.WorldMatrix,
-        g_DAGCull.ViewProjMatrix,
+        cullView.ViewProjMatrix,
         cullContext);
 #endif
 
     bVisible = bVisible &&
         !TestForLod(
             meshInstance.WorldMatrix,
-            g_DAGCull.ViewerPos,
+            cullView.ViewerPosition,
             childNode.MaxParrentError,
             childNode.BoundSphere,
-            g_DAGCull.LodScale,
+            cullView.LodScale,
             g_DAGCull.PixelErrorThreshold,
-            g_DAGCull.ProjectionType == 0);
+            cullView.IsPerspective);
     
     bool bIsLeaf = childNode.IsGroup();
 
@@ -294,6 +325,7 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
 
 void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize, uint groupIndex, uint passIndex)
 {
+    DAGCullViewData cullView = GetDAGCullViewData();
     if (groupIndex < meshletBatchReadySize)
     {
         const uint candidateIndex = meshletBatchStartIndex * DAG_CULL_GROUP_SIZE + groupIndex;
@@ -341,7 +373,7 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
             meshletHeader.BBoxMin,
             meshletHeader.BBoxMax,
             meshInstance.WorldMatrix,
-            g_DAGCull.ViewProjMatrix,
+            cullView.ViewProjMatrix,
             cullContext);
 #endif
         
@@ -356,12 +388,12 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
                 GroupHeader refineGroupHeader = refineGeometryChunksBuffer.Load<GroupHeader>(refineGroupDataLocation.ByteOffset);
                 bMeshletVisible = TestForLod(
                     meshInstance.WorldMatrix,
-                    g_DAGCull.ViewerPos,
+                    cullView.ViewerPosition,
                     refineGroupHeader.ParrentError,
                     refineGroupHeader.BoundSphere,
-                    g_DAGCull.LodScale,
+                    cullView.LodScale,
                     g_DAGCull.PixelErrorThreshold,
-                    g_DAGCull.ProjectionType == 0);
+                    cullView.IsPerspective);
             }
         }
 
@@ -395,6 +427,11 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
 [numthreads(DAG_CULL_GROUP_SIZE, 1, 1)]
 void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 {
+#ifdef VSM_PHYSICAL_PAGE_PASS
+    VsmPhysicalPageView pageView;
+    if (!TryGetVsmPhysicalPageView(pageView))
+        return;
+#endif
 #ifndef DISABLE_HZB_CULL
 #ifdef DAG_CULL_PASS1
     const uint passIndex = 1;

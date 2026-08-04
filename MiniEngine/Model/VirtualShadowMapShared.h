@@ -33,6 +33,9 @@
 #define VSM_ADDRESS_TYPE_DIRECTIONAL_CLIPMAP 1u
 #define VSM_ADDRESS_TYPE_LOCAL_PERSPECTIVE 2u
 
+#define VSM_PROJECTION_TYPE_PERSPECTIVE 0u
+#define VSM_PROJECTION_TYPE_ORTHOGRAPHIC 1u
+
 #define VSM_REQUEST_STATISTICS_STRIDE 16u
 #define VSM_REQUESTED_PAGE_COUNT_OFFSET 0u
 #define VSM_INVALID_ADDRESS_PIXEL_COUNT_OFFSET 4u
@@ -181,6 +184,9 @@ namespace Renderer::VirtualShadowMap
         VSM_FLOAT4 PrevViewProjRow1;
         VSM_FLOAT4 PrevViewProjRow2;
         VSM_FLOAT4 PrevViewProjRow3;
+
+        // xyz = current viewer/light position, w = VSM_PROJECTION_TYPE_*.
+        VSM_FLOAT4 ViewerPositionAndProjectionType;
     };
 
     // Address-only result. It intentionally contains no physical-page state.
@@ -232,8 +238,11 @@ namespace Renderer::VirtualShadowMap
         VSM_FLOAT4 PrevViewProjRow2;
         VSM_FLOAT4 PrevViewProjRow3;
 
-        // xy = page UV scale in the HZB atlas, zw = page UV bias.
-        VSM_FLOAT4 HzbUvScaleBias;
+        // xy = page UV scale in the physical atlas, zw = page UV bias.
+        VSM_FLOAT4 PhysicalAtlasUvScaleBias;
+
+        // xyz = current viewer/light position, w = VSM_PROJECTION_TYPE_*.
+        VSM_FLOAT4 ViewerPositionAndProjectionType;
 
         VSM_INT2 VirtualPage;
         VSM_UINT PhysicalPageIndex;
@@ -247,10 +256,10 @@ namespace Renderer::VirtualShadowMap
 #ifdef __cplusplus
     static_assert(sizeof(VsmShadowView) == 48);
     static_assert(sizeof(DirectionalVsmAddressGpu) == 80);
-    static_assert(sizeof(VsmProjectionGpu) == 128);
+    static_assert(sizeof(VsmProjectionGpu) == 144);
     static_assert(sizeof(VsmPageRenderRequest) == 16);
     static_assert(sizeof(VsmPhysicalPageMetadata) == 32);
-    static_assert(sizeof(VsmPhysicalPageView) == 176);
+    static_assert(sizeof(VsmPhysicalPageView) == 192);
 }
 #endif
 
