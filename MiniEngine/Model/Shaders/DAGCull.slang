@@ -72,23 +72,17 @@ groupshared uint GroupLeafMeshletCount[DAG_CULL_GROUP_SIZE];
 groupshared uint GroupCandidateMeshletBase;
 groupshared uint GroupCandidateMeshletCount;
 
-CullCommonContext GetCullCommonContext()
-{
-    CullCommonContext context;
-    context.ViewportWidth = g_DAGCull.ViewportWidth;
-    context.ViewportHeight = g_DAGCull.ViewportHeight;
-#ifndef DISABLE_HZB_CULL
-    context.HZBSizeAndInv = g_DAGCull.HZBSizeAndInv;
-#endif
-    return context;
-}
-
 struct DAGCullViewData
 {
     float4x4 ViewProjMatrix;
+    float4x4 PrevViewProjMatrix;
     float3 ViewerPosition;
     float LodScale;
     bool IsPerspective;
+    bool HasHistory;
+    uint HZBSourceWidth;
+    uint HZBSourceHeight;
+    float4 HZBUvScaleBias;
 };
 
 DAGCullViewData GetDAGCullViewData()
@@ -98,16 +92,121 @@ DAGCullViewData GetDAGCullViewData()
     VsmPhysicalPageView pageView;
     TryGetVsmPhysicalPageView(pageView);
     view.ViewProjMatrix = GetVsmPhysicalPageViewProj(pageView);
+    view.PrevViewProjMatrix = GetVsmPhysicalPagePrevViewProj(pageView);
     view.ViewerPosition = pageView.ViewerPositionAndProjectionType.xyz;
     view.LodScale = pageView.LodScale;
     view.IsPerspective = uint(pageView.ViewerPositionAndProjectionType.w) == VSM_PROJECTION_TYPE_PERSPECTIVE;
+    view.HasHistory = HasVsmPhysicalPageHistory(pageView);
+    view.HZBSourceWidth = VSM_PHYSICAL_POOL_RESOLUTION;
+    view.HZBSourceHeight = VSM_PHYSICAL_POOL_RESOLUTION;
+    view.HZBUvScaleBias = pageView.PhysicalAtlasUvScaleBias;
 #else
     view.ViewProjMatrix = g_DAGCull.ViewProjMatrix;
+#ifndef DISABLE_HZB_CULL
+    view.PrevViewProjMatrix = g_DAGCull.PrevViewProjMatrix;
+#else
+    view.PrevViewProjMatrix = view.ViewProjMatrix;
+#endif
     view.ViewerPosition = g_DAGCull.ViewerPos;
     view.LodScale = g_DAGCull.LodScale;
     view.IsPerspective = g_DAGCull.ProjectionType == 0;
+    view.HasHistory = true;
+    view.HZBSourceWidth = g_DAGCull.ViewportWidth;
+    view.HZBSourceHeight = g_DAGCull.ViewportHeight;
+    view.HZBUvScaleBias = float4(1.0f, 1.0f, 0.0f, 0.0f);
 #endif
     return view;
+}
+
+CullCommonContext GetCullCommonContext(DAGCullViewData view)
+{
+    CullCommonContext context;
+    context.ViewportWidth = g_DAGCull.ViewportWidth;
+    context.ViewportHeight = g_DAGCull.ViewportHeight;
+    context.HZBSourceWidth = view.HZBSourceWidth;
+    context.HZBSourceHeight = view.HZBSourceHeight;
+    context.HZBUvScaleBias = view.HZBUvScaleBias;
+#ifndef DISABLE_HZB_CULL
+    context.HZBSizeAndInv = g_DAGCull.HZBSizeAndInv;
+#endif
+    return context;
+}
+
+bool EvaluateNodeVisibility(
+    float3 bboxMin,
+    float3 bboxMax,
+    float4x4 worldMatrix,
+    DAGCullViewData view,
+    CullCommonContext context)
+{
+#ifndef DISABLE_HZB_CULL
+#ifdef DAG_CULL_PASS1
+    return view.HasHistory && EvaluateBoundsVisibility(
+        bboxMin,
+        bboxMax,
+        worldMatrix,
+        view.ViewProjMatrix,
+        g_DAGCull.CurrentHZB,
+        g_HZBSampler,
+        context);
+#else
+    return view.HasHistory
+        ? EvaluateBoundsVisibility(
+            bboxMin,
+            bboxMax,
+            worldMatrix,
+            view.PrevViewProjMatrix,
+            g_DAGCull.PreviousHZB,
+            g_HZBSampler,
+            context)
+        : EvaluateBoundsInFrustum(bboxMin, bboxMax, worldMatrix, view.ViewProjMatrix, context);
+#endif
+#else
+    return EvaluateBoundsInFrustum(bboxMin, bboxMax, worldMatrix, view.ViewProjMatrix, context);
+#endif
+}
+
+bool EvaluateMeshletVisibility(
+    float3 bboxMin,
+    float3 bboxMax,
+    float4x4 worldMatrix,
+    DAGCullViewData view,
+    CullCommonContext context)
+{
+#ifndef DISABLE_HZB_CULL
+    if (!view.HasHistory)
+    {
+#ifdef DAG_CULL_PASS1
+        return false;
+#else
+        return EvaluateBoundsInFrustum(bboxMin, bboxMax, worldMatrix, view.ViewProjMatrix, context);
+#endif
+    }
+
+    bool previousVisible = EvaluateBoundsVisibility(
+        bboxMin,
+        bboxMax,
+        worldMatrix,
+        view.PrevViewProjMatrix,
+        g_DAGCull.PreviousHZB,
+        g_HZBSampler,
+        context);
+
+#ifdef DAG_CULL_PASS1
+    return !previousVisible && EvaluateBoundsVisibility(
+        bboxMin,
+        bboxMax,
+        worldMatrix,
+        view.ViewProjMatrix,
+        g_DAGCull.CurrentHZB,
+        g_HZBSampler,
+        context);
+#else
+    return previousVisible;
+#endif
+#else
+    return EvaluateBoundsInFrustum(bboxMin, bboxMax, worldMatrix, view.ViewProjMatrix, context);
+#endif
 }
 
 uint FindLeafIndexForFlatMeshlet(uint flatIndex, uint leafCount)
@@ -155,34 +254,12 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
     
     InstanceConstant inst = LoadInstanceConstant(instanceIndex);
     MeshConstant meshInstance = LoadMeshConstant(inst.MeshBufferIdx);
-    CullCommonContext cullContext = GetCullCommonContext();
-
-#ifndef DISABLE_HZB_CULL
-#ifdef DAG_CULL_PASS0
-    bVisible = bVisible && EvaluateBoundsVisibility(
+    CullCommonContext cullContext = GetCullCommonContext(cullView);
+    bVisible = bVisible && EvaluateNodeVisibility(
         childNode.BBoxMin, childNode.BBoxMax,
         meshInstance.WorldMatrix,
-        g_DAGCull.PrevViewProjMatrix,
-        g_DAGCull.PreviousHZB,
-        g_HZBSampler,
+        cullView,
         cullContext);
-#endif
-#ifdef DAG_CULL_PASS1
-    bVisible = bVisible && EvaluateBoundsVisibility(
-        childNode.BBoxMin, childNode.BBoxMax,
-        meshInstance.WorldMatrix,
-        g_DAGCull.ViewProjMatrix,
-        g_DAGCull.CurrentHZB,
-        g_HZBSampler,
-        cullContext);
-#endif
-#else
-    bVisible = bVisible && EvaluateBoundsInFrustum(
-        childNode.BBoxMin, childNode.BBoxMax,
-        meshInstance.WorldMatrix,
-        cullView.ViewProjMatrix,
-        cullContext);
-#endif
 
     bVisible = bVisible &&
         !TestForLod(
@@ -346,36 +423,13 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
         InstanceConstant inst = LoadInstanceConstant(meshletPayload.InstanceIndex);
         MeshConstant meshInstance = LoadMeshConstant(inst.MeshBufferIdx);
         bool bAlphaBlend = (meshletHeader.GetPSOFlags() & PSO_ALPHA_BLEND) != 0u;
-        CullCommonContext cullContext = GetCullCommonContext();
-
-#ifndef DISABLE_HZB_CULL
-        bool bMeshletVisible = EvaluateBoundsVisibility(
+        CullCommonContext cullContext = GetCullCommonContext(cullView);
+        bool bMeshletVisible = EvaluateMeshletVisibility(
             meshletHeader.BBoxMin,
             meshletHeader.BBoxMax,
             meshInstance.WorldMatrix,
-            g_DAGCull.PrevViewProjMatrix,
-            g_DAGCull.PreviousHZB,
-            g_HZBSampler,
+            cullView,
             cullContext);
-        
-#ifdef DAG_CULL_PASS1
-            bMeshletVisible = !bMeshletVisible && EvaluateBoundsVisibility(
-                meshletHeader.BBoxMin,
-                meshletHeader.BBoxMax,
-                meshInstance.WorldMatrix,
-                g_DAGCull.ViewProjMatrix,
-                g_DAGCull.CurrentHZB,
-                g_HZBSampler,
-                cullContext);
-#endif
-#else
-        bool bMeshletVisible = EvaluateBoundsInFrustum(
-            meshletHeader.BBoxMin,
-            meshletHeader.BBoxMax,
-            meshInstance.WorldMatrix,
-            cullView.ViewProjMatrix,
-            cullContext);
-#endif
         
         bMeshletVisible = bMeshletVisible && !bAlphaBlend;
 

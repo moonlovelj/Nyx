@@ -7,6 +7,8 @@ StructuredBuffer<uint> g_VsmPreviousPageTable;
 StructuredBuffer<VsmPhysicalPageMetadata> g_VsmPhysicalPageMetadataSRV;
 StructuredBuffer<uint> g_VsmFreePhysicalPagesSRV;
 ByteAddressBuffer g_VsmPhysicalPageUsedMaskSRV;
+StructuredBuffer<VsmPageRenderRequest> g_VsmPageRenderRequestsSRV;
+ByteAddressBuffer g_VsmPageManagementCountersSRV;
 
 RWStructuredBuffer<uint> g_VsmCurrentPageTable;
 RWStructuredBuffer<VsmPhysicalPageMetadata> g_VsmPhysicalPageMetadataUAV;
@@ -14,6 +16,13 @@ RWStructuredBuffer<uint> g_VsmFreePhysicalPagesUAV;
 RWStructuredBuffer<VsmPageRenderRequest> g_VsmPageRenderRequests;
 RWByteAddressBuffer g_VsmPhysicalPageUsedMaskUAV;
 RWByteAddressBuffer g_VsmPageManagementCounters;
+
+struct MarkPhysicalPageRenderedConstants
+{
+    uint RenderRequestIndex;
+};
+
+ConstantBuffer<MarkPhysicalPageRenderedConstants> g_MarkPhysicalPageRendered;
 
 uint GetRequestedPageTableIndex(uint wordIndex, uint bitIndex)
 {
@@ -122,12 +131,11 @@ void reuseRequestedPages(uint3 dispatchThreadId : SV_DispatchThreadID)
         if (!IsPhysicalPageMetadataMatch(metadata, shadowView, virtualPage) || !TryClaimPhysicalPage(physicalPageIndex))
             continue;
 
+        uint renderRequestFlags = (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_RENDERED) != 0u
+            ? VSM_PAGE_RENDER_REQUEST_HISTORY_VALID
+            : 0u;
         g_VsmCurrentPageTable[shadowView.PageTableBase + pageTableIndex] = physicalPageIndex;
-        AppendRenderRequest(
-            viewId,
-            pageTableIndex,
-            physicalPageIndex,
-            VSM_PAGE_RENDER_REQUEST_HISTORY_VALID);
+        AppendRenderRequest(viewId, pageTableIndex, physicalPageIndex, renderRequestFlags);
 
         uint originalValue;
         g_VsmPageManagementCounters.InterlockedAdd(VSM_REUSED_PAGE_COUNT_OFFSET, 1u, originalValue);
@@ -194,4 +202,21 @@ void allocateNewPages(uint3 dispatchThreadId : SV_DispatchThreadID)
         uint originalValue;
         g_VsmPageManagementCounters.InterlockedAdd(VSM_NEW_PAGE_COUNT_OFFSET, 1u, originalValue);
     }
+}
+
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void markPhysicalPageRendered()
+{
+    uint renderRequestCount = g_VsmPageManagementCountersSRV.Load(VSM_RENDER_REQUEST_COUNT_OFFSET);
+    if (g_MarkPhysicalPageRendered.RenderRequestIndex >= renderRequestCount)
+        return;
+
+    VsmPageRenderRequest request = g_VsmPageRenderRequestsSRV[g_MarkPhysicalPageRendered.RenderRequestIndex];
+    if (request.PhysicalPageIndex >= VSM_PHYSICAL_PAGE_CAPACITY)
+        return;
+
+    VsmPhysicalPageMetadata metadata = g_VsmPhysicalPageMetadataUAV[request.PhysicalPageIndex];
+    metadata.Flags |= VSM_PHYSICAL_PAGE_METADATA_RENDERED;
+    g_VsmPhysicalPageMetadataUAV[request.PhysicalPageIndex] = metadata;
 }

@@ -37,6 +37,20 @@ float4x4 GetVsmPhysicalPageViewProj(VsmPhysicalPageView pageView)
         pageView.ViewProjRow3);
 }
 
+float4x4 GetVsmPhysicalPagePrevViewProj(VsmPhysicalPageView pageView)
+{
+    return float4x4(
+        pageView.PrevViewProjRow0,
+        pageView.PrevViewProjRow1,
+        pageView.PrevViewProjRow2,
+        pageView.PrevViewProjRow3);
+}
+
+bool HasVsmPhysicalPageHistory(VsmPhysicalPageView pageView)
+{
+    return (pageView.Flags & VSM_PAGE_RENDER_REQUEST_HISTORY_VALID) != 0u;
+}
+
 float4 TransformVsmPageClipToPhysicalAtlas(VsmPhysicalPageView pageView, float4 pageClipPosition)
 {
     float2 pageUvTimesW = pageClipPosition.xy * float2(0.5f, -0.5f) + 0.5f * pageClipPosition.w;

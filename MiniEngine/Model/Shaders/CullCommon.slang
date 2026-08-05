@@ -18,7 +18,10 @@ struct CullCommonContext
 {
     uint ViewportWidth;
     uint ViewportHeight;
+    uint HZBSourceWidth;
+    uint HZBSourceHeight;
     float4 HZBSizeAndInv;
+    float4 HZBUvScaleBias;
 };
 
 float4 BuildAabbCorner(float3 bboxMin, float3 bboxMax, uint cornerIndex)
@@ -137,12 +140,13 @@ bool HZBVisible(
 
     // uvRect = (minX, minY, maxX, maxY), with Y inverted from clip to texture space.
     float4 uvRect = saturate(float4(clipMin.xy, clipMax.xy) * float2(0.5, -0.5).xyxy + 0.5).xwzy;
+    uvRect = uvRect * context.HZBUvScaleBias.xyxy + context.HZBUvScaleBias.zwzw;
 
     int4 pixelsRect = int4(uvRect * float4(
-            context.ViewportWidth,
-            context.ViewportHeight,
-            context.ViewportWidth,
-            context.ViewportHeight) +
+            context.HZBSourceWidth,
+            context.HZBSourceHeight,
+            context.HZBSourceWidth,
+            context.HZBSourceHeight) +
         float4(0.5, 0.5, -0.5, -0.5));
 
     int2 rectMin = min(pixelsRect.xy, pixelsRect.zw);

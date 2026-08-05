@@ -52,6 +52,53 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
     MeshConstant meshConstant = LoadMeshConstant(instanceConstant.MeshBufferIdx);
 
 #ifndef DISABLE_HZB_CULL
+    CullCommonContext cullContext;
+    cullContext.ViewportWidth = g_InstanceCull.ViewportWidth;
+    cullContext.ViewportHeight = g_InstanceCull.ViewportHeight;
+    cullContext.HZBSizeAndInv = g_InstanceCull.HZBSizeAndInv;
+
+#ifdef VSM_PHYSICAL_PAGE_PASS
+    VsmPhysicalPageView pageView;
+    if (!TryGetVsmPhysicalPageView(pageView))
+        return;
+
+    cullContext.HZBSourceWidth = VSM_PHYSICAL_POOL_RESOLUTION;
+    cullContext.HZBSourceHeight = VSM_PHYSICAL_POOL_RESOLUTION;
+    cullContext.HZBUvScaleBias = pageView.PhysicalAtlasUvScaleBias;
+
+#if INSTANCE_CULL_PASS_INDEX == 1
+    const uint passIndex = 1;
+    bool visible = HasVsmPhysicalPageHistory(pageView) && EvaluateBoundsVisibility(
+        instanceConstant.BBoxMin,
+        instanceConstant.BBoxMax,
+        meshConstant.WorldMatrix,
+        GetVsmPhysicalPageViewProj(pageView),
+        g_InstanceCull.CurrentHZB,
+        g_HZBSampler,
+        cullContext);
+#else
+    const uint passIndex = 0;
+    bool visible = HasVsmPhysicalPageHistory(pageView)
+        ? EvaluateBoundsVisibility(
+            instanceConstant.BBoxMin,
+            instanceConstant.BBoxMax,
+            meshConstant.WorldMatrix,
+            GetVsmPhysicalPagePrevViewProj(pageView),
+            g_InstanceCull.PreviousHZB,
+            g_HZBSampler,
+            cullContext)
+        : EvaluateBoundsInFrustum(
+            instanceConstant.BBoxMin,
+            instanceConstant.BBoxMax,
+            meshConstant.WorldMatrix,
+            GetVsmPhysicalPageViewProj(pageView),
+            cullContext);
+#endif
+#else
+    cullContext.HZBSourceWidth = g_InstanceCull.ViewportWidth;
+    cullContext.HZBSourceHeight = g_InstanceCull.ViewportHeight;
+    cullContext.HZBUvScaleBias = float4(1.0f, 1.0f, 0.0f, 0.0f);
+
 #if INSTANCE_CULL_PASS_INDEX == 1
     const uint passIndex = 1;
     const float4x4 viewProjMatrix = g_InstanceCull.ViewProjMatrix;
@@ -62,11 +109,6 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
     Texture2D<float> hzbTexture = g_InstanceCull.PreviousHZB;
 #endif
 
-    CullCommonContext cullContext;
-    cullContext.ViewportWidth = g_InstanceCull.ViewportWidth;
-    cullContext.ViewportHeight = g_InstanceCull.ViewportHeight;
-    cullContext.HZBSizeAndInv = g_InstanceCull.HZBSizeAndInv;
-
     bool visible = EvaluateBoundsVisibility(
         instanceConstant.BBoxMin,
         instanceConstant.BBoxMax,
@@ -75,6 +117,7 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
         hzbTexture,
         g_HZBSampler,
         cullContext);
+#endif
 #else
     CullCommonContext cullContext;
     cullContext.ViewportWidth = g_InstanceCull.ViewportWidth;
