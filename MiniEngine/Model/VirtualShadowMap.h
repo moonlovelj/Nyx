@@ -20,7 +20,6 @@ namespace Renderer::VirtualShadowMap
         Math::Matrix3 WorldToLightRotation = Math::Matrix3(Math::kIdentity);
         Math::Vector3 FocusPositionWS = Math::Vector3(Math::kZero);
         Math::Matrix4 ViewProjMatrix = Math::Matrix4(Math::kIdentity);
-        Math::Matrix4 PrevViewProjMatrix = Math::Matrix4(Math::kIdentity);
 
         // Full world-space width and height covered by this clipmap level.
         float LevelWorldExtent = 1024.0f;
@@ -36,7 +35,6 @@ namespace Renderer::VirtualShadowMap
     {
         Math::Matrix4 ProjMatrix = Math::Matrix4(Math::kIdentity);
         Math::Matrix4 ViewProjMatrix = Math::Matrix4(Math::kIdentity);
-        Math::Matrix4 PrevViewProjMatrix = Math::Matrix4(Math::kIdentity);
         Math::Vector3 ViewerPositionWS = Math::Vector3(Math::kZero);
 
         uint32_t LightIndex = 0;
@@ -54,6 +52,11 @@ namespace Renderer::VirtualShadowMap
     uint32_t AddDirectionalView(const DirectionalVsmAddressDesc& desc);
     uint32_t AddLocalView(const LocalVsmViewDesc& desc);
     void MarkRequestedPages(GraphicsContext& gfxContext, const Renderer::RenderView& receiverView);
+
+    // Queues every cached physical page owned by this frame-local view for rerendering.
+    // Call after adding the view and before AllocateRequestedPages().
+    void MarkViewDirty(uint32_t viewId);
+
     void AllocateRequestedPages(GraphicsContext& gfxContext);
     void BuildPhysicalPageViews(GraphicsContext& gfxContext);
     void ClearRequestedPhysicalPage(GraphicsContext& gfxContext, uint32_t renderRequestIndex);

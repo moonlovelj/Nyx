@@ -190,11 +190,6 @@ namespace Renderer::VirtualShadowMap
         VSM_FLOAT4 ViewProjRow2;
         VSM_FLOAT4 ViewProjRow3;
 
-        VSM_FLOAT4 PrevViewProjRow0;
-        VSM_FLOAT4 PrevViewProjRow1;
-        VSM_FLOAT4 PrevViewProjRow2;
-        VSM_FLOAT4 PrevViewProjRow3;
-
         // xyz = current viewer/light position, w = VSM_PROJECTION_TYPE_*.
         VSM_FLOAT4 ViewerPositionAndProjectionType;
     };
@@ -266,7 +261,7 @@ namespace Renderer::VirtualShadowMap
 #ifdef __cplusplus
     static_assert(sizeof(VsmShadowView) == 48);
     static_assert(sizeof(DirectionalVsmAddressGpu) == 80);
-    static_assert(sizeof(VsmProjectionGpu) == 144);
+    static_assert(sizeof(VsmProjectionGpu) == 80);
     static_assert(sizeof(VsmPageRenderRequest) == 16);
     static_assert(sizeof(VsmPhysicalPageMetadata) == 32);
     static_assert(sizeof(VsmPhysicalPageView) == 192);

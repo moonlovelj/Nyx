@@ -671,7 +671,6 @@ void SceneViewer::RenderScene( void )
         vsmAddressDesc.WorldToLightRotation = Matrix3(~m_SunShadowCamera.GetRotation());
         vsmAddressDesc.FocusPositionWS = sunShadowFocus;
         vsmAddressDesc.ViewProjMatrix = m_SunShadowCamera.GetViewProjMatrix();
-        vsmAddressDesc.PrevViewProjMatrix = m_PrevSunShadowCamera.GetViewProjMatrix();
         if (!m_HasSunVsmAddressGeneration || sunOrientation != m_PreviousSunOrientation ||
             sunInclination != m_PreviousSunInclination)
         {

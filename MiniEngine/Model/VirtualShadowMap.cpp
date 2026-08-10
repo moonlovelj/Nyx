@@ -31,6 +31,7 @@ namespace Renderer::VirtualShadowMap
 
         ComputePSO s_MarkRequestedPagesPSO(L"VSM: Mark Requested Pages");
         std::shared_ptr<Program> s_MarkRequestedPagesProgram;
+        ComputePSO s_MarkViewDirtyPSO(L"VSM: Mark View Dirty");
         ComputePSO s_ReuseRequestedPagesPSO(L"VSM: Reuse Requested Pages");
         ComputePSO s_BuildFreePhysicalPageListPSO(L"VSM: Build Free Physical Page List");
         ComputePSO s_AllocateNewPagesPSO(L"VSM: Allocate New Pages");
@@ -50,6 +51,7 @@ namespace Renderer::VirtualShadowMap
             MeshShaderPSO(L"VSM: Physical Page Depth Pass 0"),
             MeshShaderPSO(L"VSM: Physical Page Depth Pass 1")
         };
+        std::shared_ptr<Program> s_MarkViewDirtyProgram;
         std::shared_ptr<Program> s_ReuseRequestedPagesProgram;
         std::shared_ptr<Program> s_BuildFreePhysicalPageListProgram;
         std::shared_ptr<Program> s_AllocateNewPagesProgram;
@@ -80,6 +82,7 @@ namespace Renderer::VirtualShadowMap
         std::vector<VsmShadowView> s_PreviousViews;
         std::vector<DirectionalVsmAddressGpu> s_DirectionalAddressesGpuData;
         std::vector<VsmProjectionGpu> s_ProjectionsGpuData;
+        std::vector<uint32_t> s_DirtyViewIds;
         uint32_t s_CurrentPageTableIndex = 0;
         uint32_t s_CommittedPhysicalHZBIndex = 0;
         uint32_t s_FrameNumber = 0;
@@ -150,6 +153,28 @@ namespace Renderer::VirtualShadowMap
             binder["g_VsmPageManagement"]["FrameNumber"].Set(s_FrameNumber);
         }
 
+        void MarkPendingViewsDirty(ComputeContext& context)
+        {
+            if (s_DirtyViewIds.empty())
+                return;
+
+            ProgramBinder binder(*s_MarkViewDirtyProgram, context);
+            binder.SetRootSignature();
+            context.SetPipelineState(s_MarkViewDirtyPSO);
+            binder.SetRootBufferSRV("g_VsmShadowViews", s_ShadowViewsGpu);
+            binder.SetRootBufferUAV("g_VsmPhysicalPageMetadataUAV", s_PhysicalPageMetadataGpu);
+
+            for (uint32_t viewId : s_DirtyViewIds)
+            {
+                binder["g_MarkVsmViewDirty"]["ViewId"].Set(viewId);
+                binder.Apply();
+                context.Dispatch1D(kPhysicalPageCapacity);
+            }
+
+            context.InsertUAVBarrier(s_PhysicalPageMetadataGpu);
+            s_DirtyViewIds.clear();
+        }
+
         void GeneratePendingPhysicalHZB(GraphicsContext& gfxContext)
         {
             ScopedTimer timer(L"VSM: Generate Physical HZB", gfxContext);
@@ -189,6 +214,7 @@ namespace Renderer::VirtualShadowMap
             context.TransitionResource(s_PageRenderRequestsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_PageManagementCountersGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_PhysicalPageMetadataGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            context.TransitionResource(s_PhysicalPageViewsGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.FlushResourceBarriers();
 
             ProgramBinder binder(*s_MarkPhysicalPageRenderedProgram, context);
@@ -197,11 +223,13 @@ namespace Renderer::VirtualShadowMap
             binder.SetRootBufferSRV("g_VsmPageRenderRequestsSRV", s_PageRenderRequestsGpu);
             binder.SetRootBufferSRV("g_VsmPageManagementCountersSRV", s_PageManagementCountersGpu);
             binder.SetRootBufferUAV("g_VsmPhysicalPageMetadataUAV", s_PhysicalPageMetadataGpu);
+            binder.SetRootBufferUAV("g_VsmPhysicalPageViewsUAV", s_PhysicalPageViewsGpu);
             binder["g_MarkPhysicalPageRendered"]["RenderRequestIndex"].Set(renderRequestIndex);
             binder.Apply();
 
             context.Dispatch(1, 1, 1);
             context.TransitionResource(s_PhysicalPageMetadataGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(s_PhysicalPageViewsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.FlushResourceBarriers();
         }
 
@@ -451,22 +479,16 @@ namespace Renderer::VirtualShadowMap
 
         VsmProjectionGpu BuildVsmProjectionGpu(
             const Math::Matrix4& viewProjMatrix,
-            const Math::Matrix4& prevViewProjMatrix,
             Math::Vector3 viewerPosition,
             uint32_t projectionType)
         {
             const Math::Matrix4 viewProjRows = Math::Transpose(viewProjMatrix);
-            const Math::Matrix4 prevViewProjRows = Math::Transpose(prevViewProjMatrix);
 
             VsmProjectionGpu projectionData{};
             projectionData.ViewProjRow0 = PackFloat4(viewProjRows.GetX());
             projectionData.ViewProjRow1 = PackFloat4(viewProjRows.GetY());
             projectionData.ViewProjRow2 = PackFloat4(viewProjRows.GetZ());
             projectionData.ViewProjRow3 = PackFloat4(viewProjRows.GetW());
-            projectionData.PrevViewProjRow0 = PackFloat4(prevViewProjRows.GetX());
-            projectionData.PrevViewProjRow1 = PackFloat4(prevViewProjRows.GetY());
-            projectionData.PrevViewProjRow2 = PackFloat4(prevViewProjRows.GetZ());
-            projectionData.PrevViewProjRow3 = PackFloat4(prevViewProjRows.GetW());
             projectionData.ViewerPositionAndProjectionType =
                 PackFloat4(viewerPosition, static_cast<float>(projectionType));
             return projectionData;
@@ -478,7 +500,6 @@ namespace Renderer::VirtualShadowMap
         {
             VsmProjectionGpu projectionData = BuildVsmProjectionGpu(
                 desc.ViewProjMatrix,
-                desc.PrevViewProjMatrix,
                 desc.FocusPositionWS,
                 VSM_PROJECTION_TYPE_ORTHOGRAPHIC);
             projectionData.ViewProjRow0 = BuildDirectionalVirtualProjectionRow(
@@ -489,10 +510,6 @@ namespace Renderer::VirtualShadowMap
                 addressData.WorldToLightRow1,
                 addressData.AddressOriginAndInvWorldUnitsPerPage,
                 1.0f);
-
-            // A directional page keeps a stable XY projection while its address generation is unchanged.
-            projectionData.PrevViewProjRow0 = projectionData.ViewProjRow0;
-            projectionData.PrevViewProjRow1 = projectionData.ViewProjRow1;
             return projectionData;
         }
 
@@ -605,6 +622,16 @@ namespace Renderer::VirtualShadowMap
 
         const std::string pageManagementShaderPath = Renderer::GetModelShaderPath("VsmPageManagement.slang");
 
+        ProgramDesc markViewDirtyDesc = ProgramUtils::MakeComputeDesc(pageManagementShaderPath, "markViewDirty");
+        markViewDirtyDesc.AddRootBufferSRV("g_VsmShadowViews");
+        markViewDirtyDesc.AddRootBufferUAV("g_VsmPhysicalPageMetadataUAV");
+        s_MarkViewDirtyProgram = ProgramUtils::GetProgram(markViewDirtyDesc, "VSM: Mark View Dirty");
+        if (!s_MarkViewDirtyProgram)
+            return false;
+
+        ProgramUtils::SetProgram(s_MarkViewDirtyPSO, *s_MarkViewDirtyProgram);
+        s_MarkViewDirtyPSO.Finalize();
+
         ProgramDesc reuseRequestedPagesDesc = ProgramUtils::MakeComputeDesc(pageManagementShaderPath, "reuseRequestedPages");
         reuseRequestedPagesDesc.AddRootBufferSRV("g_VsmShadowViews");
         reuseRequestedPagesDesc.AddRootBufferSRV("g_DirectionalVsmAddresses");
@@ -656,6 +683,7 @@ namespace Renderer::VirtualShadowMap
         markPhysicalPageRenderedDesc.AddRootBufferSRV("g_VsmPageRenderRequestsSRV");
         markPhysicalPageRenderedDesc.AddRootBufferSRV("g_VsmPageManagementCountersSRV");
         markPhysicalPageRenderedDesc.AddRootBufferUAV("g_VsmPhysicalPageMetadataUAV");
+        markPhysicalPageRenderedDesc.AddRootBufferUAV("g_VsmPhysicalPageViewsUAV");
         s_MarkPhysicalPageRenderedProgram =
             ProgramUtils::GetProgram(markPhysicalPageRenderedDesc, "VSM: Mark Physical Page Rendered");
         if (!s_MarkPhysicalPageRenderedProgram)
@@ -856,6 +884,7 @@ namespace Renderer::VirtualShadowMap
         s_PreviousViews.reserve(kMaxShadowViews);
         s_DirectionalAddressesGpuData.reserve(kMaxShadowViews);
         s_ProjectionsGpuData.reserve(kMaxShadowViews);
+        s_DirtyViewIds.reserve(kMaxShadowViews);
         s_CurrentPageTableIndex = 0;
         s_CommittedPhysicalHZBIndex = 0;
         s_FrameNumber = 0;
@@ -870,6 +899,7 @@ namespace Renderer::VirtualShadowMap
         s_PreviousViews.clear();
         s_DirectionalAddressesGpuData.clear();
         s_ProjectionsGpuData.clear();
+        s_DirtyViewIds.clear();
 
         s_ShadowViewsGpu.Destroy();
         s_DirectionalAddressesGpu.Destroy();
@@ -888,6 +918,7 @@ namespace Renderer::VirtualShadowMap
         s_PhysicalHZBs[0].Destroy();
         s_PhysicalHZBs[1].Destroy();
         s_MarkRequestedPagesProgram.reset();
+        s_MarkViewDirtyProgram.reset();
         s_ReuseRequestedPagesProgram.reset();
         s_BuildFreePhysicalPageListProgram.reset();
         s_AllocateNewPagesProgram.reset();
@@ -918,6 +949,7 @@ namespace Renderer::VirtualShadowMap
         s_Views.clear();
         s_DirectionalAddressesGpuData.clear();
         s_ProjectionsGpuData.clear();
+        s_DirtyViewIds.clear();
         s_CurrentPageTableIndex ^= 1u;
         ++s_FrameNumber;
     }
@@ -996,10 +1028,20 @@ namespace Renderer::VirtualShadowMap
         s_Views.push_back(view);
         s_ProjectionsGpuData.push_back(BuildVsmProjectionGpu(
             desc.ViewProjMatrix,
-            desc.PrevViewProjMatrix,
             desc.ViewerPositionWS,
             VSM_PROJECTION_TYPE_PERSPECTIVE));
         return viewId;
+    }
+
+    void MarkViewDirty(uint32_t viewId)
+    {
+        ASSERT(s_Initialized, "VirtualShadowMap must be initialized before marking a view dirty.");
+        ASSERT(viewId < s_Views.size(), "Invalid VSM shadow-view index.");
+        if (!s_Initialized || viewId >= s_Views.size())
+            return;
+
+        if (std::find(s_DirtyViewIds.begin(), s_DirtyViewIds.end(), viewId) == s_DirtyViewIds.end())
+            s_DirtyViewIds.push_back(viewId);
     }
 
     const VsmShadowView& GetView(uint32_t viewId)
@@ -1084,11 +1126,12 @@ namespace Renderer::VirtualShadowMap
     void AllocateRequestedPages(GraphicsContext& gfxContext)
     {
         ASSERT(s_Initialized, "VirtualShadowMap must be initialized before allocating pages.");
+        ASSERT(s_MarkViewDirtyProgram != nullptr);
         ASSERT(s_ReuseRequestedPagesProgram != nullptr);
         ASSERT(s_BuildFreePhysicalPageListProgram != nullptr);
         ASSERT(s_AllocateNewPagesProgram != nullptr);
-        if (!s_Initialized || !s_ReuseRequestedPagesProgram || !s_BuildFreePhysicalPageListProgram ||
-            !s_AllocateNewPagesProgram || s_Views.empty())
+        if (!s_Initialized || !s_MarkViewDirtyProgram || !s_ReuseRequestedPagesProgram ||
+            !s_BuildFreePhysicalPageListProgram || !s_AllocateNewPagesProgram || s_Views.empty())
         {
             return;
         }
@@ -1132,6 +1175,8 @@ namespace Renderer::VirtualShadowMap
             (kRequestMaskWordCountPerView + kPageManagementThreadCount - 1u) / kPageManagementThreadCount;
         constexpr uint32_t kPhysicalPageGroupCount =
             (kPhysicalPageCapacity + kPageManagementThreadCount - 1u) / kPageManagementThreadCount;
+
+        MarkPendingViewsDirty(context);
 
         {
             ProgramBinder binder(*s_ReuseRequestedPagesProgram, context);

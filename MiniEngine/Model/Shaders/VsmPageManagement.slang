@@ -11,6 +11,7 @@ ByteAddressBuffer g_VsmPageManagementCountersSRV;
 
 RWStructuredBuffer<uint> g_VsmCurrentPageTable;
 RWStructuredBuffer<VsmPhysicalPageMetadata> g_VsmPhysicalPageMetadataUAV;
+RWStructuredBuffer<VsmPhysicalPageView> g_VsmPhysicalPageViewsUAV;
 RWStructuredBuffer<uint> g_VsmFreePhysicalPagesUAV;
 RWStructuredBuffer<VsmPageRenderRequest> g_VsmPageRenderRequests;
 RWByteAddressBuffer g_VsmPhysicalPageUsedMaskUAV;
@@ -26,8 +27,14 @@ struct MarkPhysicalPageRenderedConstants
     uint RenderRequestIndex;
 };
 
+struct MarkVsmViewDirtyConstants
+{
+    uint ViewId;
+};
+
 ConstantBuffer<VsmPageManagementConstants> g_VsmPageManagement;
 ConstantBuffer<MarkPhysicalPageRenderedConstants> g_MarkPhysicalPageRendered;
+ConstantBuffer<MarkVsmViewDirtyConstants> g_MarkVsmViewDirty;
 
 uint GetRequestedPageTableIndex(uint wordIndex, uint bitIndex)
 {
@@ -209,6 +216,23 @@ void allocateNewPages(uint3 dispatchThreadId : SV_DispatchThreadID)
 }
 
 [shader("compute")]
+[numthreads(64, 1, 1)]
+void markViewDirty(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint physicalPageIndex = dispatchThreadId.x;
+    if (physicalPageIndex >= VSM_PHYSICAL_PAGE_CAPACITY)
+        return;
+
+    VsmShadowView shadowView = g_VsmShadowViews[g_MarkVsmViewDirty.ViewId];
+    VsmPhysicalPageMetadata metadata = g_VsmPhysicalPageMetadataUAV[physicalPageIndex];
+    if (!IsVsmPhysicalPageOwnedByView(metadata, shadowView))
+        return;
+
+    metadata.Flags |= VSM_PHYSICAL_PAGE_METADATA_DIRTY;
+    g_VsmPhysicalPageMetadataUAV[physicalPageIndex] = metadata;
+}
+
+[shader("compute")]
 [numthreads(1, 1, 1)]
 void markPhysicalPageRendered()
 {
@@ -224,4 +248,11 @@ void markPhysicalPageRendered()
     metadata.Flags |= VSM_PHYSICAL_PAGE_METADATA_RENDERED;
     metadata.Flags &= ~VSM_PHYSICAL_PAGE_METADATA_DIRTY;
     g_VsmPhysicalPageMetadataUAV[request.PhysicalPageIndex] = metadata;
+
+    VsmPhysicalPageView pageView = g_VsmPhysicalPageViewsUAV[request.PhysicalPageIndex];
+    pageView.PrevViewProjRow0 = pageView.ViewProjRow0;
+    pageView.PrevViewProjRow1 = pageView.ViewProjRow1;
+    pageView.PrevViewProjRow2 = pageView.ViewProjRow2;
+    pageView.PrevViewProjRow3 = pageView.ViewProjRow3;
+    g_VsmPhysicalPageViewsUAV[request.PhysicalPageIndex] = pageView;
 }

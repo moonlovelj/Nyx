@@ -42,8 +42,6 @@ void computeMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     VsmProjectionRows pageProjection =
         BuildVsmPageProjection(GetVsmProjectionRows(projectionData), projectionPageCoord);
-    VsmProjectionRows previousPageProjection =
-        BuildVsmPageProjection(GetPreviousVsmProjectionRows(projectionData), projectionPageCoord);
 
     VsmPhysicalPageView pageView;
     pageView.ViewProjRow0 = pageProjection.Row0;
@@ -51,10 +49,21 @@ void computeMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     pageView.ViewProjRow2 = pageProjection.Row2;
     pageView.ViewProjRow3 = pageProjection.Row3;
 
-    pageView.PrevViewProjRow0 = previousPageProjection.Row0;
-    pageView.PrevViewProjRow1 = previousPageProjection.Row1;
-    pageView.PrevViewProjRow2 = previousPageProjection.Row2;
-    pageView.PrevViewProjRow3 = previousPageProjection.Row3;
+    if ((request.Flags & VSM_PAGE_RENDER_REQUEST_HISTORY_VALID) != 0u)
+    {
+        VsmPhysicalPageView history = g_VsmPhysicalPageViews[request.PhysicalPageIndex];
+        pageView.PrevViewProjRow0 = history.PrevViewProjRow0;
+        pageView.PrevViewProjRow1 = history.PrevViewProjRow1;
+        pageView.PrevViewProjRow2 = history.PrevViewProjRow2;
+        pageView.PrevViewProjRow3 = history.PrevViewProjRow3;
+    }
+    else
+    {
+        pageView.PrevViewProjRow0 = pageProjection.Row0;
+        pageView.PrevViewProjRow1 = pageProjection.Row1;
+        pageView.PrevViewProjRow2 = pageProjection.Row2;
+        pageView.PrevViewProjRow3 = pageProjection.Row3;
+    }
 
     float physicalAtlasUvScale = 1.0f / float(VSM_PHYSICAL_POOL_DIM_PAGES);
     pageView.PhysicalAtlasUvScaleBias =

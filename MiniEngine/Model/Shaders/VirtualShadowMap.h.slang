@@ -49,16 +49,6 @@ VsmProjectionRows GetVsmProjectionRows(VsmProjectionGpu projection)
     return rows;
 }
 
-VsmProjectionRows GetPreviousVsmProjectionRows(VsmProjectionGpu projection)
-{
-    VsmProjectionRows rows;
-    rows.Row0 = projection.PrevViewProjRow0;
-    rows.Row1 = projection.PrevViewProjRow1;
-    rows.Row2 = projection.PrevViewProjRow2;
-    rows.Row3 = projection.PrevViewProjRow3;
-    return rows;
-}
-
 // pageCoord is relative to the full projection's virtual-page origin and may be signed.
 VsmProjectionRows BuildVsmPageProjection(VsmProjectionRows projection, int2 pageCoord)
 {
@@ -170,17 +160,21 @@ uint GetVsmPhysicalPageIndex(
     return pageTable[GetVsmPageTableEntryIndex(shadowView, pageTableCoord)];
 }
 
-bool IsVsmPhysicalPageMetadataMatch(
-    VsmPhysicalPageMetadata metadata,
-    VsmShadowView shadowView,
-    int2 virtualPage)
+bool IsVsmPhysicalPageOwnedByView(VsmPhysicalPageMetadata metadata, VsmShadowView shadowView)
 {
     return (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_VALID) != 0u &&
         metadata.StableShadowMapId == shadowView.StableShadowMapId &&
         metadata.AddressGeneration == shadowView.AddressGeneration &&
         metadata.AddressType == shadowView.AddressType &&
-        metadata.Layer == shadowView.Layer &&
-        all(metadata.VirtualPage == virtualPage);
+        metadata.Layer == shadowView.Layer;
+}
+
+bool IsVsmPhysicalPageMetadataMatch(
+    VsmPhysicalPageMetadata metadata,
+    VsmShadowView shadowView,
+    int2 virtualPage)
+{
+    return IsVsmPhysicalPageOwnedByView(metadata, shadowView) && all(metadata.VirtualPage == virtualPage);
 }
 
 int2 GetDirectionalVsmGlobalPage(uint pageTableIndex, DirectionalVsmAddressGpu addressData)
