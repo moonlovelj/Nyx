@@ -4,7 +4,6 @@ StructuredBuffer<VsmShadowView> g_VsmShadowViews;
 StructuredBuffer<DirectionalVsmAddressGpu> g_DirectionalVsmAddresses;
 ByteAddressBuffer g_VsmPageRequestMask;
 StructuredBuffer<uint> g_VsmPreviousPageTable;
-StructuredBuffer<VsmPhysicalPageMetadata> g_VsmPhysicalPageMetadataSRV;
 StructuredBuffer<uint> g_VsmFreePhysicalPagesSRV;
 ByteAddressBuffer g_VsmPhysicalPageUsedMaskSRV;
 StructuredBuffer<VsmPageRenderRequest> g_VsmPageRenderRequestsSRV;
@@ -17,11 +16,17 @@ RWStructuredBuffer<VsmPageRenderRequest> g_VsmPageRenderRequests;
 RWByteAddressBuffer g_VsmPhysicalPageUsedMaskUAV;
 RWByteAddressBuffer g_VsmPageManagementCounters;
 
+struct VsmPageManagementConstants
+{
+    uint FrameNumber;
+};
+
 struct MarkPhysicalPageRenderedConstants
 {
     uint RenderRequestIndex;
 };
 
+ConstantBuffer<VsmPageManagementConstants> g_VsmPageManagement;
 ConstantBuffer<MarkPhysicalPageRenderedConstants> g_MarkPhysicalPageRendered;
 
 uint GetRequestedPageTableIndex(uint wordIndex, uint bitIndex)
@@ -48,19 +53,6 @@ bool TryGetRequestedVirtualPage(VsmShadowView shadowView, uint pageTableIndex, o
     return false;
 }
 
-bool IsPhysicalPageMetadataMatch(
-    VsmPhysicalPageMetadata metadata,
-    VsmShadowView shadowView,
-    int2 virtualPage)
-{
-    return (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_VALID) != 0u &&
-        metadata.StableShadowMapId == shadowView.StableShadowMapId &&
-        metadata.AddressGeneration == shadowView.AddressGeneration &&
-        metadata.AddressType == shadowView.AddressType &&
-        metadata.Layer == shadowView.Layer &&
-        all(metadata.VirtualPage == virtualPage);
-}
-
 VsmPhysicalPageMetadata MakePhysicalPageMetadata(VsmShadowView shadowView, int2 virtualPage)
 {
     VsmPhysicalPageMetadata metadata;
@@ -69,8 +61,8 @@ VsmPhysicalPageMetadata MakePhysicalPageMetadata(VsmShadowView shadowView, int2 
     metadata.AddressType = shadowView.AddressType;
     metadata.Layer = shadowView.Layer;
     metadata.VirtualPage = virtualPage;
-    metadata.Flags = VSM_PHYSICAL_PAGE_METADATA_VALID;
-    metadata.Padding = 0u;
+    metadata.Flags = VSM_PHYSICAL_PAGE_METADATA_VALID | VSM_PHYSICAL_PAGE_METADATA_DIRTY;
+    metadata.LastRequestedFrame = g_VsmPageManagement.FrameNumber;
     return metadata;
 }
 
@@ -127,17 +119,29 @@ void reuseRequestedPages(uint3 dispatchThreadId : SV_DispatchThreadID)
         if (!TryGetRequestedVirtualPage(shadowView, pageTableIndex, virtualPage))
             continue;
 
-        VsmPhysicalPageMetadata metadata = g_VsmPhysicalPageMetadataSRV[physicalPageIndex];
-        if (!IsPhysicalPageMetadataMatch(metadata, shadowView, virtualPage) || !TryClaimPhysicalPage(physicalPageIndex))
+        VsmPhysicalPageMetadata metadata = g_VsmPhysicalPageMetadataUAV[physicalPageIndex];
+        if (!IsVsmPhysicalPageMetadataMatch(metadata, shadowView, virtualPage) ||
+            !TryClaimPhysicalPage(physicalPageIndex))
             continue;
 
-        uint renderRequestFlags = (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_RENDERED) != 0u
-            ? VSM_PAGE_RENDER_REQUEST_HISTORY_VALID
-            : 0u;
+        bool isRendered = (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_RENDERED) != 0u;
+        bool needsRender = !isRendered || (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_DIRTY) != 0u;
+
+        metadata.LastRequestedFrame = g_VsmPageManagement.FrameNumber;
+        g_VsmPhysicalPageMetadataUAV[physicalPageIndex] = metadata;
         g_VsmCurrentPageTable[shadowView.PageTableBase + pageTableIndex] = physicalPageIndex;
-        AppendRenderRequest(viewId, pageTableIndex, physicalPageIndex, renderRequestFlags);
 
         uint originalValue;
+        if (needsRender)
+        {
+            uint renderRequestFlags = isRendered ? VSM_PAGE_RENDER_REQUEST_HISTORY_VALID : 0u;
+            AppendRenderRequest(viewId, pageTableIndex, physicalPageIndex, renderRequestFlags);
+        }
+        else
+        {
+            g_VsmPageManagementCounters.InterlockedAdd(VSM_CACHE_HIT_PAGE_COUNT_OFFSET, 1u, originalValue);
+        }
+
         g_VsmPageManagementCounters.InterlockedAdd(VSM_REUSED_PAGE_COUNT_OFFSET, 1u, originalValue);
     }
 }
@@ -218,5 +222,6 @@ void markPhysicalPageRendered()
 
     VsmPhysicalPageMetadata metadata = g_VsmPhysicalPageMetadataUAV[request.PhysicalPageIndex];
     metadata.Flags |= VSM_PHYSICAL_PAGE_METADATA_RENDERED;
+    metadata.Flags &= ~VSM_PHYSICAL_PAGE_METADATA_DIRTY;
     g_VsmPhysicalPageMetadataUAV[request.PhysicalPageIndex] = metadata;
 }

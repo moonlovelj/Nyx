@@ -8,7 +8,7 @@
 #define VIEW_MODE_SHOW_MESH_ID       4
 #define VIEW_MODE_SHOW_INSTANCE_ID   5
 #define VIEW_MODE_SHOW_MATERIAL_ID   6
-#define VIEW_MODE_SHOW_VSM_ADDRESS   7
+#define VIEW_MODE_SHOW_VSM_PAGE_STATE 7
 
 uint HashUint(uint value)
 {

@@ -33,7 +33,7 @@ StructuredBuffer<VsmShadowView> g_VsmShadowViews;
 StructuredBuffer<DirectionalVsmAddressGpu> g_DirectionalVsmAddresses;
 ByteAddressBuffer g_VsmPageRequestMask;
 StructuredBuffer<uint> g_VsmPageTable;
-StructuredBuffer<VsmPhysicalPageView> g_VsmPhysicalPageViews;
+StructuredBuffer<VsmPhysicalPageMetadata> g_VsmPhysicalPageMetadata;
 
 #define InverseViewProjMatrix g_DeferredLighting.InverseViewProjMatrix
 #define SunShadowMatrix g_DeferredLighting.SunShadowMatrix
@@ -49,17 +49,21 @@ StructuredBuffer<VsmPhysicalPageView> g_VsmPhysicalPageViews;
 
 #include "LightingCommon.h.slang"
 
-float3 GetVsmPhysicalPageDebugColor(uint physicalPageIndex)
+float3 GetVsmPhysicalPageStateColor(VsmPhysicalPageMetadata metadata)
 {
-    uint hash = physicalPageIndex * 747796405u + 2891336453u;
-    hash = ((hash >> ((hash >> 28u) + 4u)) ^ hash) * 277803737u;
-    hash = (hash >> 22u) ^ hash;
+    bool isRendered = (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_RENDERED) != 0u;
+    bool isDirty = (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_DIRTY) != 0u;
 
-    float3 color = float3(hash & 0xffu, (hash >> 8u) & 0xffu, (hash >> 16u) & 0xffu) / 255.0f;
-    return color * 0.7f + 0.3f;
+    if (!isRendered)
+        return float3(0.1f, 0.35f, 1.0f); // Blue: waiting for the first render.
+
+    if (isDirty)
+        return float3(1.0f, 0.35f, 0.0f); // Orange: stale, but history is available.
+
+    return float3(0.1f, 0.9f, 0.15f); // Green: valid cached depth.
 }
 
-float3 VisualizeDirectionalVsmAddress(uint2 pixelPosition)
+float3 VisualizeDirectionalVsmPageState(uint2 pixelPosition)
 {
     if (g_DeferredLighting.VsmViewId == VSM_INVALID_VIEW_ID)
         return float3(1.0f, 0.0f, 1.0f);
@@ -95,22 +99,19 @@ float3 VisualizeDirectionalVsmAddress(uint2 pixelPosition)
         else
         {
             uint physicalPageIndex = GetVsmPhysicalPageIndex(g_VsmPageTable, shadowView, address.PageTableCoord);
-            if (physicalPageIndex == VSM_INVALID_PHYSICAL_PAGE)
+            if (physicalPageIndex >= VSM_PHYSICAL_PAGE_CAPACITY)
             {
                 addressColor = float3(1.0f, 0.0f, 1.0f);
             }
             else
             {
-                VsmPhysicalPageView pageView = g_VsmPhysicalPageViews[physicalPageIndex];
-                bool pageViewValid = pageView.ViewId == g_DeferredLighting.VsmViewId &&
-                    pageView.PhysicalPageIndex == physicalPageIndex &&
-                    all(pageView.PhysicalPageCoord == GetVsmPhysicalPageCoord(physicalPageIndex)) &&
-                    all(pageView.VirtualPage == address.VirtualPage);
+                VsmPhysicalPageMetadata metadata = g_VsmPhysicalPageMetadata[physicalPageIndex];
+                bool metadataMatches = IsVsmPhysicalPageMetadataMatch(metadata, shadowView, address.VirtualPage);
 
-                // Orange indicates that page-view generation disagrees with the address/page-table mapping.
-                addressColor = !pageViewValid
-                    ? float3(1.0f, 0.25f, 0.0f)
-                    : pageBorder ? float3(0.0f) : GetVsmPhysicalPageDebugColor(physicalPageIndex);
+                // White indicates that the page table and reverse mapping disagree.
+                addressColor = !metadataMatches
+                    ? float3(1.0f)
+                    : pageBorder ? float3(0.0f) : GetVsmPhysicalPageStateColor(metadata);
             }
         }
     }
@@ -135,9 +136,9 @@ void computeMain(
         RWTexture2D<float4> sceneColor = GetSceneColorUAV();
         Texture2D<float4> gBufferD = GetGBufferDSRV();
         uint viewMode = (uint)gBufferD[DTid].a;
-        if (viewMode == VIEW_MODE_SHOW_VSM_ADDRESS)
+        if (viewMode == VIEW_MODE_SHOW_VSM_PAGE_STATE)
         {
-            sceneColor[DTid] = float4(VisualizeDirectionalVsmAddress(DTid), 1.0f);
+            sceneColor[DTid] = float4(VisualizeDirectionalVsmPageState(DTid), 1.0f);
         }
         else if (viewMode == VIEW_MODE_LIT)
         {

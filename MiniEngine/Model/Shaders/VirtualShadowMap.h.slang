@@ -170,6 +170,19 @@ uint GetVsmPhysicalPageIndex(
     return pageTable[GetVsmPageTableEntryIndex(shadowView, pageTableCoord)];
 }
 
+bool IsVsmPhysicalPageMetadataMatch(
+    VsmPhysicalPageMetadata metadata,
+    VsmShadowView shadowView,
+    int2 virtualPage)
+{
+    return (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_VALID) != 0u &&
+        metadata.StableShadowMapId == shadowView.StableShadowMapId &&
+        metadata.AddressGeneration == shadowView.AddressGeneration &&
+        metadata.AddressType == shadowView.AddressType &&
+        metadata.Layer == shadowView.Layer &&
+        all(metadata.VirtualPage == virtualPage);
+}
+
 int2 GetDirectionalVsmGlobalPage(uint pageTableIndex, DirectionalVsmAddressGpu addressData)
 {
     int2 windowOriginPage = addressData.AddressAndWindowOriginPage.zw;

@@ -157,7 +157,7 @@ void Lighting::InitializeResources( void )
     deferredLightingDesc.AddRootBufferSRV("g_DirectionalVsmAddresses");
     deferredLightingDesc.AddRootBufferSRV("g_VsmPageRequestMask");
     deferredLightingDesc.AddRootBufferSRV("g_VsmPageTable");
-    deferredLightingDesc.AddRootBufferSRV("g_VsmPhysicalPageViews");
+    deferredLightingDesc.AddRootBufferSRV("g_VsmPhysicalPageMetadata");
 
     SamplerDesc cubeMapSamplerDesc;
     cubeMapSamplerDesc.MaxAnisotropy = 8;
@@ -472,7 +472,7 @@ void Lighting::RenderDeferredLighting(
     constants["TileCountX"].Set(frame.TileCount[0]);
     constants["IBLSpecularLDMapMipCount"].Set(frame.IBLSpecularLDMapMipCount);
     constants["VsmViewId"].Set(frame.SunVsmViewId);
-    Renderer::VirtualShadowMap::BindPageRequestDebugResources(binder);
+    Renderer::VirtualShadowMap::BindDebugResources(binder);
     SetCommonResources(binder, frame);
     binder.Apply();
 

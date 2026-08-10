@@ -27,6 +27,7 @@
 
 #define VSM_PHYSICAL_PAGE_METADATA_VALID 0x1u
 #define VSM_PHYSICAL_PAGE_METADATA_RENDERED 0x2u
+#define VSM_PHYSICAL_PAGE_METADATA_DIRTY 0x4u
 #define VSM_PAGE_RENDER_REQUEST_HISTORY_VALID 0x1u
 
 #define VSM_REQUEST_MASK_WORD_LOG2 5u
@@ -53,6 +54,7 @@
 #define VSM_OVERFLOW_PAGE_COUNT_OFFSET 12u
 #define VSM_FREE_PAGE_COUNT_OFFSET 16u
 #define VSM_FREE_PAGE_READ_OFFSET 20u
+#define VSM_CACHE_HIT_PAGE_COUNT_OFFSET 24u
 
 #ifdef __cplusplus
 
@@ -230,7 +232,7 @@ namespace Renderer::VirtualShadowMap
 
         VSM_INT2 VirtualPage;
         VSM_UINT Flags;
-        VSM_UINT Padding;
+        VSM_UINT LastRequestedFrame;
     };
 
     // Render and cull data indexed directly by PhysicalPageIndex.
