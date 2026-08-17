@@ -68,7 +68,7 @@ VsmPhysicalPageMetadata MakePhysicalPageMetadata(VsmShadowView shadowView, int2 
     metadata.AddressType = shadowView.AddressType;
     metadata.Layer = shadowView.Layer;
     metadata.VirtualPage = virtualPage;
-    metadata.Flags = VSM_PHYSICAL_PAGE_METADATA_VALID | VSM_PHYSICAL_PAGE_METADATA_DIRTY;
+    metadata.Flags = VSM_PHYSICAL_PAGE_METADATA_VALID;
     metadata.LastRequestedFrame = g_VsmPageManagement.FrameNumber;
     return metadata;
 }
@@ -143,6 +143,14 @@ void reuseRequestedPages(uint3 dispatchThreadId : SV_DispatchThreadID)
         {
             uint renderRequestFlags = isRendered ? VSM_PAGE_RENDER_REQUEST_HISTORY_VALID : 0u;
             AppendRenderRequest(viewId, pageTableIndex, physicalPageIndex, renderRequestFlags);
+
+            if (isRendered)
+            {
+                g_VsmPageManagementCounters.InterlockedAdd(
+                    VSM_HISTORY_VALID_REQUEST_COUNT_OFFSET,
+                    1u,
+                    originalValue);
+            }
         }
         else
         {
@@ -225,11 +233,16 @@ void markViewDirty(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     VsmShadowView shadowView = g_VsmShadowViews[g_MarkVsmViewDirty.ViewId];
     VsmPhysicalPageMetadata metadata = g_VsmPhysicalPageMetadataUAV[physicalPageIndex];
-    if (!IsVsmPhysicalPageOwnedByView(metadata, shadowView))
+    bool isRendered = (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_RENDERED) != 0u;
+    bool isDirty = (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_DIRTY) != 0u;
+    if (!IsVsmPhysicalPageOwnedByView(metadata, shadowView) || !isRendered || isDirty)
         return;
 
     metadata.Flags |= VSM_PHYSICAL_PAGE_METADATA_DIRTY;
     g_VsmPhysicalPageMetadataUAV[physicalPageIndex] = metadata;
+
+    uint originalValue;
+    g_VsmPageManagementCounters.InterlockedAdd(VSM_MARKED_DIRTY_PAGE_COUNT_OFFSET, 1u, originalValue);
 }
 
 [shader("compute")]

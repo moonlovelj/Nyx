@@ -47,6 +47,8 @@ using namespace std;
 
 namespace
 {
+    constexpr uint32_t kSunStableShadowMapId = 1u;
+
     Vector3 UpdateDirectionalShadowCamera(
         ShadowCamera& shadowCamera,
         const Camera& viewCamera,
@@ -205,6 +207,7 @@ NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0
 NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f);
 NumVar g_SunShadowDistance("Viewer/Lighting/Sun Shadow Distance", 100.0f, 1.0f, 100000.0f, 1.0f);
 BoolVar g_RenderSunShadow("Viewer/Lighting/Render Sun Shadow", false);
+BoolVar g_InvalidateSunVsmCache("Viewer/Lighting/Invalidate VSM Cache", false);
 //NumVar g_SunLightSize("Viewer/Lighting/Sun Light Size", 0.5f, 0.0f, 2.0f, 0.1f);
 //NumVar g_SunShadowBias("Viewer/Lighting/Sun Shadow Bias", 4.f, 1.0f, 20.0f, 1.f );
 //BoolVar g_SunShadow("Viewer/Lighting/Sun Shadow", false);
@@ -671,6 +674,7 @@ void SceneViewer::RenderScene( void )
         vsmAddressDesc.WorldToLightRotation = Matrix3(~m_SunShadowCamera.GetRotation());
         vsmAddressDesc.FocusPositionWS = sunShadowFocus;
         vsmAddressDesc.ViewProjMatrix = m_SunShadowCamera.GetViewProjMatrix();
+        vsmAddressDesc.StableShadowMapId = kSunStableShadowMapId;
         if (!m_HasSunVsmAddressGeneration || sunOrientation != m_PreviousSunOrientation ||
             sunInclination != m_PreviousSunInclination)
         {
@@ -681,6 +685,12 @@ void SceneViewer::RenderScene( void )
         }
         vsmAddressDesc.AddressGeneration = m_SunVsmAddressGeneration;
         frameConstants.SunVsmViewId = Renderer::VirtualShadowMap::AddDirectionalView(vsmAddressDesc);
+        if (g_InvalidateSunVsmCache &&
+            frameConstants.SunVsmViewId != Renderer::VirtualShadowMap::kInvalidViewId)
+        {
+            Renderer::VirtualShadowMap::MarkViewDirty(frameConstants.SunVsmViewId);
+            g_InvalidateSunVsmCache = false;
+        }
         frameConstants.SunDirection = SunDirection;
         frameConstants.SunIntensity = Vector3(Scalar(g_SunLightIntensity));
         frameConstants.ShadowTexelSize = Vector4(

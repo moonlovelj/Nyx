@@ -163,6 +163,7 @@ namespace Renderer::VirtualShadowMap
             context.SetPipelineState(s_MarkViewDirtyPSO);
             binder.SetRootBufferSRV("g_VsmShadowViews", s_ShadowViewsGpu);
             binder.SetRootBufferUAV("g_VsmPhysicalPageMetadataUAV", s_PhysicalPageMetadataGpu);
+            binder.SetRootBufferUAV("g_VsmPageManagementCounters", s_PageManagementCountersGpu);
 
             for (uint32_t viewId : s_DirtyViewIds)
             {
@@ -625,6 +626,7 @@ namespace Renderer::VirtualShadowMap
         ProgramDesc markViewDirtyDesc = ProgramUtils::MakeComputeDesc(pageManagementShaderPath, "markViewDirty");
         markViewDirtyDesc.AddRootBufferSRV("g_VsmShadowViews");
         markViewDirtyDesc.AddRootBufferUAV("g_VsmPhysicalPageMetadataUAV");
+        markViewDirtyDesc.AddRootBufferUAV("g_VsmPageManagementCounters");
         s_MarkViewDirtyProgram = ProgramUtils::GetProgram(markViewDirtyDesc, "VSM: Mark View Dirty");
         if (!s_MarkViewDirtyProgram)
             return false;
@@ -1288,35 +1290,51 @@ namespace Renderer::VirtualShadowMap
         context.FlushResourceBarriers();
     }
 
+    namespace
+    {
+        void ClearRequestedPhysicalPageRange(
+            GraphicsContext& gfxContext,
+            uint32_t firstRenderRequestIndex,
+            uint32_t instanceCount)
+        {
+            ASSERT(s_Initialized, "VirtualShadowMap must be initialized before clearing physical pages.");
+            ASSERT(s_ClearRequestedPhysicalPageProgram != nullptr);
+            if (!s_Initialized || !s_ClearRequestedPhysicalPageProgram || s_Views.empty() || instanceCount == 0u)
+                return;
+
+            ScopedTimer timer(L"VSM: Clear Requested Physical Pages", gfxContext);
+
+            constexpr D3D12_RESOURCE_STATES kGraphicsShaderResourceState =
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            gfxContext.TransitionResource(s_PageRenderRequestsGpu, kGraphicsShaderResourceState);
+            gfxContext.TransitionResource(s_PageManagementCountersGpu, kGraphicsShaderResourceState);
+            gfxContext.TransitionResource(s_PhysicalPagePool, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+            gfxContext.FlushResourceBarriers();
+
+            ProgramBinder binder(*s_ClearRequestedPhysicalPageProgram, gfxContext);
+            binder.SetRootSignature();
+            gfxContext.SetPipelineState(s_ClearRequestedPhysicalPagePSO);
+            gfxContext.SetDepthStencilTarget(s_PhysicalPagePool.GetDSV());
+            gfxContext.SetViewportAndScissor(0, 0, kPhysicalPoolResolution, kPhysicalPoolResolution);
+            gfxContext.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+            binder.SetRootBufferSRV("g_VsmPageRenderRequests", s_PageRenderRequestsGpu);
+            binder.SetRootBufferSRV("g_VsmPageManagementCounters", s_PageManagementCountersGpu);
+            binder["g_ClearVsmPhysicalPage"]["FirstRenderRequestIndex"].Set(firstRenderRequestIndex);
+            binder.Apply();
+
+            gfxContext.DrawInstanced(6, instanceCount, 0, 0);
+        }
+    } // namespace
+
+    void ClearRequestedPhysicalPages(GraphicsContext& gfxContext)
+    {
+        ClearRequestedPhysicalPageRange(gfxContext, 0u, kPhysicalPageCapacity);
+    }
+
     void ClearRequestedPhysicalPage(GraphicsContext& gfxContext, uint32_t renderRequestIndex)
     {
-        ASSERT(s_Initialized, "VirtualShadowMap must be initialized before clearing a physical page.");
-        ASSERT(s_ClearRequestedPhysicalPageProgram != nullptr);
-        if (!s_Initialized || !s_ClearRequestedPhysicalPageProgram || s_Views.empty())
-            return;
-
-        ScopedTimer timer(L"VSM: Clear Requested Physical Page", gfxContext);
-
-        constexpr D3D12_RESOURCE_STATES kGraphicsShaderResourceState =
-            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-        gfxContext.TransitionResource(s_PageRenderRequestsGpu, kGraphicsShaderResourceState);
-        gfxContext.TransitionResource(s_PageManagementCountersGpu, kGraphicsShaderResourceState);
-        gfxContext.TransitionResource(s_PhysicalPagePool, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-        gfxContext.FlushResourceBarriers();
-
-        ProgramBinder binder(*s_ClearRequestedPhysicalPageProgram, gfxContext);
-        binder.SetRootSignature();
-        gfxContext.SetPipelineState(s_ClearRequestedPhysicalPagePSO);
-        gfxContext.SetDepthStencilTarget(s_PhysicalPagePool.GetDSV());
-        gfxContext.SetViewportAndScissor(0, 0, kPhysicalPoolResolution, kPhysicalPoolResolution);
-        gfxContext.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-        binder.SetRootBufferSRV("g_VsmPageRenderRequests", s_PageRenderRequestsGpu);
-        binder.SetRootBufferSRV("g_VsmPageManagementCounters", s_PageManagementCountersGpu);
-        binder["g_ClearVsmPhysicalPage"]["RenderRequestIndex"].Set(renderRequestIndex);
-        binder.Apply();
-
-        gfxContext.Draw(6);
+        ClearRequestedPhysicalPageRange(gfxContext, renderRequestIndex, 1u);
     }
 
     void RenderRequestedPhysicalPageDepth(

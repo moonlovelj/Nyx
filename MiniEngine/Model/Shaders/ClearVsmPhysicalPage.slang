@@ -2,7 +2,7 @@
 
 struct ClearVsmPhysicalPageConstants
 {
-    uint RenderRequestIndex;
+    uint FirstRenderRequestIndex;
 };
 
 ConstantBuffer<ClearVsmPhysicalPageConstants> g_ClearVsmPhysicalPage;
@@ -15,7 +15,7 @@ struct VertexOutput
 };
 
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VertexID)
+VertexOutput vertexMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID)
 {
     const float2 quadPositions[6] = {
         float2(0.0f, 0.0f),
@@ -27,14 +27,15 @@ VertexOutput vertexMain(uint vertexId : SV_VertexID)
     };
 
     VertexOutput output;
+    uint renderRequestIndex = g_ClearVsmPhysicalPage.FirstRenderRequestIndex + instanceId;
     uint renderRequestCount = g_VsmPageManagementCounters.Load(VSM_RENDER_REQUEST_COUNT_OFFSET);
-    if (g_ClearVsmPhysicalPage.RenderRequestIndex >= renderRequestCount)
+    if (renderRequestIndex >= renderRequestCount)
     {
         output.Position = float4(-2.0f, -2.0f, 0.0f, 1.0f);
         return output;
     }
 
-    VsmPageRenderRequest request = g_VsmPageRenderRequests[g_ClearVsmPhysicalPage.RenderRequestIndex];
+    VsmPageRenderRequest request = g_VsmPageRenderRequests[renderRequestIndex];
     if (request.PhysicalPageIndex >= VSM_PHYSICAL_PAGE_CAPACITY)
     {
         output.Position = float4(-2.0f, -2.0f, 0.0f, 1.0f);
