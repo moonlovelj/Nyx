@@ -52,6 +52,18 @@ globallycoherent RWStructuredBuffer<QueueState> g_TaskQueueStateUAV;
 globallycoherent RWByteAddressBuffer g_TaskQueueUAV;
 globallycoherent RWByteAddressBuffer g_MeshletBatchUAV;
 globallycoherent RWByteAddressBuffer g_CandidateMeshletUAV;
+#ifdef VSM_PHYSICAL_PAGE_PASS
+RWStructuredBuffer<VisibleMeshletPayload> g_VsmVisibleMeshletUAV;
+#endif
+
+RWStructuredBuffer<VisibleMeshletPayload> GetCullVisibleMeshletUAV()
+{
+#ifdef VSM_PHYSICAL_PAGE_PASS
+    return g_VsmVisibleMeshletUAV;
+#else
+    return GetVisibleMeshletBufferUAV();
+#endif
+}
 
 groupshared uint GroupNumCandidateNodes;
 groupshared uint GroupCandidateNodesOffset;
@@ -455,7 +467,7 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
         {
             uint writeOffset;
             WaveInterlockedAddScalar(g_TaskQueueStateUAV[0].PassState[passIndex].VisibleMeshletCount, true, 1, writeOffset);
-            RWStructuredBuffer<VisibleMeshletPayload> payloadBufferUAV = GetVisibleMeshletBufferUAV();
+            RWStructuredBuffer<VisibleMeshletPayload> payloadBufferUAV = GetCullVisibleMeshletUAV();
 
 #ifndef DISABLE_HZB_CULL
 #ifdef DAG_CULL_PASS1

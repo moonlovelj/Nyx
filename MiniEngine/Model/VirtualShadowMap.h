@@ -63,6 +63,9 @@ namespace Renderer::VirtualShadowMap
     // The batch entry becomes the active path once all selected requests are rendered in the same frame.
     void ClearRequestedPhysicalPages(GraphicsContext& gfxContext);
     void ClearRequestedPhysicalPage(GraphicsContext& gfxContext, uint32_t renderRequestIndex);
+    void RenderRequestedPhysicalPagesDepthNoHZB(
+        GraphicsContext& gfxContext,
+        const Renderer::FrameConstants& frame);
     void RenderRequestedPhysicalPageDepth(
         GraphicsContext& gfxContext,
         const Renderer::FrameConstants& frame,

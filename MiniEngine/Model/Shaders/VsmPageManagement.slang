@@ -16,6 +16,7 @@ RWStructuredBuffer<uint> g_VsmFreePhysicalPagesUAV;
 RWStructuredBuffer<VsmPageRenderRequest> g_VsmPageRenderRequests;
 RWByteAddressBuffer g_VsmPhysicalPageUsedMaskUAV;
 RWByteAddressBuffer g_VsmPageManagementCounters;
+RWByteAddressBuffer g_VsmRenderRequestPredicate;
 
 struct VsmPageManagementConstants
 {
@@ -89,6 +90,9 @@ void AppendRenderRequest(uint viewId, uint pageTableIndex, uint physicalPageInde
     g_VsmPageManagementCounters.InterlockedAdd(VSM_RENDER_REQUEST_COUNT_OFFSET, 1u, renderRequestIndex);
     if (renderRequestIndex >= VSM_PHYSICAL_PAGE_CAPACITY)
         return;
+
+    uint previousPredicate;
+    g_VsmRenderRequestPredicate.InterlockedOr(0u, 1u, previousPredicate);
 
     VsmPageRenderRequest renderRequest;
     renderRequest.ViewId = viewId;

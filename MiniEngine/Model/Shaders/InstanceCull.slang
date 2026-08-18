@@ -34,9 +34,22 @@ struct InstanceCullConstants
 
 ConstantBuffer<InstanceCullConstants> g_InstanceCull;
 
+#ifdef VSM_PHYSICAL_PAGE_PASS
+RWStructuredBuffer<QueueState> g_VsmTaskQueueStateUAV;
+#endif
+
 #ifndef DISABLE_HZB_CULL
 SamplerState g_HZBSampler;
 #endif
+
+RWStructuredBuffer<QueueState> GetCullTaskQueueStateUAV()
+{
+#ifdef VSM_PHYSICAL_PAGE_PASS
+    return g_VsmTaskQueueStateUAV;
+#else
+    return GetTaskQueueStateBufferUAV();
+#endif
+}
 
 [shader("compute")]
 [numthreads(64, 1, 1)]
@@ -144,7 +157,7 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
     uint waveBaseIndex = 0;
     if (WaveIsFirstLane() && waveVisibleCount > 0)
     {
-        RWStructuredBuffer<QueueState> taskState = GetTaskQueueStateBufferUAV();
+        RWStructuredBuffer<QueueState> taskState = GetCullTaskQueueStateUAV();
         // Allocate space for the whole wave at once
         InterlockedAdd(taskState[0].PassState[passIndex].NodeWriteOffset, waveVisibleCount, waveBaseIndex);
         InterlockedAdd(taskState[0].PassState[passIndex].NodeCount, waveVisibleCount);

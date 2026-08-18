@@ -52,6 +52,11 @@ struct PrimitiveAttributes
 
 ConstantBuffer<VBufferMeshConstants> g_VBufferMesh;
 
+#ifdef VSM_PHYSICAL_PAGE_PASS
+StructuredBuffer<QueueState> g_VsmTaskQueueStateSRV;
+StructuredBuffer<VisibleMeshletPayload> g_VsmVisibleMeshlets;
+#endif
+
 groupshared uint s_PrimCount;
 groupshared uint s_PrimOutIndex[MAX_PRIMS];
 groupshared uint3 s_PrimIndices[MAX_PRIMS];
@@ -173,7 +178,11 @@ void meshMain(
 
 #ifndef DISABLE_HZB_CULL
 #if VBUFFER_MESH_PASS_INDEX == 1
+#ifdef VSM_PHYSICAL_PAGE_PASS
+    StructuredBuffer<QueueState> taskStateSRV = g_VsmTaskQueueStateSRV;
+#else
     StructuredBuffer<QueueState> taskStateSRV = GetTaskQueueStateBufferSRV();
+#endif
     const uint commandStart = taskStateSRV[0].PassState[0].VisibleMeshletCount;
 #else
     const uint commandStart = 0;
@@ -183,7 +192,11 @@ void meshMain(
 #endif
 
     uint commandIndex = gid + commandStart;
+#ifdef VSM_PHYSICAL_PAGE_PASS
+    VisibleMeshletPayload payload = g_VsmVisibleMeshlets[commandIndex];
+#else
     VisibleMeshletPayload payload = GetVisibleMeshletPayload(commandIndex);
+#endif
     InstanceConstant inst = LoadInstanceConstant(payload.InstanceIndex);
     MeshConstant meshInstance = LoadMeshConstant(inst.MeshBufferIdx);
 
