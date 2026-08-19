@@ -194,6 +194,7 @@
     <None Include="Shaders\ViewMode.h.slang" />
     <None Include="Shaders\VirtualShadowMap.h.slang" />
     <None Include="Shaders\VsmPhysicalPagePass.h.slang" />
+    <None Include="Shaders\VsmSampling.h.slang" />
     <None Include="Shaders\VsmPageManagement.slang" />
     <None Include="Shaders\WaveUtil.h.slang" />
   </ItemGroup>

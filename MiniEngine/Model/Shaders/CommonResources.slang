@@ -201,6 +201,11 @@ Texture2D<float> GetShadowMapSRV()
     return GetBindlessResourceHandle<Texture2D<float>>(SRV_SHADOW_MAP);
 }
 
+Texture2D<float> GetVsmPhysicalPagePoolSRV()
+{
+    return GetBindlessResourceHandle<Texture2D<float>>(SRV_VSM_PHYSICAL_PAGE_POOL);
+}
+
 Texture2DArray<float> GetLightShadowArraySRV()
 {
     return GetBindlessResourceHandle<Texture2DArray<float>>(SRV_LIGHT_SHADOW_ARRAY);

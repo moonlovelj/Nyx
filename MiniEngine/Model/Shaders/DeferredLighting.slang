@@ -9,7 +9,7 @@
 
 #include "CommonResources.slang"
 #include "ViewCommon.h.slang"
-#include "VirtualShadowMap.h.slang"
+#include "VsmSampling.h.slang"
 #include "ViewMode.h.slang"
 
 struct DeferredLightingConstants
@@ -29,11 +29,7 @@ struct DeferredLightingConstants
 };
 
 ConstantBuffer<DeferredLightingConstants> g_DeferredLighting;
-StructuredBuffer<VsmShadowView> g_VsmShadowViews;
-StructuredBuffer<DirectionalVsmAddressGpu> g_DirectionalVsmAddresses;
 ByteAddressBuffer g_VsmPageRequestMask;
-StructuredBuffer<uint> g_VsmPageTable;
-StructuredBuffer<VsmPhysicalPageMetadata> g_VsmPhysicalPageMetadata;
 
 #define InverseViewProjMatrix g_DeferredLighting.InverseViewProjMatrix
 #define SunShadowMatrix g_DeferredLighting.SunShadowMatrix
@@ -173,10 +169,18 @@ void computeMain(
                 Surface.alpha = roughness * roughness;
                 Surface.alphaSqr = Surface.alpha * Surface.alpha;
 
-                float4 shadowCoord = mul(SunShadowMatrix, float4(posW, 1.0));
-                shadowCoord.xyz *= rcp(shadowCoord.w);
-                // TODO: shadows have artifacts
-                float sunShadow = GetDirectionalShadow(ScreenUV, shadowCoord.xyz);
+                float sunShadow;
+                if (g_DeferredLighting.VsmViewId != VSM_INVALID_VIEW_ID)
+                {
+                    sunShadow = SampleDirectionalVsmHard(posW, g_DeferredLighting.VsmViewId);
+                }
+                else
+                {
+                    float4 shadowCoord = mul(SunShadowMatrix, float4(posW, 1.0));
+                    shadowCoord.xyz *= rcp(shadowCoord.w);
+                    sunShadow = GetDirectionalShadow(ScreenUV, shadowCoord.xyz);
+                }
+
                 // TODO: specular aliasing, especially when roughness is near 0
                 colorAccum.rgb += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunIntensity);
 

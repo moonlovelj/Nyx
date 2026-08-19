@@ -1010,6 +1010,7 @@ namespace Renderer::VirtualShadowMap
             kPhysicalPoolResolution,
             kPhysicalPoolResolution,
             DXGI_FORMAT_R32_FLOAT);
+        Renderer::SetBindlessResourceDescriptor(SRV_VSM_PHYSICAL_PAGE_POOL, s_PhysicalPagePool.GetDepthSRV());
         Renderer::SetBindlessResourceDescriptor(SRV_VSM_PHYSICAL_HZB0, s_PhysicalHZBs[0].GetSRV());
         Renderer::SetBindlessResourceDescriptor(SRV_VSM_PHYSICAL_HZB1, s_PhysicalHZBs[1].GetSRV());
 
@@ -1623,14 +1624,23 @@ namespace Renderer::VirtualShadowMap
         CommitPendingPhysicalHZB();
     }
 
-    void BindDebugResources(ProgramBinder& binder)
+    void BindSamplingResources(ComputeContext& context, ProgramBinder& binder)
     {
-        ASSERT(s_Initialized, "VirtualShadowMap must be initialized before binding request resources.");
+        ASSERT(s_Initialized, "VirtualShadowMap must be initialized before binding sampling resources.");
         if (!s_Initialized)
             return;
 
+        context.TransitionResource(s_ShadowViewsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_DirectionalAddressesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_ProjectionsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_PageRequestMaskGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(GetCurrentPageTable(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_PhysicalPageMetadataGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_PhysicalPagePool, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
         binder.SetRootBufferSRV("g_VsmShadowViews", s_ShadowViewsGpu);
         binder.SetRootBufferSRV("g_DirectionalVsmAddresses", s_DirectionalAddressesGpu);
+        binder.SetRootBufferSRV("g_VsmProjections", s_ProjectionsGpu);
         binder.SetRootBufferSRV("g_VsmPageRequestMask", s_PageRequestMaskGpu);
         binder.SetRootBufferSRV("g_VsmPageTable", GetCurrentPageTable());
         binder.SetRootBufferSRV("g_VsmPhysicalPageMetadata", s_PhysicalPageMetadataGpu);

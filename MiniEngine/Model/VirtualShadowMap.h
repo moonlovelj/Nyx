@@ -3,6 +3,7 @@
 #include "VirtualShadowMapShared.h"
 
 class GraphicsContext;
+class ComputeContext;
 class ProgramBinder;
 
 namespace Renderer
@@ -72,7 +73,7 @@ namespace Renderer::VirtualShadowMap
         const Renderer::FrameConstants& frame,
         uint32_t renderRequestIndex);
 
-    void BindDebugResources(ProgramBinder& binder);
+    void BindSamplingResources(ComputeContext& context, ProgramBinder& binder);
 
     bool IsInitialized();
     uint32_t GetViewCount();

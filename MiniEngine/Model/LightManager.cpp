@@ -155,6 +155,7 @@ void Lighting::InitializeResources( void )
         ProgramUtils::BindlessMode::ResourceHeap);
     deferredLightingDesc.AddRootBufferSRV("g_VsmShadowViews");
     deferredLightingDesc.AddRootBufferSRV("g_DirectionalVsmAddresses");
+    deferredLightingDesc.AddRootBufferSRV("g_VsmProjections");
     deferredLightingDesc.AddRootBufferSRV("g_VsmPageRequestMask");
     deferredLightingDesc.AddRootBufferSRV("g_VsmPageTable");
     deferredLightingDesc.AddRootBufferSRV("g_VsmPhysicalPageMetadata");
@@ -472,7 +473,7 @@ void Lighting::RenderDeferredLighting(
     constants["TileCountX"].Set(frame.TileCount[0]);
     constants["IBLSpecularLDMapMipCount"].Set(frame.IBLSpecularLDMapMipCount);
     constants["VsmViewId"].Set(frame.SunVsmViewId);
-    Renderer::VirtualShadowMap::BindDebugResources(binder);
+    Renderer::VirtualShadowMap::BindSamplingResources(Context, binder);
     SetCommonResources(binder, frame);
     binder.Apply();
 
