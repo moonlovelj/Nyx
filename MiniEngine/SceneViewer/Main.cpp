@@ -441,6 +441,10 @@ void SceneViewer::ReloadModel(const std::wstring& filePath, bool useOrbit, uint3
         return;
     }
 
+    GraphicsContext& resetContext = GraphicsContext::Begin(L"Reset VSM");
+    Renderer::VirtualShadowMap::Reset(resetContext);
+    resetContext.Finish(true);
+
     if (ModelInstanceManager::GetNumModelInstances() > 0)
         ModelInstanceManager::Cleanup();
 

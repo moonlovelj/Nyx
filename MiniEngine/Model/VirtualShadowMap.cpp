@@ -1076,6 +1076,55 @@ namespace Renderer::VirtualShadowMap
         s_Initialized = false;
     }
 
+    void Reset(GraphicsContext& gfxContext)
+    {
+        ASSERT(s_Initialized, "VirtualShadowMap must be initialized before Reset.");
+        if (!s_Initialized)
+            return;
+
+        s_Views.clear();
+        s_PreviousViews.clear();
+        s_DirectionalAddressesGpuData.clear();
+        s_ProjectionsGpuData.clear();
+        s_DirtyViewIds.clear();
+        s_CurrentPageTableIndex = 0;
+        s_CommittedPhysicalHZBIndex = 0;
+        s_FrameNumber = 0;
+
+        ComputeContext& context = gfxContext.GetComputeContext();
+        const auto clearBuffer = [&context](GpuBuffer& buffer, uint32_t value = 0u)
+        {
+            context.TransitionResource(buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            context.ClearUAV(buffer, value);
+            context.InsertUAVBarrier(buffer, true);
+        };
+
+        clearBuffer(s_ShadowViewsGpu);
+        clearBuffer(s_DirectionalAddressesGpu);
+        clearBuffer(s_ProjectionsGpu);
+        clearBuffer(s_PageRequestMaskGpu);
+        clearBuffer(s_RequestStatisticsGpu);
+        clearBuffer(s_PageTablesGpu[0], kInvalidPhysicalPage);
+        clearBuffer(s_PageTablesGpu[1], kInvalidPhysicalPage);
+        clearBuffer(s_PageRenderRequestsGpu);
+        clearBuffer(s_PhysicalPageMetadataGpu);
+        clearBuffer(s_FreePhysicalPagesGpu);
+        clearBuffer(s_PhysicalPageUsedMaskGpu);
+        clearBuffer(s_PageManagementCountersGpu);
+        clearBuffer(s_RenderRequestPredicateGpu);
+        clearBuffer(s_PhysicalPageViewsGpu);
+        clearBuffer(s_PhysicalPageCullOutputs.QueueStateGpu);
+        clearBuffer(s_PhysicalPageCullOutputs.VisibleMeshletsGpu);
+        clearBuffer(s_PhysicalPageCullOutputs.IndirectDispatchMeshGpu);
+
+        gfxContext.TransitionResource(s_PhysicalPagePool, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+        gfxContext.ClearDepth(s_PhysicalPagePool);
+        gfxContext.TransitionResource(s_PhysicalPagePool, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        s_PhysicalHZBs[0].GenerateHZB(gfxContext, s_PhysicalPagePool);
+        s_PhysicalHZBs[1].GenerateHZB(gfxContext, s_PhysicalPagePool);
+        s_PhysicalPagePoolInitialized = true;
+    }
+
     void BeginFrame()
     {
         ASSERT(s_Initialized, "VirtualShadowMap must be initialized before BeginFrame.");

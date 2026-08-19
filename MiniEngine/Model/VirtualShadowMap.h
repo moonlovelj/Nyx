@@ -47,6 +47,7 @@ namespace Renderer::VirtualShadowMap
 
     bool Initialize();
     void Shutdown();
+    void Reset(GraphicsContext& gfxContext);
 
     void BeginFrame();
     uint32_t AddDirectionalView(const DirectionalVsmAddressDesc& desc);
