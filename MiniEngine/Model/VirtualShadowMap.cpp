@@ -7,6 +7,7 @@
 #include "../Core/BufferManager.h"
 #include "../Core/DepthBuffer.h"
 #include "../Core/EngineProfiling.h"
+#include "../Core/EngineTuning.h"
 #include "../Core/GpuBuffer.h"
 #include "../Core/HierarchicalDepthBuffer.h"
 #include "../Core/PipelineState.h"
@@ -27,7 +28,12 @@ namespace Renderer::VirtualShadowMap
 {
     namespace
     {
-        constexpr uint32_t kPhysicalPageRenderBudget = 4;
+        IntVar s_PhysicalPageRenderBudget(
+            "Renderer/VSM/Physical Page Render Budget",
+            4,
+            1,
+            static_cast<int32_t>(kPhysicalPageCapacity),
+            1);
 
         bool s_Initialized = false;
 
@@ -123,6 +129,11 @@ namespace Renderer::VirtualShadowMap
         uint32_t s_CommittedPhysicalHZBIndex = 0;
         uint32_t s_FrameNumber = 0;
         bool s_PhysicalPagePoolInitialized = false;
+
+        uint32_t GetPhysicalPageRenderBudget()
+        {
+            return static_cast<uint32_t>(s_PhysicalPageRenderBudget);
+        }
 
         void AddPhysicalPagePassRootSRVs(ProgramDesc& desc)
         {
@@ -1576,14 +1587,65 @@ namespace Renderer::VirtualShadowMap
             0,
             D3D12_PREDICATION_OP_EQUAL_ZERO);
 
-        ClearRequestedPhysicalPageRange(gfxContext, 0u, kPhysicalPageRenderBudget);
+        const uint32_t renderBudget = GetPhysicalPageRenderBudget();
+        ClearRequestedPhysicalPageRange(gfxContext, 0u, renderBudget);
 
-        for (uint32_t renderRequestIndex = 0; renderRequestIndex < kPhysicalPageRenderBudget; ++renderRequestIndex)
+        for (uint32_t renderRequestIndex = 0; renderRequestIndex < renderBudget; ++renderRequestIndex)
         {
             ResetPhysicalPageCullBuffers(gfxContext);
             DispatchPhysicalPageCull(gfxContext, frame, nullptr, renderRequestIndex, 0u);
             BuildPhysicalPageDrawCommand(gfxContext, frame, 0u);
             DrawPhysicalPageDepth(gfxContext, frame, renderRequestIndex, 0u);
+            MarkPhysicalPageRendered(gfxContext, renderRequestIndex);
+        }
+
+        gfxContext.SetPredication(nullptr, 0, D3D12_PREDICATION_OP_EQUAL_ZERO);
+        GeneratePendingPhysicalHZB(gfxContext);
+        CommitPendingPhysicalHZB();
+    }
+
+    void RenderRequestedPhysicalPagesDepth(
+        GraphicsContext& gfxContext,
+        const Renderer::FrameConstants& frame)
+    {
+        ASSERT(s_Initialized, "VirtualShadowMap must be initialized before rendering physical pages.");
+        ASSERT(ArePhysicalPageRenderProgramsReady());
+        ASSERT(s_PhysicalPagePoolInitialized, "VSM physical page pool must be initialized before rendering.");
+        if (!s_Initialized || !ArePhysicalPageRenderProgramsReady() || !s_PhysicalPagePoolInitialized ||
+            s_Views.empty() || DrawCommandManager::GetNumPotentialDrawItems() == 0)
+        {
+            return;
+        }
+
+        ScopedTimer timer(L"VSM: Render Requested Physical Pages Depth", gfxContext);
+        PreparePhysicalPageRenderResources(gfxContext);
+
+        const Renderer::HZBResources hzbResources = GetPhysicalHZBResources();
+        const uint32_t renderBudget = GetPhysicalPageRenderBudget();
+
+        gfxContext.TransitionResource(s_RenderRequestPredicateGpu, D3D12_RESOURCE_STATE_PREDICATION);
+        gfxContext.FlushResourceBarriers();
+        gfxContext.SetPredication(
+            s_RenderRequestPredicateGpu.GetResource(),
+            0,
+            D3D12_PREDICATION_OP_EQUAL_ZERO);
+
+        ClearRequestedPhysicalPageRange(gfxContext, 0u, renderBudget);
+
+        for (uint32_t renderRequestIndex = 0; renderRequestIndex < renderBudget; ++renderRequestIndex)
+        {
+            ResetPhysicalPageCullBuffers(gfxContext);
+
+            DispatchPhysicalPageCull(gfxContext, frame, &hzbResources, renderRequestIndex, 0u);
+            BuildPhysicalPageDrawCommand(gfxContext, frame, 0u);
+            DrawPhysicalPageDepth(gfxContext, frame, renderRequestIndex, 0u);
+
+            GeneratePendingPhysicalHZB(gfxContext);
+
+            DispatchPhysicalPageCull(gfxContext, frame, &hzbResources, renderRequestIndex, 1u);
+            BuildPhysicalPageDrawCommand(gfxContext, frame, 1u);
+            DrawPhysicalPageDepth(gfxContext, frame, renderRequestIndex, 1u);
+
             MarkPhysicalPageRendered(gfxContext, renderRequestIndex);
         }
 

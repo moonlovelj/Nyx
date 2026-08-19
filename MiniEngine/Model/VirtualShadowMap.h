@@ -68,6 +68,9 @@ namespace Renderer::VirtualShadowMap
     void RenderRequestedPhysicalPagesDepthNoHZB(
         GraphicsContext& gfxContext,
         const Renderer::FrameConstants& frame);
+    void RenderRequestedPhysicalPagesDepth(
+        GraphicsContext& gfxContext,
+        const Renderer::FrameConstants& frame);
     void RenderRequestedPhysicalPageDepth(
         GraphicsContext& gfxContext,
         const Renderer::FrameConstants& frame,
