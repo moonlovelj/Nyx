@@ -58,6 +58,8 @@
 #define VSM_HISTORY_VALID_REQUEST_COUNT_OFFSET 28u
 #define VSM_MARKED_DIRTY_PAGE_COUNT_OFFSET 32u
 
+#define VSM_RENDER_REQUEST_PREDICATE_STRIDE 8u
+
 #ifdef __cplusplus
 
 #include "../Core/VectorMath.h"
@@ -104,6 +106,7 @@ namespace Renderer::VirtualShadowMap
     static_assert(kPagesPerView % kRequestMaskWordBits == 0);
     static_assert(kPhysicalPageCapacity == 1024);
     static_assert(kPhysicalPoolResolution == 4096);
+    static_assert(VSM_RENDER_REQUEST_PREDICATE_STRIDE == sizeof(uint64_t));
 
 #else
 

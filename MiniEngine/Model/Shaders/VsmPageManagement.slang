@@ -91,15 +91,16 @@ void AppendRenderRequest(uint viewId, uint pageTableIndex, uint physicalPageInde
     if (renderRequestIndex >= VSM_PHYSICAL_PAGE_CAPACITY)
         return;
 
-    uint previousPredicate;
-    g_VsmRenderRequestPredicate.InterlockedOr(0u, 1u, previousPredicate);
-
     VsmPageRenderRequest renderRequest;
     renderRequest.ViewId = viewId;
     renderRequest.PageTableIndex = pageTableIndex;
     renderRequest.PhysicalPageIndex = physicalPageIndex;
     renderRequest.Flags = flags;
     g_VsmPageRenderRequests[renderRequestIndex] = renderRequest;
+
+    g_VsmRenderRequestPredicate.Store2(
+        renderRequestIndex * VSM_RENDER_REQUEST_PREDICATE_STRIDE,
+        uint2(1u, 0u));
 }
 
 [shader("compute")]

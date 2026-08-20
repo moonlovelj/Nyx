@@ -135,6 +135,11 @@ namespace Renderer::VirtualShadowMap
             return static_cast<uint32_t>(s_PhysicalPageRenderBudget);
         }
 
+        uint64_t GetRenderRequestPredicateOffset(uint32_t renderRequestIndex)
+        {
+            return static_cast<uint64_t>(renderRequestIndex) * VSM_RENDER_REQUEST_PREDICATE_STRIDE;
+        }
+
         void AddPhysicalPagePassRootSRVs(ProgramDesc& desc)
         {
             desc.AddRootBufferSRV("g_VsmPageRenderRequests");
@@ -1000,7 +1005,10 @@ namespace Renderer::VirtualShadowMap
             kPhysicalPageCapacity / kRequestMaskWordBits,
             sizeof(uint32_t));
         s_PageManagementCountersGpu.Create(L"VSM Page Management Counters", 1, VSM_PAGE_MANAGEMENT_COUNTERS_SIZE);
-        s_RenderRequestPredicateGpu.Create(L"VSM Render Request Predicate", 2, sizeof(uint32_t));
+        s_RenderRequestPredicateGpu.Create(
+            L"VSM Render Request Predicates",
+            kPhysicalPageCapacity,
+            VSM_RENDER_REQUEST_PREDICATE_STRIDE);
         s_PhysicalPageViewsGpu.Create(
             L"VSM Physical Page Views",
             kPhysicalPageCapacity,
@@ -1353,7 +1361,10 @@ namespace Renderer::VirtualShadowMap
         context.ClearBufferUAV(currentPageTable, pageTableBytes, kInvalidPhysicalPage);
         context.ClearBufferUAV(s_PhysicalPageUsedMaskGpu, physicalPageUsedMaskBytes, 0);
         context.ClearBufferUAV(s_PageManagementCountersGpu, VSM_PAGE_MANAGEMENT_COUNTERS_SIZE, 0);
-        context.ClearBufferUAV(s_RenderRequestPredicateGpu, sizeof(uint64_t), 0);
+        context.ClearBufferUAV(
+            s_RenderRequestPredicateGpu,
+            s_RenderRequestPredicateGpu.GetBufferSize(),
+            0);
         context.InsertUAVBarrier(currentPageTable);
         context.InsertUAVBarrier(s_PhysicalPageUsedMaskGpu);
         context.InsertUAVBarrier(s_PageManagementCountersGpu);
@@ -1584,7 +1595,7 @@ namespace Renderer::VirtualShadowMap
         gfxContext.FlushResourceBarriers();
         gfxContext.SetPredication(
             s_RenderRequestPredicateGpu.GetResource(),
-            0,
+            GetRenderRequestPredicateOffset(0u),
             D3D12_PREDICATION_OP_EQUAL_ZERO);
 
         const uint32_t renderBudget = GetPhysicalPageRenderBudget();
@@ -1592,6 +1603,11 @@ namespace Renderer::VirtualShadowMap
 
         for (uint32_t renderRequestIndex = 0; renderRequestIndex < renderBudget; ++renderRequestIndex)
         {
+            gfxContext.SetPredication(
+                s_RenderRequestPredicateGpu.GetResource(),
+                GetRenderRequestPredicateOffset(renderRequestIndex),
+                D3D12_PREDICATION_OP_EQUAL_ZERO);
+
             ResetPhysicalPageCullBuffers(gfxContext);
             DispatchPhysicalPageCull(gfxContext, frame, nullptr, renderRequestIndex, 0u);
             BuildPhysicalPageDrawCommand(gfxContext, frame, 0u);
@@ -1627,13 +1643,18 @@ namespace Renderer::VirtualShadowMap
         gfxContext.FlushResourceBarriers();
         gfxContext.SetPredication(
             s_RenderRequestPredicateGpu.GetResource(),
-            0,
+            GetRenderRequestPredicateOffset(0u),
             D3D12_PREDICATION_OP_EQUAL_ZERO);
 
         ClearRequestedPhysicalPageRange(gfxContext, 0u, renderBudget);
 
         for (uint32_t renderRequestIndex = 0; renderRequestIndex < renderBudget; ++renderRequestIndex)
         {
+            gfxContext.SetPredication(
+                s_RenderRequestPredicateGpu.GetResource(),
+                GetRenderRequestPredicateOffset(renderRequestIndex),
+                D3D12_PREDICATION_OP_EQUAL_ZERO);
+
             ResetPhysicalPageCullBuffers(gfxContext);
 
             DispatchPhysicalPageCull(gfxContext, frame, &hzbResources, renderRequestIndex, 0u);
