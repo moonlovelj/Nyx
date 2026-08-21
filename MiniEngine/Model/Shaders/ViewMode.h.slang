@@ -9,6 +9,7 @@
 #define VIEW_MODE_SHOW_INSTANCE_ID   5
 #define VIEW_MODE_SHOW_MATERIAL_ID   6
 #define VIEW_MODE_SHOW_VSM_PAGE_STATE 7
+#define VIEW_MODE_SHOW_VSM_CLIPMAP_LEVEL 8
 
 uint HashUint(uint value)
 {

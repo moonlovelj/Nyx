@@ -152,7 +152,8 @@ namespace Renderer
 	BoolVar FreezeCull("Renderer/Freeze Cull", false);
     
     const char* ViewModeLabels[] = {
-        "Lit", "MeshletLOD", "MeshletID", "MeshletTriangle", "MeshID", "InstanceID", "MaterialID", "VSMPageState"
+        "Lit", "MeshletLOD", "MeshletID", "MeshletTriangle", "MeshID", "InstanceID", "MaterialID", "VSMPageState",
+        "VSMClipmapLevel"
     };
     EnumVar ViewMode("Visualize/View Mode", 0, _countof(ViewModeLabels), ViewModeLabels);
 

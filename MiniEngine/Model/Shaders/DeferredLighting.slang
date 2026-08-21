@@ -25,7 +25,8 @@ struct DeferredLightingConstants
     uint ViewportHeight;
     uint TileCountX;
     uint IBLSpecularLDMapMipCount;
-    uint VsmViewId;
+    uint VsmClipmapId;
+    uint EnableSunShadowSampling;
 };
 
 ConstantBuffer<DeferredLightingConstants> g_DeferredLighting;
@@ -59,25 +60,33 @@ float3 GetVsmPhysicalPageStateColor(VsmPhysicalPageMetadata metadata)
     return float3(0.1f, 0.9f, 0.15f); // Green: valid cached depth.
 }
 
-float3 VisualizeDirectionalVsmPageState(uint2 pixelPosition)
+bool TryReconstructVsmReceiverWorldPosition(uint2 pixelPosition, out float3 worldPosition)
 {
-    if (g_DeferredLighting.VsmViewId == VSM_INVALID_VIEW_ID)
-        return float3(1.0f, 0.0f, 1.0f);
-
-    VsmShadowView shadowView = g_VsmShadowViews[g_DeferredLighting.VsmViewId];
-    if (shadowView.AddressType != VSM_ADDRESS_TYPE_DIRECTIONAL_CLIPMAP)
-        return float3(1.0f, 0.0f, 1.0f);
-
-    Texture2D<float> sceneDepth = GetSceneDepthSRV();
-    float depth = sceneDepth[pixelPosition];
+    worldPosition = float3(0.0f);
+    float depth = GetSceneDepthSRV()[pixelPosition];
     if (depth == 0.0f)
-        return float3(0.15f);
+        return false;
 
-    float3 worldPosition = ReconstructWorldPosition(
+    worldPosition = ReconstructWorldPosition(
         pixelPosition,
         depth,
         uint2(ViewportWidth, ViewportHeight),
         InverseViewProjMatrix);
+    return true;
+}
+
+float3 VisualizeDirectionalVsmPageState(uint2 pixelPosition)
+{
+    if (g_DeferredLighting.VsmClipmapId == VSM_INVALID_VIEW_ID)
+        return float3(1.0f, 0.0f, 1.0f);
+
+    float3 worldPosition;
+    if (!TryReconstructVsmReceiverWorldPosition(pixelPosition, worldPosition))
+        return float3(0.15f);
+
+    DirectionalVsmClipmapGpu clipmap = g_DirectionalVsmClipmaps[g_DeferredLighting.VsmClipmapId];
+    uint level = SelectDirectionalVsmClipmapLevel(worldPosition, clipmap);
+    VsmShadowView shadowView = g_VsmShadowViews[clipmap.FirstViewId + level];
     DirectionalVsmAddressGpu addressData = g_DirectionalVsmAddresses[shadowView.AddressDataIndex];
     VsmVirtualAddress address = GetDirectionalVsmVirtualAddress(worldPosition, addressData);
     float3 addressColor = float3(0.0f);
@@ -119,6 +128,33 @@ float3 VisualizeDirectionalVsmPageState(uint2 pixelPosition)
     return addressColor;
 }
 
+float3 VisualizeDirectionalVsmClipmapLevel(uint2 pixelPosition)
+{
+    if (g_DeferredLighting.VsmClipmapId == VSM_INVALID_VIEW_ID)
+        return float3(1.0f, 0.0f, 1.0f);
+
+    float3 worldPosition;
+    if (!TryReconstructVsmReceiverWorldPosition(pixelPosition, worldPosition))
+        return float3(0.15f);
+
+    DirectionalVsmClipmapGpu clipmap = g_DirectionalVsmClipmaps[g_DeferredLighting.VsmClipmapId];
+    uint level = SelectDirectionalVsmClipmapLevel(worldPosition, clipmap);
+    VsmShadowView shadowView = g_VsmShadowViews[clipmap.FirstViewId + level];
+    DirectionalVsmAddressGpu addressData = g_DirectionalVsmAddresses[shadowView.AddressDataIndex];
+    VsmVirtualAddress address = GetDirectionalVsmVirtualAddress(worldPosition, addressData);
+    if (address.Valid == 0u)
+        return float3(1.0f);
+
+    bool pageBorder = any(address.TexelInPage < uint2(2u)) ||
+        any(address.TexelInPage >= uint2(VSM_PAGE_SIZE - 2u));
+    if (pageBorder)
+        return float3(0.0f);
+
+    const float goldenRatioConjugate = 0.61803398875f;
+    float hue = frac(float(level) * goldenRatioConjugate);
+    return HsvToRgb(float3(hue, 0.75f, 0.95f));
+}
+
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void computeMain(
@@ -135,6 +171,10 @@ void computeMain(
         if (viewMode == VIEW_MODE_SHOW_VSM_PAGE_STATE)
         {
             sceneColor[DTid] = float4(VisualizeDirectionalVsmPageState(DTid), 1.0f);
+        }
+        else if (viewMode == VIEW_MODE_SHOW_VSM_CLIPMAP_LEVEL)
+        {
+            sceneColor[DTid] = float4(VisualizeDirectionalVsmClipmapLevel(DTid), 1.0f);
         }
         else if (viewMode == VIEW_MODE_LIT)
         {
@@ -169,16 +209,11 @@ void computeMain(
                 Surface.alpha = roughness * roughness;
                 Surface.alphaSqr = Surface.alpha * Surface.alpha;
 
-                float sunShadow;
-                if (g_DeferredLighting.VsmViewId != VSM_INVALID_VIEW_ID)
+                float sunShadow = 1.0f;
+                if (g_DeferredLighting.EnableSunShadowSampling != 0u &&
+                    g_DeferredLighting.VsmClipmapId != VSM_INVALID_VIEW_ID)
                 {
-                    sunShadow = SampleDirectionalVsmHard(posW, g_DeferredLighting.VsmViewId);
-                }
-                else
-                {
-                    float4 shadowCoord = mul(SunShadowMatrix, float4(posW, 1.0));
-                    shadowCoord.xyz *= rcp(shadowCoord.w);
-                    sunShadow = GetDirectionalShadow(ScreenUV, shadowCoord.xyz);
+                    sunShadow = SampleDirectionalVsmClipmapHard(posW, g_DeferredLighting.VsmClipmapId);
                 }
 
                 // TODO: specular aliasing, especially when roughness is near 0

@@ -90,7 +90,8 @@ namespace Renderer
     {
         FrameConstants()
             : SunShadowMatrix(kIdentity)
-            , SunVsmViewId(VirtualShadowMap::kInvalidViewId)
+            , SunVsmClipmapId(VirtualShadowMap::kInvalidViewId)
+            , EnableSunShadowSampling(1)
             , SunDirection(kZero)
             , SunIntensity(kZero)
             , ShadowTexelSize(kZero)
@@ -105,7 +106,8 @@ namespace Renderer
         }
 
         Matrix4 SunShadowMatrix;
-        uint32_t SunVsmViewId;
+        uint32_t SunVsmClipmapId;
+        uint32_t EnableSunShadowSampling;
         Vector3 SunDirection;
         Vector3 SunIntensity;
         Vector4 ShadowTexelSize;

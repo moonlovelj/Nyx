@@ -6,13 +6,14 @@ struct MarkVsmPagesConstants
 {
     float4x4 InverseViewProjMatrix;
     uint2 ViewportSize;
-    uint ViewId;
+    uint TargetId;
     uint Padding;
 };
 
 ConstantBuffer<MarkVsmPagesConstants> g_MarkVsmPages;
 
 StructuredBuffer<VsmShadowView> g_VsmShadowViews;
+StructuredBuffer<DirectionalVsmClipmapGpu> g_DirectionalVsmClipmaps;
 StructuredBuffer<DirectionalVsmAddressGpu> g_DirectionalVsmAddresses;
 StructuredBuffer<VsmProjectionGpu> g_VsmProjections;
 RWByteAddressBuffer g_VsmPageRequestMask;
@@ -44,43 +45,72 @@ void MarkRequestedPage(uint viewId, VsmShadowView shadowView, VsmVirtualAddress 
     }
 }
 
-[shader("compute")]
-[numthreads(8, 8, 1)]
-void computeMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+bool TryGetReceiverWorldPosition(uint2 pixelPosition, out float3 worldPosition)
 {
-    uint2 pixelPosition = dispatchThreadId.xy;
+    worldPosition = float3(0.0f);
     if (any(pixelPosition >= g_MarkVsmPages.ViewportSize))
-        return;
+        return false;
 
     Texture2D<float> sceneDepthTexture = GetSceneDepthSRV();
     float sceneDepth = sceneDepthTexture[pixelPosition];
 
     // The main camera uses reverse Z and clears depth to zero.
     if (sceneDepth == 0.0f)
-        return;
+        return false;
 
-    VsmShadowView shadowView = g_VsmShadowViews[g_MarkVsmPages.ViewId];
-    float3 worldPosition = ReconstructWorldPosition(
+    worldPosition = ReconstructWorldPosition(
         pixelPosition,
         sceneDepth,
         g_MarkVsmPages.ViewportSize,
         g_MarkVsmPages.InverseViewProjMatrix);
+    return true;
+}
 
-    VsmVirtualAddress address;
-    if (shadowView.AddressType == VSM_ADDRESS_TYPE_DIRECTIONAL_CLIPMAP)
-    {
-        DirectionalVsmAddressGpu addressData = g_DirectionalVsmAddresses[shadowView.AddressDataIndex];
-        address = GetDirectionalVsmVirtualAddress(worldPosition, addressData);
-    }
-    else if (shadowView.AddressType == VSM_ADDRESS_TYPE_LOCAL_PERSPECTIVE)
-    {
-        VsmProjectionGpu projectionData = g_VsmProjections[shadowView.ProjectionDataIndex];
-        address = GetLocalVsmVirtualAddress(worldPosition, projectionData);
-    }
-    else
-    {
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void markDirectionalMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    float3 worldPosition;
+    if (!TryGetReceiverWorldPosition(dispatchThreadId.xy, worldPosition))
         return;
+
+    DirectionalVsmClipmapGpu clipmap = g_DirectionalVsmClipmaps[g_MarkVsmPages.TargetId];
+    uint firstLevel = SelectDirectionalVsmClipmapLevel(worldPosition, clipmap);
+    for (uint level = firstLevel; level < clipmap.LevelCount; ++level)
+    {
+        uint viewId = clipmap.FirstViewId + level;
+        VsmShadowView shadowView = g_VsmShadowViews[viewId];
+        DirectionalVsmAddressGpu addressData = g_DirectionalVsmAddresses[shadowView.AddressDataIndex];
+        VsmVirtualAddress address = GetDirectionalVsmVirtualAddress(worldPosition, addressData);
+        if (address.Valid != 0u)
+        {
+            MarkRequestedPage(viewId, shadowView, address);
+            return;
+        }
     }
 
-    MarkRequestedPage(g_MarkVsmPages.ViewId, shadowView, address);
+    uint statisticsBase = (clipmap.FirstViewId + firstLevel) * VSM_REQUEST_STATISTICS_STRIDE;
+    uint originalValue;
+    g_VsmRequestStatistics.InterlockedAdd(
+        statisticsBase + VSM_INVALID_ADDRESS_PIXEL_COUNT_OFFSET,
+        1u,
+        originalValue);
+}
+
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void markLocalMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    float3 worldPosition;
+    if (!TryGetReceiverWorldPosition(dispatchThreadId.xy, worldPosition))
+        return;
+
+    uint viewId = g_MarkVsmPages.TargetId;
+    VsmShadowView shadowView = g_VsmShadowViews[viewId];
+    if (shadowView.AddressType != VSM_ADDRESS_TYPE_LOCAL_PERSPECTIVE)
+        return;
+
+    VsmProjectionGpu projectionData = g_VsmProjections[shadowView.ProjectionDataIndex];
+    VsmVirtualAddress address = GetLocalVsmVirtualAddress(worldPosition, projectionData);
+    MarkRequestedPage(viewId, shadowView, address);
 }

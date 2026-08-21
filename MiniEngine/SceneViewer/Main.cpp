@@ -48,8 +48,23 @@ using namespace std;
 namespace
 {
     constexpr uint32_t kSunStableShadowMapId = 1u;
+    constexpr float kSunVsmFirstLevelExtent = 64.0f;
 
-    Vector3 UpdateDirectionalShadowCamera(
+    uint32_t CalculateSunVsmClipmapLevelCount(float shadowDistance)
+    {
+        float selectionRadius =
+            kSunVsmFirstLevelExtent * Renderer::VirtualShadowMap::kDirectionalClipmapSelectionRadiusScale;
+        uint32_t levelCount = 1u;
+        while (selectionRadius < shadowDistance &&
+               levelCount < Renderer::VirtualShadowMap::kMaxDirectionalClipmapLevels)
+        {
+            selectionRadius *= 2.0f;
+            ++levelCount;
+        }
+        return levelCount;
+    }
+
+    void UpdateDirectionalShadowCamera(
         ShadowCamera& shadowCamera,
         const Camera& viewCamera,
         Vector3 lightDirection,
@@ -154,7 +169,6 @@ namespace
             shadowHeight,
             shadowBufferPrecision);
 
-        return receiverCenter;
     }
 }
 
@@ -187,6 +201,7 @@ private:
     ShadowCamera m_PrevSunShadowCamera;
     float m_PreviousSunOrientation = 0.0f;
     float m_PreviousSunInclination = 0.0f;
+    float m_PreviousSunShadowDistance = 0.0f;
     uint32_t m_SunVsmAddressGeneration = 0;
     bool m_HasSunVsmAddressGeneration = false;
 
@@ -205,8 +220,9 @@ int wmain(int /*argc*/, wchar_t** /*argv*/)
 ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 6.0f, -5.0f, 20.0f, 0.1f); // unit: lx
 NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0f, 0.1f );
 NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f);
-NumVar g_SunShadowDistance("Viewer/Lighting/Sun Shadow Distance", 100.0f, 1.0f, 100000.0f, 1.0f);
+NumVar g_SunShadowDistance("Viewer/Lighting/Sun Shadow Distance", 200.0f, 1.0f, 100000.0f, 1.0f);
 BoolVar g_RenderSunShadow("Viewer/Lighting/Render Sun Shadow", false);
+BoolVar g_EnableSunShadowSampling("Viewer/Lighting/Enable Sun Shadow Sampling", true);
 BoolVar g_InvalidateSunVsmCache("Viewer/Lighting/Invalidate VSM Cache", false);
 //NumVar g_SunLightSize("Viewer/Lighting/Sun Light Size", 0.5f, 0.0f, 2.0f, 0.1f);
 //NumVar g_SunShadowBias("Viewer/Lighting/Sun Shadow Bias", 4.f, 1.0f, 20.0f, 1.f );
@@ -658,11 +674,12 @@ void SceneViewer::RenderScene( void )
         float sinphi = sinf(sunInclination * 3.14159f * 0.5f);
 
         Vector3 SunDirection = Normalize(Vector3( costheta * cosphi, sinphi, sintheta * cosphi ));
-        const Vector3 sunShadowFocus = UpdateDirectionalShadowCamera(
+        const float sunShadowDistance = static_cast<float>(g_SunShadowDistance);
+        UpdateDirectionalShadowCamera(
             m_SunShadowCamera,
             m_Camera,
             -SunDirection,
-            static_cast<float>(g_SunShadowDistance),
+            sunShadowDistance,
             g_ShadowBuffer.GetWidth(),
             g_ShadowBuffer.GetHeight(),
             32);
@@ -672,27 +689,31 @@ void SceneViewer::RenderScene( void )
 
         Renderer::FrameConstants frameConstants;
         frameConstants.SunShadowMatrix = m_SunShadowCamera.GetShadowMatrix();
+        frameConstants.EnableSunShadowSampling = g_EnableSunShadowSampling ? 1u : 0u;
         Renderer::VirtualShadowMap::BeginFrame();
 
-        Renderer::VirtualShadowMap::DirectionalVsmAddressDesc vsmAddressDesc;
-        vsmAddressDesc.WorldToLightRotation = Matrix3(~m_SunShadowCamera.GetRotation());
-        vsmAddressDesc.FocusPositionWS = sunShadowFocus;
-        vsmAddressDesc.ViewProjMatrix = m_SunShadowCamera.GetViewProjMatrix();
-        vsmAddressDesc.StableShadowMapId = kSunStableShadowMapId;
+        Renderer::VirtualShadowMap::DirectionalVsmClipmapDesc vsmClipmapDesc;
+        vsmClipmapDesc.WorldToLightRotation = Matrix3(~m_SunShadowCamera.GetRotation());
+        vsmClipmapDesc.OriginWS = m_Camera.GetPosition();
+        vsmClipmapDesc.ViewProjMatrix = m_SunShadowCamera.GetViewProjMatrix();
+        vsmClipmapDesc.FirstLevelExtent = kSunVsmFirstLevelExtent;
+        vsmClipmapDesc.LevelCount = CalculateSunVsmClipmapLevelCount(sunShadowDistance);
+        vsmClipmapDesc.StableShadowMapId = kSunStableShadowMapId;
         if (!m_HasSunVsmAddressGeneration || sunOrientation != m_PreviousSunOrientation ||
-            sunInclination != m_PreviousSunInclination)
+            sunInclination != m_PreviousSunInclination || sunShadowDistance != m_PreviousSunShadowDistance)
         {
             ++m_SunVsmAddressGeneration;
             m_PreviousSunOrientation = sunOrientation;
             m_PreviousSunInclination = sunInclination;
+            m_PreviousSunShadowDistance = sunShadowDistance;
             m_HasSunVsmAddressGeneration = true;
         }
-        vsmAddressDesc.AddressGeneration = m_SunVsmAddressGeneration;
-        frameConstants.SunVsmViewId = Renderer::VirtualShadowMap::AddDirectionalView(vsmAddressDesc);
+        vsmClipmapDesc.AddressGeneration = m_SunVsmAddressGeneration;
+        frameConstants.SunVsmClipmapId = Renderer::VirtualShadowMap::AddDirectionalClipmap(vsmClipmapDesc);
         if (g_InvalidateSunVsmCache &&
-            frameConstants.SunVsmViewId != Renderer::VirtualShadowMap::kInvalidViewId)
+            frameConstants.SunVsmClipmapId != Renderer::VirtualShadowMap::kInvalidViewId)
         {
-            Renderer::VirtualShadowMap::MarkViewDirty(frameConstants.SunVsmViewId);
+            Renderer::VirtualShadowMap::MarkClipmapDirty(frameConstants.SunVsmClipmapId);
             g_InvalidateSunVsmCache = false;
         }
         frameConstants.SunDirection = SunDirection;

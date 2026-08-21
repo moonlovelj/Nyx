@@ -5,6 +5,7 @@
 #include "VirtualShadowMap.h.slang"
 
 StructuredBuffer<VsmShadowView> g_VsmShadowViews;
+StructuredBuffer<DirectionalVsmClipmapGpu> g_DirectionalVsmClipmaps;
 StructuredBuffer<DirectionalVsmAddressGpu> g_DirectionalVsmAddresses;
 StructuredBuffer<VsmProjectionGpu> g_VsmProjections;
 StructuredBuffer<uint> g_VsmPageTable;
@@ -20,42 +21,58 @@ bool IsVsmPhysicalPageReady(
     return IsVsmPhysicalPageMetadataMatch(metadata, shadowView, virtualPage) && isRendered && !isDirty;
 }
 
-float SampleDirectionalVsmHard(float3 worldPosition, uint viewId)
+bool TrySampleDirectionalVsmView(float3 worldPosition, uint viewId, out float shadow)
 {
-    if (viewId == VSM_INVALID_VIEW_ID)
-        return 1.0f;
-
+    shadow = 1.0f;
     VsmShadowView shadowView = g_VsmShadowViews[viewId];
     if (shadowView.AddressType != VSM_ADDRESS_TYPE_DIRECTIONAL_CLIPMAP)
-        return 1.0f;
+        return false;
 
     DirectionalVsmAddressGpu addressData = g_DirectionalVsmAddresses[shadowView.AddressDataIndex];
     VsmVirtualAddress address = GetDirectionalVsmVirtualAddress(worldPosition, addressData);
     if (address.Valid == 0u)
-        return 1.0f;
+        return false;
 
     uint physicalPageIndex = GetVsmPhysicalPageIndex(g_VsmPageTable, shadowView, address.PageTableCoord);
     if (physicalPageIndex >= VSM_PHYSICAL_PAGE_CAPACITY)
-        return 1.0f;
+        return false;
 
     VsmPhysicalPageMetadata metadata = g_VsmPhysicalPageMetadata[physicalPageIndex];
     if (!IsVsmPhysicalPageReady(metadata, shadowView, address.VirtualPage))
-        return 1.0f;
+        return false;
 
     VsmProjectionGpu projection = g_VsmProjections[shadowView.ProjectionDataIndex];
     float4 clipPosition = ProjectWorldToVsmClip(GetVsmProjectionRows(projection), worldPosition);
     if (clipPosition.w <= 0.0f)
-        return 1.0f;
+        return false;
 
     float receiverDepth = clipPosition.z / clipPosition.w;
     if (receiverDepth < 0.0f || receiverDepth > 1.0f)
-        return 1.0f;
+        return false;
 
     uint2 atlasTexel = GetVsmPhysicalPageCoord(physicalPageIndex) * VSM_PAGE_SIZE + address.TexelInPage;
     float shadowDepth = GetVsmPhysicalPagePoolSRV().Load(int3(atlasTexel, 0));
 
     // The VSM uses reverse Z: larger depth values are closer to the light.
-    return receiverDepth >= shadowDepth ? 1.0f : 0.0f;
+    shadow = receiverDepth + 1e-6 >= shadowDepth ? 1.0f : 0.0f;
+    return true;
+}
+
+float SampleDirectionalVsmClipmapHard(float3 worldPosition, uint clipmapId)
+{
+    if (clipmapId == VSM_INVALID_VIEW_ID)
+        return 1.0f;
+
+    DirectionalVsmClipmapGpu clipmap = g_DirectionalVsmClipmaps[clipmapId];
+    uint firstLevel = SelectDirectionalVsmClipmapLevel(worldPosition, clipmap);
+    for (uint level = firstLevel; level < clipmap.LevelCount; ++level)
+    {
+        float shadow;
+        if (TrySampleDirectionalVsmView(worldPosition, clipmap.FirstViewId + level, shadow))
+            return shadow;
+    }
+
+    return 1.0f;
 }
 
 #endif

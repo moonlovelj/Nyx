@@ -37,8 +37,10 @@ namespace Renderer::VirtualShadowMap
 
         bool s_Initialized = false;
 
-        ComputePSO s_MarkRequestedPagesPSO(L"VSM: Mark Requested Pages");
-        std::shared_ptr<Program> s_MarkRequestedPagesProgram;
+        ComputePSO s_MarkDirectionalPagesPSO(L"VSM: Mark Directional Pages");
+        ComputePSO s_MarkLocalPagesPSO(L"VSM: Mark Local Pages");
+        std::shared_ptr<Program> s_MarkDirectionalPagesProgram;
+        std::shared_ptr<Program> s_MarkLocalPagesProgram;
         ComputePSO s_MarkViewDirtyPSO(L"VSM: Mark View Dirty");
         ComputePSO s_ReuseRequestedPagesPSO(L"VSM: Reuse Requested Pages");
         ComputePSO s_BuildFreePhysicalPageListPSO(L"VSM: Build Free Physical Page List");
@@ -76,6 +78,7 @@ namespace Renderer::VirtualShadowMap
         std::shared_ptr<Program> s_PhysicalPageDepthPrograms[2];
 
         StructuredBuffer s_ShadowViewsGpu;
+        StructuredBuffer s_DirectionalClipmapsGpu;
         StructuredBuffer s_DirectionalAddressesGpu;
         StructuredBuffer s_ProjectionsGpu;
         ByteAddressBuffer s_PageRequestMaskGpu;
@@ -122,8 +125,10 @@ namespace Renderer::VirtualShadowMap
 
         std::vector<VsmShadowView> s_Views;
         std::vector<VsmShadowView> s_PreviousViews;
+        std::vector<DirectionalVsmClipmapGpu> s_DirectionalClipmapsGpuData;
         std::vector<DirectionalVsmAddressGpu> s_DirectionalAddressesGpuData;
         std::vector<VsmProjectionGpu> s_ProjectionsGpuData;
+        std::vector<uint32_t> s_LocalViewIds;
         std::vector<uint32_t> s_DirtyViewIds;
         uint32_t s_CurrentPageTableIndex = 0;
         uint32_t s_CommittedPhysicalHZBIndex = 0;
@@ -160,6 +165,17 @@ namespace Renderer::VirtualShadowMap
             ProgramVar commonResources = binder["g_CommonResources"];
             commonResources["BindlessResourcesBaseIndex"].Set(frame.BindlessResourcesBaseIndex);
             commonResources["FrameIndexMod2"].Set(frame.FrameIndexMod2);
+        }
+
+        void SetMarkRequestedPagesConstants(ProgramBinder& binder, const Renderer::ViewConstants& view)
+        {
+            ProgramVar constants = binder["g_MarkVsmPages"];
+            constants["InverseViewProjMatrix"].Set(view.InverseViewProjMatrix);
+            constants["ViewportSize"].Set(DirectX::XMUINT2(view.ViewportWidth, view.ViewportHeight));
+
+            ProgramVar commonResources = binder["g_CommonResources"];
+            commonResources["BindlessResourcesBaseIndex"].Set(Renderer::GetBindlessResourcesBaseOffset());
+            commonResources["FrameIndexMod2"].Set(TemporalEffects::GetFrameIndexMod2());
         }
 
         StructuredBuffer& GetCurrentPageTable()
@@ -636,6 +652,15 @@ namespace Renderer::VirtualShadowMap
                 s_Views.data(),
                 s_Views.size() * sizeof(VsmShadowView));
 
+            if (!s_DirectionalClipmapsGpuData.empty())
+            {
+                context.WriteBuffer(
+                    s_DirectionalClipmapsGpu,
+                    0,
+                    s_DirectionalClipmapsGpuData.data(),
+                    s_DirectionalClipmapsGpuData.size() * sizeof(DirectionalVsmClipmapGpu));
+            }
+
             if (!s_DirectionalAddressesGpuData.empty())
             {
                 context.WriteBuffer(
@@ -655,6 +680,7 @@ namespace Renderer::VirtualShadowMap
             }
 
             context.TransitionResource(s_ShadowViewsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(s_DirectionalClipmapsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_DirectionalAddressesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_ProjectionsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         }
@@ -700,23 +726,40 @@ namespace Renderer::VirtualShadowMap
         if (s_Initialized)
             return true;
 
-        ProgramDesc markRequestedPagesDesc = ProgramUtils::MakeComputeDesc(
+        ProgramDesc markDirectionalPagesDesc = ProgramUtils::MakeComputeDesc(
             Renderer::GetModelShaderPath("MarkVsmPages.slang"),
-            "computeMain",
+            "markDirectionalMain",
             ProgramUtils::BindlessMode::ResourceHeap);
-        markRequestedPagesDesc.AddRootBufferSRV("g_VsmShadowViews");
-        markRequestedPagesDesc.AddRootBufferSRV("g_DirectionalVsmAddresses");
-        markRequestedPagesDesc.AddRootBufferSRV("g_VsmProjections");
-        markRequestedPagesDesc.AddRootBufferUAV("g_VsmPageRequestMask");
-        markRequestedPagesDesc.AddRootBufferUAV("g_VsmRequestStatistics");
-        s_MarkRequestedPagesProgram = ProgramUtils::GetProgram(
-            markRequestedPagesDesc,
-            "VSM: Mark Requested Pages");
-        if (!s_MarkRequestedPagesProgram)
+        markDirectionalPagesDesc.AddRootBufferSRV("g_VsmShadowViews");
+        markDirectionalPagesDesc.AddRootBufferSRV("g_DirectionalVsmClipmaps");
+        markDirectionalPagesDesc.AddRootBufferSRV("g_DirectionalVsmAddresses");
+        markDirectionalPagesDesc.AddRootBufferUAV("g_VsmPageRequestMask");
+        markDirectionalPagesDesc.AddRootBufferUAV("g_VsmRequestStatistics");
+        s_MarkDirectionalPagesProgram = ProgramUtils::GetProgram(
+            markDirectionalPagesDesc,
+            "VSM: Mark Directional Pages");
+        if (!s_MarkDirectionalPagesProgram)
             return false;
 
-        ProgramUtils::SetProgram(s_MarkRequestedPagesPSO, *s_MarkRequestedPagesProgram);
-        s_MarkRequestedPagesPSO.Finalize();
+        ProgramUtils::SetProgram(s_MarkDirectionalPagesPSO, *s_MarkDirectionalPagesProgram);
+        s_MarkDirectionalPagesPSO.Finalize();
+
+        ProgramDesc markLocalPagesDesc = ProgramUtils::MakeComputeDesc(
+            Renderer::GetModelShaderPath("MarkVsmPages.slang"),
+            "markLocalMain",
+            ProgramUtils::BindlessMode::ResourceHeap);
+        markLocalPagesDesc.AddRootBufferSRV("g_VsmShadowViews");
+        markLocalPagesDesc.AddRootBufferSRV("g_VsmProjections");
+        markLocalPagesDesc.AddRootBufferUAV("g_VsmPageRequestMask");
+        markLocalPagesDesc.AddRootBufferUAV("g_VsmRequestStatistics");
+        s_MarkLocalPagesProgram = ProgramUtils::GetProgram(
+            markLocalPagesDesc,
+            "VSM: Mark Local Pages");
+        if (!s_MarkLocalPagesProgram)
+            return false;
+
+        ProgramUtils::SetProgram(s_MarkLocalPagesPSO, *s_MarkLocalPagesProgram);
+        s_MarkLocalPagesPSO.Finalize();
 
         const std::string pageManagementShaderPath = Renderer::GetModelShaderPath("VsmPageManagement.slang");
 
@@ -973,6 +1016,10 @@ namespace Renderer::VirtualShadowMap
             L"VSM Shadow Views",
             kMaxShadowViews,
             sizeof(VsmShadowView));
+        s_DirectionalClipmapsGpu.Create(
+            L"VSM Directional Clipmaps",
+            kMaxDirectionalClipmaps,
+            sizeof(DirectionalVsmClipmapGpu));
         s_DirectionalAddressesGpu.Create(
             L"VSM Directional Addresses",
             kMaxShadowViews,
@@ -1035,8 +1082,10 @@ namespace Renderer::VirtualShadowMap
 
         s_Views.reserve(kMaxShadowViews);
         s_PreviousViews.reserve(kMaxShadowViews);
+        s_DirectionalClipmapsGpuData.reserve(kMaxDirectionalClipmaps);
         s_DirectionalAddressesGpuData.reserve(kMaxShadowViews);
         s_ProjectionsGpuData.reserve(kMaxShadowViews);
+        s_LocalViewIds.reserve(kMaxShadowViews);
         s_DirtyViewIds.reserve(kMaxShadowViews);
         s_CurrentPageTableIndex = 0;
         s_CommittedPhysicalHZBIndex = 0;
@@ -1050,11 +1099,14 @@ namespace Renderer::VirtualShadowMap
     {
         s_Views.clear();
         s_PreviousViews.clear();
+        s_DirectionalClipmapsGpuData.clear();
         s_DirectionalAddressesGpuData.clear();
         s_ProjectionsGpuData.clear();
+        s_LocalViewIds.clear();
         s_DirtyViewIds.clear();
 
         s_ShadowViewsGpu.Destroy();
+        s_DirectionalClipmapsGpu.Destroy();
         s_DirectionalAddressesGpu.Destroy();
         s_ProjectionsGpu.Destroy();
         s_PageRequestMaskGpu.Destroy();
@@ -1072,7 +1124,8 @@ namespace Renderer::VirtualShadowMap
         s_PhysicalPagePool.Destroy();
         s_PhysicalHZBs[0].Destroy();
         s_PhysicalHZBs[1].Destroy();
-        s_MarkRequestedPagesProgram.reset();
+        s_MarkDirectionalPagesProgram.reset();
+        s_MarkLocalPagesProgram.reset();
         s_MarkViewDirtyProgram.reset();
         s_ReuseRequestedPagesProgram.reset();
         s_BuildFreePhysicalPageListProgram.reset();
@@ -1104,8 +1157,10 @@ namespace Renderer::VirtualShadowMap
 
         s_Views.clear();
         s_PreviousViews.clear();
+        s_DirectionalClipmapsGpuData.clear();
         s_DirectionalAddressesGpuData.clear();
         s_ProjectionsGpuData.clear();
+        s_LocalViewIds.clear();
         s_DirtyViewIds.clear();
         s_CurrentPageTableIndex = 0;
         s_CommittedPhysicalHZBIndex = 0;
@@ -1120,6 +1175,7 @@ namespace Renderer::VirtualShadowMap
         };
 
         clearBuffer(s_ShadowViewsGpu);
+        clearBuffer(s_DirectionalClipmapsGpu);
         clearBuffer(s_DirectionalAddressesGpu);
         clearBuffer(s_ProjectionsGpu);
         clearBuffer(s_PageRequestMaskGpu);
@@ -1153,55 +1209,122 @@ namespace Renderer::VirtualShadowMap
 
         s_PreviousViews.swap(s_Views);
         s_Views.clear();
+        s_DirectionalClipmapsGpuData.clear();
         s_DirectionalAddressesGpuData.clear();
         s_ProjectionsGpuData.clear();
+        s_LocalViewIds.clear();
         s_DirtyViewIds.clear();
         s_CurrentPageTableIndex ^= 1u;
         ++s_FrameNumber;
     }
 
-    uint32_t AddDirectionalView(const DirectionalVsmAddressDesc& desc)
+    namespace
     {
-        ASSERT(s_Initialized, "VirtualShadowMap must be initialized before adding views.");
-        ASSERT(s_Views.size() < kMaxShadowViews, "Exceeded the VSM shadow-view capacity.");
-        ASSERT(s_DirectionalAddressesGpuData.size() < kMaxShadowViews, "Exceeded the directional VSM address capacity.");
-        ASSERT(s_ProjectionsGpuData.size() < kMaxShadowViews, "Exceeded the VSM projection capacity.");
-        if (!s_Initialized ||
-            s_Views.size() >= kMaxShadowViews ||
-            s_DirectionalAddressesGpuData.size() >= kMaxShadowViews ||
-            s_ProjectionsGpuData.size() >= kMaxShadowViews)
+        uint32_t AddDirectionalLevelView(const DirectionalVsmAddressDesc& desc)
+        {
+            ASSERT(s_Initialized, "VirtualShadowMap must be initialized before adding views.");
+            ASSERT(s_Views.size() < kMaxShadowViews, "Exceeded the VSM shadow-view capacity.");
+            ASSERT(s_DirectionalAddressesGpuData.size() < kMaxShadowViews,
+                   "Exceeded the directional VSM address capacity.");
+            ASSERT(s_ProjectionsGpuData.size() < kMaxShadowViews, "Exceeded the VSM projection capacity.");
+            if (!s_Initialized || s_Views.size() >= kMaxShadowViews ||
+                s_DirectionalAddressesGpuData.size() >= kMaxShadowViews ||
+                s_ProjectionsGpuData.size() >= kMaxShadowViews)
+            {
+                return kInvalidViewId;
+            }
+
+            const DirectionalVsmAddressConstants addressConstants = BuildDirectionalVsmAddressConstants(desc);
+            const DirectionalVsmAddressGpu addressData = BuildDirectionalVsmAddressGpu(addressConstants);
+            const uint32_t addressDataIndex = static_cast<uint32_t>(s_DirectionalAddressesGpuData.size());
+            const uint32_t projectionDataIndex = static_cast<uint32_t>(s_ProjectionsGpuData.size());
+            const uint32_t viewId = static_cast<uint32_t>(s_Views.size());
+
+            VsmShadowView view{};
+            view.StableShadowMapId = desc.StableShadowMapId;
+            view.AddressGeneration = desc.AddressGeneration;
+            view.AddressType = VSM_ADDRESS_TYPE_DIRECTIONAL_CLIPMAP;
+            view.AddressDataIndex = addressDataIndex;
+            view.RequestMaskWordBase = viewId * kRequestMaskWordCountPerView;
+            view.PageTableBase = viewId * kPagesPerView;
+            view.PreviousPageTableBase = FindPreviousPageTableBase(
+                desc.StableShadowMapId,
+                VSM_ADDRESS_TYPE_DIRECTIONAL_CLIPMAP,
+                desc.ClipmapLevel);
+            view.Layer = desc.ClipmapLevel;
+            view.LightIndex = desc.LightIndex;
+            view.ProjectionDataIndex = projectionDataIndex;
+            view.LodScale = addressConstants.InvWorldUnitsPerPage > 0.0f
+                ? 1.0f / (addressConstants.InvWorldUnitsPerPage * static_cast<float>(kPageSize))
+                : 0.0f;
+
+            s_Views.push_back(view);
+            s_DirectionalAddressesGpuData.push_back(addressData);
+            s_ProjectionsGpuData.push_back(BuildDirectionalVsmProjectionGpu(desc, addressData));
+            return viewId;
+        }
+    } // namespace
+
+    uint32_t AddDirectionalClipmap(const DirectionalVsmClipmapDesc& desc)
+    {
+        const float coarsestLevelExtent = desc.LevelCount > 0u && desc.LevelCount <= kMaxDirectionalClipmapLevels
+            ? std::ldexp(desc.FirstLevelExtent, static_cast<int>(desc.LevelCount - 1u))
+            : 0.0f;
+
+        ASSERT(s_Initialized, "VirtualShadowMap must be initialized before adding clipmaps.");
+        ASSERT(desc.LevelCount > 0u, "A directional VSM clipmap must contain at least one level.");
+        ASSERT(desc.LevelCount <= kMaxDirectionalClipmapLevels, "Exceeded the directional VSM clipmap level limit.");
+        ASSERT(std::isfinite(desc.FirstLevelExtent) && desc.FirstLevelExtent > 0.0f,
+               "The directional VSM first-level extent must be positive and finite.");
+        ASSERT(std::isfinite(coarsestLevelExtent), "The directional VSM coarsest-level extent must be finite.");
+        ASSERT(std::isfinite(desc.LodBias), "The directional VSM clipmap LOD bias must be finite.");
+        ASSERT(s_DirectionalClipmapsGpuData.size() < kMaxDirectionalClipmaps,
+               "Exceeded the directional VSM clipmap capacity.");
+        ASSERT(s_Views.size() + desc.LevelCount <= kMaxShadowViews,
+               "Exceeded the VSM shadow-view capacity.");
+        ASSERT(s_DirectionalAddressesGpuData.size() + desc.LevelCount <= kMaxShadowViews,
+               "Exceeded the directional VSM address capacity.");
+        ASSERT(s_ProjectionsGpuData.size() + desc.LevelCount <= kMaxShadowViews,
+               "Exceeded the VSM projection capacity.");
+        if (!s_Initialized || desc.LevelCount == 0u || desc.LevelCount > kMaxDirectionalClipmapLevels ||
+            !std::isfinite(desc.FirstLevelExtent) || desc.FirstLevelExtent <= 0.0f || !std::isfinite(desc.LodBias) ||
+            !std::isfinite(coarsestLevelExtent) || s_DirectionalClipmapsGpuData.size() >= kMaxDirectionalClipmaps ||
+            s_Views.size() + desc.LevelCount > kMaxShadowViews ||
+            s_DirectionalAddressesGpuData.size() + desc.LevelCount > kMaxShadowViews ||
+            s_ProjectionsGpuData.size() + desc.LevelCount > kMaxShadowViews)
         {
             return kInvalidViewId;
         }
 
-        const DirectionalVsmAddressConstants addressConstants = BuildDirectionalVsmAddressConstants(desc);
-        const DirectionalVsmAddressGpu addressData = BuildDirectionalVsmAddressGpu(addressConstants);
-        const uint32_t addressDataIndex = static_cast<uint32_t>(s_DirectionalAddressesGpuData.size());
-        const uint32_t projectionDataIndex = static_cast<uint32_t>(s_ProjectionsGpuData.size());
-        const uint32_t viewId = static_cast<uint32_t>(s_Views.size());
+        const uint32_t clipmapId = static_cast<uint32_t>(s_DirectionalClipmapsGpuData.size());
+        const uint32_t firstViewId = static_cast<uint32_t>(s_Views.size());
+        for (uint32_t level = 0; level < desc.LevelCount; ++level)
+        {
+            DirectionalVsmAddressDesc levelDesc;
+            levelDesc.WorldToLightRotation = desc.WorldToLightRotation;
+            levelDesc.FocusPositionWS = desc.OriginWS;
+            levelDesc.ViewProjMatrix = desc.ViewProjMatrix;
+            levelDesc.LevelWorldExtent = std::ldexp(desc.FirstLevelExtent, static_cast<int>(level));
+            levelDesc.LightIndex = desc.LightIndex;
+            levelDesc.StableShadowMapId = desc.StableShadowMapId;
+            levelDesc.ClipmapLevel = level;
+            levelDesc.AddressGeneration = desc.AddressGeneration;
 
-        VsmShadowView view{};
-        view.StableShadowMapId = desc.StableShadowMapId;
-        view.AddressGeneration = desc.AddressGeneration;
-        view.AddressType = VSM_ADDRESS_TYPE_DIRECTIONAL_CLIPMAP;
-        view.AddressDataIndex = addressDataIndex;
-        view.RequestMaskWordBase = viewId * kRequestMaskWordCountPerView;
-        view.PageTableBase = viewId * kPagesPerView;
-        view.PreviousPageTableBase = FindPreviousPageTableBase(
-            desc.StableShadowMapId,
-            VSM_ADDRESS_TYPE_DIRECTIONAL_CLIPMAP,
-            desc.ClipmapLevel);
-        view.Layer = desc.ClipmapLevel;
-        view.LightIndex = desc.LightIndex;
-        view.ProjectionDataIndex = projectionDataIndex;
-        view.LodScale = addressConstants.InvWorldUnitsPerPage > 0.0f
-            ? 1.0f / (addressConstants.InvWorldUnitsPerPage * static_cast<float>(kPageSize))
-            : 0.0f;
+            const uint32_t viewId = AddDirectionalLevelView(levelDesc);
+            ASSERT(viewId == firstViewId + level, "Directional VSM clipmap views must be contiguous.");
+            if (viewId != firstViewId + level)
+                return kInvalidViewId;
+        }
 
-        s_Views.push_back(view);
-        s_DirectionalAddressesGpuData.push_back(addressData);
-        s_ProjectionsGpuData.push_back(BuildDirectionalVsmProjectionGpu(desc, addressData));
-        return viewId;
+        DirectionalVsmClipmapGpu clipmap{};
+        clipmap.OriginAndFirstLevelRadius = PackFloat4(
+            desc.OriginWS,
+            desc.FirstLevelExtent * kDirectionalClipmapSelectionRadiusScale);
+        clipmap.FirstViewId = firstViewId;
+        clipmap.LevelCount = desc.LevelCount;
+        clipmap.LodBias = desc.LodBias;
+        s_DirectionalClipmapsGpuData.push_back(clipmap);
+        return clipmapId;
     }
 
     uint32_t AddLocalView(const LocalVsmViewDesc& desc)
@@ -1236,6 +1359,7 @@ namespace Renderer::VirtualShadowMap
             desc.ViewProjMatrix,
             desc.ViewerPositionWS,
             VSM_PROJECTION_TYPE_PERSPECTIVE));
+        s_LocalViewIds.push_back(viewId);
         return viewId;
     }
 
@@ -1248,6 +1372,17 @@ namespace Renderer::VirtualShadowMap
 
         if (std::find(s_DirtyViewIds.begin(), s_DirtyViewIds.end(), viewId) == s_DirtyViewIds.end())
             s_DirtyViewIds.push_back(viewId);
+    }
+
+    void MarkClipmapDirty(uint32_t clipmapId)
+    {
+        ASSERT(clipmapId < s_DirectionalClipmapsGpuData.size(), "Invalid directional VSM clipmap index.");
+        if (clipmapId >= s_DirectionalClipmapsGpuData.size())
+            return;
+
+        const DirectionalVsmClipmapGpu& clipmap = s_DirectionalClipmapsGpuData[clipmapId];
+        for (uint32_t level = 0; level < clipmap.LevelCount; ++level)
+            MarkViewDirty(clipmap.FirstViewId + level);
     }
 
     const VsmShadowView& GetView(uint32_t viewId)
@@ -1275,8 +1410,9 @@ namespace Renderer::VirtualShadowMap
     void MarkRequestedPages(GraphicsContext& gfxContext, const Renderer::RenderView& receiverView)
     {
         ASSERT(s_Initialized, "VirtualShadowMap must be initialized before marking pages.");
-        ASSERT(s_MarkRequestedPagesProgram != nullptr);
-        if (!s_Initialized || !s_MarkRequestedPagesProgram || s_Views.empty())
+        ASSERT(s_MarkDirectionalPagesProgram != nullptr);
+        ASSERT(s_MarkLocalPagesProgram != nullptr);
+        if (!s_Initialized || !s_MarkDirectionalPagesProgram || !s_MarkLocalPagesProgram || s_Views.empty())
             return;
 
         ScopedTimer timer(L"VSM: Mark Requested Pages", gfxContext);
@@ -1292,37 +1428,58 @@ namespace Renderer::VirtualShadowMap
 
         context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_ShadowViewsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_DirectionalClipmapsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_DirectionalAddressesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_ProjectionsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_PageRequestMaskGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         context.TransitionResource(s_RequestStatisticsGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
         context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Renderer::s_TextureHeap.GetHeapPointer());
-        ProgramBinder binder(*s_MarkRequestedPagesProgram, context);
-        binder.SetRootSignature();
-        context.SetPipelineState(s_MarkRequestedPagesPSO);
-
-        binder.SetRootBufferSRV("g_VsmShadowViews", s_ShadowViewsGpu);
-        binder.SetRootBufferSRV("g_DirectionalVsmAddresses", s_DirectionalAddressesGpu);
-        binder.SetRootBufferSRV("g_VsmProjections", s_ProjectionsGpu);
-        binder.SetRootBufferUAV("g_VsmPageRequestMask", s_PageRequestMaskGpu);
-        binder.SetRootBufferUAV("g_VsmRequestStatistics", s_RequestStatisticsGpu);
-
         const Renderer::ViewConstants& viewConstants = receiverView.GetConstants();
-        ProgramVar constants = binder["g_MarkVsmPages"];
-        constants["InverseViewProjMatrix"].Set(viewConstants.InverseViewProjMatrix);
-        constants["ViewportSize"].Set(
-            DirectX::XMUINT2(viewConstants.ViewportWidth, viewConstants.ViewportHeight));
 
-        ProgramVar commonResources = binder["g_CommonResources"];
-        commonResources["BindlessResourcesBaseIndex"].Set(Renderer::GetBindlessResourcesBaseOffset());
-        commonResources["FrameIndexMod2"].Set(TemporalEffects::GetFrameIndexMod2());
-
-        for (uint32_t viewId = 0; viewId < s_Views.size(); ++viewId)
+        if (!s_DirectionalClipmapsGpuData.empty())
         {
-            constants["ViewId"].Set(viewId);
-            binder.Apply();
-            context.Dispatch2D(viewConstants.ViewportWidth, viewConstants.ViewportHeight);
+            ProgramBinder binder(*s_MarkDirectionalPagesProgram, context);
+            binder.SetRootSignature();
+            context.SetPipelineState(s_MarkDirectionalPagesPSO);
+
+            binder.SetRootBufferSRV("g_VsmShadowViews", s_ShadowViewsGpu);
+            binder.SetRootBufferSRV("g_DirectionalVsmClipmaps", s_DirectionalClipmapsGpu);
+            binder.SetRootBufferSRV("g_DirectionalVsmAddresses", s_DirectionalAddressesGpu);
+            binder.SetRootBufferUAV("g_VsmPageRequestMask", s_PageRequestMaskGpu);
+            binder.SetRootBufferUAV("g_VsmRequestStatistics", s_RequestStatisticsGpu);
+
+            SetMarkRequestedPagesConstants(binder, viewConstants);
+            ProgramVar constants = binder["g_MarkVsmPages"];
+
+            for (uint32_t clipmapId = 0; clipmapId < s_DirectionalClipmapsGpuData.size(); ++clipmapId)
+            {
+                constants["TargetId"].Set(clipmapId);
+                binder.Apply();
+                context.Dispatch2D(viewConstants.ViewportWidth, viewConstants.ViewportHeight);
+            }
+        }
+
+        if (!s_LocalViewIds.empty())
+        {
+            ProgramBinder binder(*s_MarkLocalPagesProgram, context);
+            binder.SetRootSignature();
+            context.SetPipelineState(s_MarkLocalPagesPSO);
+
+            binder.SetRootBufferSRV("g_VsmShadowViews", s_ShadowViewsGpu);
+            binder.SetRootBufferSRV("g_VsmProjections", s_ProjectionsGpu);
+            binder.SetRootBufferUAV("g_VsmPageRequestMask", s_PageRequestMaskGpu);
+            binder.SetRootBufferUAV("g_VsmRequestStatistics", s_RequestStatisticsGpu);
+
+            SetMarkRequestedPagesConstants(binder, viewConstants);
+            ProgramVar constants = binder["g_MarkVsmPages"];
+
+            for (uint32_t viewId : s_LocalViewIds)
+            {
+                constants["TargetId"].Set(viewId);
+                binder.Apply();
+                context.Dispatch2D(viewConstants.ViewportWidth, viewConstants.ViewportHeight);
+            }
         }
 
         context.TransitionResource(s_PageRequestMaskGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -1714,6 +1871,7 @@ namespace Renderer::VirtualShadowMap
             return;
 
         context.TransitionResource(s_ShadowViewsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_DirectionalClipmapsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_DirectionalAddressesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_ProjectionsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_PageRequestMaskGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -1722,6 +1880,7 @@ namespace Renderer::VirtualShadowMap
         context.TransitionResource(s_PhysicalPagePool, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
         binder.SetRootBufferSRV("g_VsmShadowViews", s_ShadowViewsGpu);
+        binder.SetRootBufferSRV("g_DirectionalVsmClipmaps", s_DirectionalClipmapsGpu);
         binder.SetRootBufferSRV("g_DirectionalVsmAddresses", s_DirectionalAddressesGpu);
         binder.SetRootBufferSRV("g_VsmProjections", s_ProjectionsGpu);
         binder.SetRootBufferSRV("g_VsmPageRequestMask", s_PageRequestMaskGpu);

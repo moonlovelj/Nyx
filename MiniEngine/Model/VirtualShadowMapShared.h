@@ -143,6 +143,18 @@ namespace Renderer::VirtualShadowMap
         VSM_UINT Padding2;
     };
 
+    // Groups the consecutive VSM views that form one directional-light clipmap.
+    // xyz = the world-space selection origin, w = the finest level selection radius.
+    struct VSM_ALIGN_16 DirectionalVsmClipmapGpu
+    {
+        VSM_FLOAT4 OriginAndFirstLevelRadius;
+
+        VSM_UINT FirstViewId;
+        VSM_UINT LevelCount;
+        float LodBias;
+        VSM_UINT Padding;
+    };
+
     // Describes one directional-light clipmap level's stable address space.
     //
     // AddressOriginWS must lie on the boundary of AddressOriginPage in the light
@@ -265,6 +277,7 @@ namespace Renderer::VirtualShadowMap
 
 #ifdef __cplusplus
     static_assert(sizeof(VsmShadowView) == 48);
+    static_assert(sizeof(DirectionalVsmClipmapGpu) == 32);
     static_assert(sizeof(DirectionalVsmAddressGpu) == 80);
     static_assert(sizeof(VsmProjectionGpu) == 80);
     static_assert(sizeof(VsmPageRenderRequest) == 16);

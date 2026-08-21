@@ -3,6 +3,17 @@
 
 #include "../VirtualShadowMapShared.h"
 
+uint SelectDirectionalVsmClipmapLevel(
+    float3 receiverPositionWS,
+    DirectionalVsmClipmapGpu clipmap)
+{
+    float firstLevelRadius = max(clipmap.OriginAndFirstLevelRadius.w, 1e-6f);
+    float distanceToOrigin = length(receiverPositionWS - clipmap.OriginAndFirstLevelRadius.xyz);
+    float levelFloat = ceil(log2(max(distanceToOrigin / firstLevelRadius, 1.0f)) + clipmap.LodBias);
+    int maxLevel = max(int(clipmap.LevelCount) - 1, 0);
+    return uint(clamp(int(levelFloat), 0, maxLevel));
+}
+
 int VsmFloorMod(int value, int divisor)
 {
     int remainder = value % divisor;

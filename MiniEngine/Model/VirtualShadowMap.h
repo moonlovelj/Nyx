@@ -15,6 +15,26 @@ namespace Renderer
 namespace Renderer::VirtualShadowMap
 {
     inline constexpr uint32_t kMaxShadowViews = 256;
+    inline constexpr uint32_t kMaxDirectionalClipmaps = 16;
+    inline constexpr uint32_t kMaxDirectionalClipmapLevels = 16;
+    inline constexpr float kDirectionalClipmapSelectionRadiusScale = 0.25f;
+
+    struct DirectionalVsmClipmapDesc
+    {
+        Math::Matrix3 WorldToLightRotation = Math::Matrix3(Math::kIdentity);
+        Math::Vector3 OriginWS = Math::Vector3(Math::kZero);
+        Math::Matrix4 ViewProjMatrix = Math::Matrix4(Math::kIdentity);
+
+        // Every level has the same virtual resolution. Its world extent doubles
+        // from FirstLevelExtent for each successive level.
+        float FirstLevelExtent = 64.0f;
+        float LodBias = 0.0f;
+        uint32_t LevelCount = 1;
+
+        uint32_t LightIndex = 0;
+        uint32_t StableShadowMapId = 0;
+        uint32_t AddressGeneration = 0;
+    };
 
     struct DirectionalVsmAddressDesc
     {
@@ -51,13 +71,14 @@ namespace Renderer::VirtualShadowMap
     void Reset(GraphicsContext& gfxContext);
 
     void BeginFrame();
-    uint32_t AddDirectionalView(const DirectionalVsmAddressDesc& desc);
+    uint32_t AddDirectionalClipmap(const DirectionalVsmClipmapDesc& desc);
     uint32_t AddLocalView(const LocalVsmViewDesc& desc);
     void MarkRequestedPages(GraphicsContext& gfxContext, const Renderer::RenderView& receiverView);
 
     // Queues every cached physical page owned by this frame-local view for rerendering.
     // Call after adding the view and before AllocateRequestedPages().
     void MarkViewDirty(uint32_t viewId);
+    void MarkClipmapDirty(uint32_t clipmapId);
 
     void AllocateRequestedPages(GraphicsContext& gfxContext);
     void BuildPhysicalPageViews(GraphicsContext& gfxContext);
