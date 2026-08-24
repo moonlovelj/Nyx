@@ -9,10 +9,12 @@
 #include "../Core/EngineProfiling.h"
 #include "../Core/EngineTuning.h"
 #include "../Core/GpuBuffer.h"
+#include "../Core/GraphicsCore.h"
 #include "../Core/HierarchicalDepthBuffer.h"
 #include "../Core/PipelineState.h"
 #include "../Core/ProgramBinder.h"
 #include "../Core/ProgramUtils.h"
+#include "../Core/ReadbackBuffer.h"
 #include "../Core/Utility.h"
 
 #include <algorithm>
@@ -30,10 +32,20 @@ namespace Renderer::VirtualShadowMap
     {
         IntVar s_PhysicalPageRenderBudget(
             "Renderer/VSM/Physical Page Render Budget",
-            4,
+            64,
             1,
             static_cast<int32_t>(kPhysicalPageCapacity),
             1);
+
+        IntVar s_RequestedPageCount("Renderer/VSM/Page Statistics/Requested", 0);
+        IntVar s_ReusedPageCount("Renderer/VSM/Page Statistics/Reused", 0);
+        IntVar s_NewPageCount("Renderer/VSM/Page Statistics/New", 0);
+        IntVar s_OverflowPageCount("Renderer/VSM/Page Statistics/Overflow", 0);
+        IntVar s_RenderRequestCount("Renderer/VSM/Page Statistics/Render Request", 0);
+        IntVar s_RenderBacklogCount("Renderer/VSM/Page Statistics/Render Backlog", 0);
+        BoolVar s_PhysicalPoolExhausted("Renderer/VSM/Page Statistics/Physical Pool Exhausted", false);
+        BoolVar s_RenderBudgetExceeded("Renderer/VSM/Page Statistics/Render Budget Exceeded", false);
+        BoolVar s_PageCountersValid("Renderer/VSM/Page Statistics/Counters Valid", false);
 
         bool s_Initialized = false;
 
@@ -55,8 +67,6 @@ namespace Renderer::VirtualShadowMap
             ComputePSO(L"VSM: Physical Page DAG Cull Pass 0"),
             ComputePSO(L"VSM: Physical Page DAG Cull Pass 1")
         };
-        ComputePSO s_PhysicalPageInstanceCullNoHZBPSO(L"VSM: Physical Page Instance Cull No HZB");
-        ComputePSO s_PhysicalPageDAGCullNoHZBPSO(L"VSM: Physical Page DAG Cull No HZB");
         ComputePSO s_PhysicalPageMeshBufferGenPSO(L"VSM: Physical Page Mesh Buffer Gen");
         GraphicsPSO s_ClearRequestedPhysicalPagePSO(L"VSM: Clear Requested Physical Page");
         MeshShaderPSO s_PhysicalPageDepthPSOs[2] = {
@@ -72,8 +82,6 @@ namespace Renderer::VirtualShadowMap
         std::shared_ptr<Program> s_ClearRequestedPhysicalPageProgram;
         std::shared_ptr<Program> s_PhysicalPageInstanceCullPrograms[2];
         std::shared_ptr<Program> s_PhysicalPageDAGCullPrograms[2];
-        std::shared_ptr<Program> s_PhysicalPageInstanceCullNoHZBProgram;
-        std::shared_ptr<Program> s_PhysicalPageDAGCullNoHZBProgram;
         std::shared_ptr<Program> s_PhysicalPageMeshBufferGenProgram;
         std::shared_ptr<Program> s_PhysicalPageDepthPrograms[2];
 
@@ -135,9 +143,134 @@ namespace Renderer::VirtualShadowMap
         uint32_t s_FrameNumber = 0;
         bool s_PhysicalPagePoolInitialized = false;
 
+        constexpr uint32_t kPageStatisticsReadbackCount = 3;
+        constexpr size_t kManagementStatisticsReadbackOffset = 0;
+        constexpr size_t kRequestStatisticsReadbackOffset = VSM_PAGE_MANAGEMENT_COUNTERS_SIZE;
+        constexpr size_t kPageStatisticsReadbackSize =
+            kRequestStatisticsReadbackOffset + kMaxShadowViews * VSM_REQUEST_STATISTICS_STRIDE;
+
+        struct PageStatisticsReadbackSlot
+        {
+            ReadbackBuffer Buffer;
+            uint64_t FenceValue = 0;
+            uint32_t ViewCount = 0;
+            uint32_t RenderBudget = 0;
+            uint32_t Generation = 0;
+        };
+
+        std::array<PageStatisticsReadbackSlot, kPageStatisticsReadbackCount> s_PageStatisticsReadbacks;
+        PageStatistics s_PageStatistics;
+        uint32_t s_PageStatisticsGeneration = 0;
+        uint32_t s_PageStatisticsRenderBudget = 0;
+
         uint32_t GetPhysicalPageRenderBudget()
         {
             return static_cast<uint32_t>(s_PhysicalPageRenderBudget);
+        }
+
+        void PublishPageStatistics(const PageStatistics& statistics)
+        {
+            s_PageStatistics = statistics;
+            s_RequestedPageCount = static_cast<int32_t>(statistics.RequestedPages);
+            s_ReusedPageCount = static_cast<int32_t>(statistics.ReusedPages);
+            s_NewPageCount = static_cast<int32_t>(statistics.NewPages);
+            s_OverflowPageCount = static_cast<int32_t>(statistics.OverflowPages);
+            s_RenderRequestCount = static_cast<int32_t>(statistics.RenderRequests);
+            s_RenderBacklogCount = static_cast<int32_t>(statistics.RenderBacklog);
+            s_PhysicalPoolExhausted = statistics.PhysicalPoolExhausted;
+            s_RenderBudgetExceeded = statistics.RenderBudgetExceeded;
+            s_PageCountersValid = statistics.CountersValid;
+        }
+
+        PageStatistics DecodePageStatistics(PageStatisticsReadbackSlot& slot)
+        {
+            const uint32_t* data = static_cast<const uint32_t*>(slot.Buffer.Map());
+            const auto readValue = [data](size_t byteOffset)
+            {
+                return data[byteOffset / sizeof(uint32_t)];
+            };
+
+            PageStatistics statistics;
+            statistics.Ready = true;
+            statistics.RenderBudget = slot.RenderBudget;
+            statistics.ReusedPages = readValue(
+                kManagementStatisticsReadbackOffset + VSM_REUSED_PAGE_COUNT_OFFSET);
+            statistics.NewPages = readValue(
+                kManagementStatisticsReadbackOffset + VSM_NEW_PAGE_COUNT_OFFSET);
+            statistics.OverflowPages = readValue(
+                kManagementStatisticsReadbackOffset + VSM_OVERFLOW_PAGE_COUNT_OFFSET);
+            statistics.RenderRequests = readValue(
+                kManagementStatisticsReadbackOffset + VSM_RENDER_REQUEST_COUNT_OFFSET);
+            statistics.FreePagesBeforeAllocation = readValue(
+                kManagementStatisticsReadbackOffset + VSM_FREE_PAGE_COUNT_OFFSET);
+
+            for (uint32_t viewId = 0; viewId < slot.ViewCount; ++viewId)
+            {
+                statistics.RequestedPages += readValue(
+                    kRequestStatisticsReadbackOffset +
+                        static_cast<size_t>(viewId) * VSM_REQUEST_STATISTICS_STRIDE +
+                        VSM_REQUESTED_PAGE_COUNT_OFFSET);
+            }
+
+            slot.Buffer.Unmap();
+
+            const uint32_t mappedPages = statistics.ReusedPages + statistics.NewPages;
+            statistics.RenderBacklog = statistics.RenderRequests > statistics.RenderBudget
+                ? statistics.RenderRequests - statistics.RenderBudget
+                : 0u;
+            statistics.PhysicalPoolExhausted = statistics.OverflowPages != 0u;
+            statistics.RenderBudgetExceeded = statistics.RenderBacklog != 0u;
+            statistics.CountersValid =
+                statistics.RequestedPages == mappedPages + statistics.OverflowPages &&
+                statistics.ReusedPages + statistics.FreePagesBeforeAllocation == kPhysicalPageCapacity &&
+                statistics.NewPages <= statistics.FreePagesBeforeAllocation &&
+                (!statistics.PhysicalPoolExhausted ||
+                    statistics.NewPages == statistics.FreePagesBeforeAllocation) &&
+                statistics.RenderRequests <= mappedPages &&
+                statistics.RenderRequests <= kPhysicalPageCapacity;
+            return statistics;
+        }
+
+        void UpdatePageStatisticsReadback()
+        {
+            PageStatisticsReadbackSlot& slot =
+                s_PageStatisticsReadbacks[s_FrameNumber % kPageStatisticsReadbackCount];
+
+            if (slot.FenceValue != 0)
+            {
+                if (!Graphics::g_CommandManager.IsFenceComplete(slot.FenceValue))
+                    return;
+
+                slot.FenceValue = 0;
+                if (slot.Generation == s_PageStatisticsGeneration)
+                    PublishPageStatistics(DecodePageStatistics(slot));
+            }
+
+            if (s_Views.empty())
+                return;
+
+            slot.ViewCount = static_cast<uint32_t>(s_Views.size());
+            slot.RenderBudget = s_PageStatisticsRenderBudget;
+            slot.Generation = s_PageStatisticsGeneration;
+
+            GraphicsContext& context = GraphicsContext::Begin(L"VSM Page Statistics Readback");
+            context.TransitionResource(s_PageManagementCountersGpu, D3D12_RESOURCE_STATE_COPY_SOURCE);
+            context.TransitionResource(s_RequestStatisticsGpu, D3D12_RESOURCE_STATE_COPY_SOURCE);
+            context.CopyBufferRegion(
+                slot.Buffer,
+                kManagementStatisticsReadbackOffset,
+                s_PageManagementCountersGpu,
+                0,
+                VSM_PAGE_MANAGEMENT_COUNTERS_SIZE);
+            context.CopyBufferRegion(
+                slot.Buffer,
+                kRequestStatisticsReadbackOffset,
+                s_RequestStatisticsGpu,
+                0,
+                static_cast<size_t>(slot.ViewCount) * VSM_REQUEST_STATISTICS_STRIDE);
+            context.TransitionResource(s_PageManagementCountersGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(s_RequestStatisticsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            slot.FenceValue = context.Finish();
         }
 
         uint64_t GetRenderRequestPredicateOffset(uint32_t renderRequestIndex)
@@ -260,32 +393,6 @@ namespace Renderer::VirtualShadowMap
             constants["CurrentHZB"].Set(SlangDescriptorHandle{ hzbResources.CurrentSRVIndex, 0 });
         }
 
-        bool ArePhysicalPageRenderProgramsReady()
-        {
-            if (!s_MarkPhysicalPageRenderedProgram || !s_PhysicalPageMeshBufferGenProgram)
-                return false;
-
-            for (uint32_t passIndex = 0; passIndex < 2; ++passIndex)
-            {
-                if (!s_PhysicalPageInstanceCullPrograms[passIndex] ||
-                    !s_PhysicalPageDAGCullPrograms[passIndex] ||
-                    !s_PhysicalPageDepthPrograms[passIndex])
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        bool ArePhysicalPageNoHZBRenderProgramsReady()
-        {
-            return s_MarkPhysicalPageRenderedProgram &&
-                s_PhysicalPageInstanceCullNoHZBProgram &&
-                s_PhysicalPageDAGCullNoHZBProgram &&
-                s_PhysicalPageMeshBufferGenProgram &&
-                s_PhysicalPageDepthPrograms[0];
-        }
-
         void MarkPhysicalPageRendered(GraphicsContext& gfxContext, uint32_t renderRequestIndex)
         {
             ComputeContext& context = gfxContext.GetComputeContext();
@@ -314,26 +421,14 @@ namespace Renderer::VirtualShadowMap
         void DispatchPhysicalPageCull(
             GraphicsContext& gfxContext,
             const Renderer::FrameConstants& frame,
-            const Renderer::HZBResources* hzbResources,
+            const Renderer::HZBResources& hzbResources,
             uint32_t renderRequestIndex,
             uint32_t passIndex)
         {
-            const Program* instanceCullProgram = hzbResources
-                ? s_PhysicalPageInstanceCullPrograms[passIndex].get()
-                : s_PhysicalPageInstanceCullNoHZBProgram.get();
-            const ComputePSO& instanceCullPSO = hzbResources
-                ? s_PhysicalPageInstanceCullPSOs[passIndex]
-                : s_PhysicalPageInstanceCullNoHZBPSO;
-            const Program* dagCullProgram = hzbResources
-                ? s_PhysicalPageDAGCullPrograms[passIndex].get()
-                : s_PhysicalPageDAGCullNoHZBProgram.get();
-            const ComputePSO& dagCullPSO = hzbResources
-                ? s_PhysicalPageDAGCullPSOs[passIndex]
-                : s_PhysicalPageDAGCullNoHZBPSO;
-
-            ASSERT(instanceCullProgram && dagCullProgram);
-            if (!instanceCullProgram || !dagCullProgram)
-                return;
+            const Program& instanceCullProgram = *s_PhysicalPageInstanceCullPrograms[passIndex];
+            const ComputePSO& instanceCullPSO = s_PhysicalPageInstanceCullPSOs[passIndex];
+            const Program& dagCullProgram = *s_PhysicalPageDAGCullPrograms[passIndex];
+            const ComputePSO& dagCullPSO = s_PhysicalPageDAGCullPSOs[passIndex];
 
             ComputeContext& context = gfxContext.GetComputeContext();
             context.TransitionResource(
@@ -358,7 +453,7 @@ namespace Renderer::VirtualShadowMap
                 Renderer::s_SamplerHeap.GetHeapPointer());
 
             {
-                ProgramBinder binder(*instanceCullProgram, context);
+                ProgramBinder binder(instanceCullProgram, context);
                 binder.SetRootSignature();
                 context.SetPipelineState(instanceCullPSO);
 
@@ -366,8 +461,7 @@ namespace Renderer::VirtualShadowMap
                 constants["ViewportWidth"].Set(kPageSize);
                 constants["ViewportHeight"].Set(kPageSize);
                 constants["MaxCommands"].Set(DrawCommandManager::GetNumPotentialDrawItems());
-                if (hzbResources)
-                    BindPhysicalHZBConstants(constants, *hzbResources);
+                BindPhysicalHZBConstants(constants, hzbResources);
                 BindPhysicalPagePassResources(binder, renderRequestIndex);
                 SetCommonResources(binder, frame);
                 binder.SetRootBufferUAV("g_VsmTaskQueueStateUAV", s_PhysicalPageCullOutputs.QueueStateGpu);
@@ -388,7 +482,7 @@ namespace Renderer::VirtualShadowMap
                 D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.FlushResourceBarriers();
 
-            ProgramBinder binder(*dagCullProgram, context);
+            ProgramBinder binder(dagCullProgram, context);
             binder.SetRootSignature();
             context.SetPipelineState(dagCullPSO);
 
@@ -396,8 +490,7 @@ namespace Renderer::VirtualShadowMap
             constants["PixelErrorThreshold"].Set(Renderer::GetPixelErrorThreshold());
             constants["ViewportWidth"].Set(kPageSize);
             constants["ViewportHeight"].Set(kPageSize);
-            if (hzbResources)
-                BindPhysicalHZBConstants(constants, *hzbResources);
+            BindPhysicalHZBConstants(constants, hzbResources);
             BindPhysicalPagePassResources(binder, renderRequestIndex);
             SetCommonResources(binder, frame);
             binder.SetRootBufferUAV("g_TaskQueueStateUAV", s_PhysicalPageCullOutputs.QueueStateGpu);
@@ -642,10 +735,6 @@ namespace Renderer::VirtualShadowMap
 
         void UploadFrameData(ComputeContext& context)
         {
-            ASSERT(!s_Views.empty());
-            if (s_Views.empty())
-                return;
-
             context.WriteBuffer(
                 s_ShadowViewsGpu,
                 0,
@@ -927,44 +1016,6 @@ namespace Renderer::VirtualShadowMap
             s_PhysicalPageDAGCullPSOs[passIndex].Finalize();
         }
 
-        ProgramDesc instanceCullNoHZBDesc = ProgramUtils::MakeComputeDesc(
-            Renderer::GetModelShaderPath("InstanceCull.slang"),
-            "computeMain",
-            ProgramUtils::BindlessMode::ResourceHeap);
-        instanceCullNoHZBDesc.AddDefine("INSTANCE_CULL_PASS_INDEX", "0");
-        instanceCullNoHZBDesc.AddDefine("DISABLE_HZB_CULL");
-        instanceCullNoHZBDesc.AddDefine("VSM_PHYSICAL_PAGE_PASS");
-        AddPhysicalPagePassRootSRVs(instanceCullNoHZBDesc);
-        instanceCullNoHZBDesc.AddRootBufferUAV("g_VsmTaskQueueStateUAV");
-        s_PhysicalPageInstanceCullNoHZBProgram =
-            ProgramUtils::GetProgram(instanceCullNoHZBDesc, "VSM: Physical Page Instance Cull No HZB");
-        if (!s_PhysicalPageInstanceCullNoHZBProgram)
-            return false;
-
-        ProgramUtils::SetProgram(s_PhysicalPageInstanceCullNoHZBPSO, *s_PhysicalPageInstanceCullNoHZBProgram);
-        s_PhysicalPageInstanceCullNoHZBPSO.Finalize();
-
-        ProgramDesc dagCullNoHZBDesc = ProgramUtils::MakeComputeDesc(
-            Renderer::GetModelShaderPath("DAGCull.slang"),
-            "computeMain",
-            ProgramUtils::BindlessMode::ResourceHeap);
-        dagCullNoHZBDesc.AddDefine("DAG_CULL_PASS_INDEX", "0");
-        dagCullNoHZBDesc.AddDefine("DISABLE_HZB_CULL");
-        dagCullNoHZBDesc.AddDefine("VSM_PHYSICAL_PAGE_PASS");
-        AddPhysicalPagePassRootSRVs(dagCullNoHZBDesc);
-        dagCullNoHZBDesc.AddRootBufferUAV("g_TaskQueueStateUAV");
-        dagCullNoHZBDesc.AddRootBufferUAV("g_TaskQueueUAV");
-        dagCullNoHZBDesc.AddRootBufferUAV("g_MeshletBatchUAV");
-        dagCullNoHZBDesc.AddRootBufferUAV("g_CandidateMeshletUAV");
-        dagCullNoHZBDesc.AddRootBufferUAV("g_VsmVisibleMeshletUAV");
-        s_PhysicalPageDAGCullNoHZBProgram =
-            ProgramUtils::GetProgram(dagCullNoHZBDesc, "VSM: Physical Page DAG Cull No HZB");
-        if (!s_PhysicalPageDAGCullNoHZBProgram)
-            return false;
-
-        ProgramUtils::SetProgram(s_PhysicalPageDAGCullNoHZBPSO, *s_PhysicalPageDAGCullNoHZBProgram);
-        s_PhysicalPageDAGCullNoHZBPSO.Finalize();
-
         ProgramDesc physicalPageMeshBufferGenDesc = ProgramUtils::MakeComputeDesc(
             Renderer::GetModelShaderPath("MeshBufferGen.slang"),
             "computeMain",
@@ -1060,6 +1111,14 @@ namespace Renderer::VirtualShadowMap
             L"VSM Physical Page Views",
             kPhysicalPageCapacity,
             sizeof(VsmPhysicalPageView));
+        static_assert(kPageStatisticsReadbackSize % sizeof(uint32_t) == 0);
+        for (PageStatisticsReadbackSlot& slot : s_PageStatisticsReadbacks)
+        {
+            slot.Buffer.Create(
+                L"VSM Page Statistics Readback",
+                static_cast<uint32_t>(kPageStatisticsReadbackSize / sizeof(uint32_t)),
+                sizeof(uint32_t));
+        }
         s_PhysicalPageCullOutputs.Create();
         s_PhysicalPagePool.Create(
             L"VSM Physical Page Pool",
@@ -1091,6 +1150,9 @@ namespace Renderer::VirtualShadowMap
         s_CommittedPhysicalHZBIndex = 0;
         s_FrameNumber = 0;
         s_PhysicalPagePoolInitialized = false;
+        s_PageStatistics = {};
+        s_PageStatisticsGeneration = 0;
+        s_PageStatisticsRenderBudget = 0;
         s_Initialized = true;
         return true;
     }
@@ -1120,6 +1182,11 @@ namespace Renderer::VirtualShadowMap
         s_PageManagementCountersGpu.Destroy();
         s_RenderRequestPredicateGpu.Destroy();
         s_PhysicalPageViewsGpu.Destroy();
+        for (PageStatisticsReadbackSlot& slot : s_PageStatisticsReadbacks)
+        {
+            slot.Buffer.Destroy();
+            slot.FenceValue = 0;
+        }
         s_PhysicalPageCullOutputs.Destroy();
         s_PhysicalPagePool.Destroy();
         s_PhysicalHZBs[0].Destroy();
@@ -1139,21 +1206,20 @@ namespace Renderer::VirtualShadowMap
             s_PhysicalPageDAGCullPrograms[passIndex].reset();
             s_PhysicalPageDepthPrograms[passIndex].reset();
         }
-        s_PhysicalPageInstanceCullNoHZBProgram.reset();
-        s_PhysicalPageDAGCullNoHZBProgram.reset();
         s_PhysicalPageMeshBufferGenProgram.reset();
         s_CurrentPageTableIndex = 0;
         s_CommittedPhysicalHZBIndex = 0;
         s_FrameNumber = 0;
         s_PhysicalPagePoolInitialized = false;
+        s_PageStatistics = {};
+        s_PageStatisticsGeneration = 0;
+        s_PageStatisticsRenderBudget = 0;
         s_Initialized = false;
     }
 
     void Reset(GraphicsContext& gfxContext)
     {
         ASSERT(s_Initialized, "VirtualShadowMap must be initialized before Reset.");
-        if (!s_Initialized)
-            return;
 
         s_Views.clear();
         s_PreviousViews.clear();
@@ -1165,6 +1231,9 @@ namespace Renderer::VirtualShadowMap
         s_CurrentPageTableIndex = 0;
         s_CommittedPhysicalHZBIndex = 0;
         s_FrameNumber = 0;
+        ++s_PageStatisticsGeneration;
+        s_PageStatisticsRenderBudget = 0;
+        PublishPageStatistics({});
 
         ComputeContext& context = gfxContext.GetComputeContext();
         const auto clearBuffer = [&context](GpuBuffer& buffer, uint32_t value = 0u)
@@ -1204,9 +1273,8 @@ namespace Renderer::VirtualShadowMap
     void BeginFrame()
     {
         ASSERT(s_Initialized, "VirtualShadowMap must be initialized before BeginFrame.");
-        if (!s_Initialized)
-            return;
 
+        UpdatePageStatisticsReadback();
         s_PreviousViews.swap(s_Views);
         s_Views.clear();
         s_DirectionalClipmapsGpuData.clear();
@@ -1222,18 +1290,6 @@ namespace Renderer::VirtualShadowMap
     {
         uint32_t AddDirectionalLevelView(const DirectionalVsmAddressDesc& desc)
         {
-            ASSERT(s_Initialized, "VirtualShadowMap must be initialized before adding views.");
-            ASSERT(s_Views.size() < kMaxShadowViews, "Exceeded the VSM shadow-view capacity.");
-            ASSERT(s_DirectionalAddressesGpuData.size() < kMaxShadowViews,
-                   "Exceeded the directional VSM address capacity.");
-            ASSERT(s_ProjectionsGpuData.size() < kMaxShadowViews, "Exceeded the VSM projection capacity.");
-            if (!s_Initialized || s_Views.size() >= kMaxShadowViews ||
-                s_DirectionalAddressesGpuData.size() >= kMaxShadowViews ||
-                s_ProjectionsGpuData.size() >= kMaxShadowViews)
-            {
-                return kInvalidViewId;
-            }
-
             const DirectionalVsmAddressConstants addressConstants = BuildDirectionalVsmAddressConstants(desc);
             const DirectionalVsmAddressGpu addressData = BuildDirectionalVsmAddressGpu(addressConstants);
             const uint32_t addressDataIndex = static_cast<uint32_t>(s_DirectionalAddressesGpuData.size());
@@ -1267,31 +1323,14 @@ namespace Renderer::VirtualShadowMap
 
     uint32_t AddDirectionalClipmap(const DirectionalVsmClipmapDesc& desc)
     {
-        const float coarsestLevelExtent = desc.LevelCount > 0u && desc.LevelCount <= kMaxDirectionalClipmapLevels
-            ? std::ldexp(desc.FirstLevelExtent, static_cast<int>(desc.LevelCount - 1u))
-            : 0.0f;
-
         ASSERT(s_Initialized, "VirtualShadowMap must be initialized before adding clipmaps.");
         ASSERT(desc.LevelCount > 0u, "A directional VSM clipmap must contain at least one level.");
         ASSERT(desc.LevelCount <= kMaxDirectionalClipmapLevels, "Exceeded the directional VSM clipmap level limit.");
         ASSERT(std::isfinite(desc.FirstLevelExtent) && desc.FirstLevelExtent > 0.0f,
                "The directional VSM first-level extent must be positive and finite.");
-        ASSERT(std::isfinite(coarsestLevelExtent), "The directional VSM coarsest-level extent must be finite.");
         ASSERT(std::isfinite(desc.LodBias), "The directional VSM clipmap LOD bias must be finite.");
-        ASSERT(s_DirectionalClipmapsGpuData.size() < kMaxDirectionalClipmaps,
-               "Exceeded the directional VSM clipmap capacity.");
-        ASSERT(s_Views.size() + desc.LevelCount <= kMaxShadowViews,
-               "Exceeded the VSM shadow-view capacity.");
-        ASSERT(s_DirectionalAddressesGpuData.size() + desc.LevelCount <= kMaxShadowViews,
-               "Exceeded the directional VSM address capacity.");
-        ASSERT(s_ProjectionsGpuData.size() + desc.LevelCount <= kMaxShadowViews,
-               "Exceeded the VSM projection capacity.");
-        if (!s_Initialized || desc.LevelCount == 0u || desc.LevelCount > kMaxDirectionalClipmapLevels ||
-            !std::isfinite(desc.FirstLevelExtent) || desc.FirstLevelExtent <= 0.0f || !std::isfinite(desc.LodBias) ||
-            !std::isfinite(coarsestLevelExtent) || s_DirectionalClipmapsGpuData.size() >= kMaxDirectionalClipmaps ||
-            s_Views.size() + desc.LevelCount > kMaxShadowViews ||
-            s_DirectionalAddressesGpuData.size() + desc.LevelCount > kMaxShadowViews ||
-            s_ProjectionsGpuData.size() + desc.LevelCount > kMaxShadowViews)
+        if (s_DirectionalClipmapsGpuData.size() >= kMaxDirectionalClipmaps ||
+            s_Views.size() + desc.LevelCount > kMaxShadowViews)
         {
             return kInvalidViewId;
         }
@@ -1312,8 +1351,6 @@ namespace Renderer::VirtualShadowMap
 
             const uint32_t viewId = AddDirectionalLevelView(levelDesc);
             ASSERT(viewId == firstViewId + level, "Directional VSM clipmap views must be contiguous.");
-            if (viewId != firstViewId + level)
-                return kInvalidViewId;
         }
 
         DirectionalVsmClipmapGpu clipmap{};
@@ -1330,9 +1367,7 @@ namespace Renderer::VirtualShadowMap
     uint32_t AddLocalView(const LocalVsmViewDesc& desc)
     {
         ASSERT(s_Initialized, "VirtualShadowMap must be initialized before adding views.");
-        ASSERT(s_Views.size() < kMaxShadowViews, "Exceeded the VSM shadow-view capacity.");
-        ASSERT(s_ProjectionsGpuData.size() < kMaxShadowViews, "Exceeded the VSM projection capacity.");
-        if (!s_Initialized || s_Views.size() >= kMaxShadowViews || s_ProjectionsGpuData.size() >= kMaxShadowViews)
+        if (s_Views.size() >= kMaxShadowViews)
             return kInvalidViewId;
 
         const uint32_t projectionDataIndex = static_cast<uint32_t>(s_ProjectionsGpuData.size());
@@ -1367,8 +1402,6 @@ namespace Renderer::VirtualShadowMap
     {
         ASSERT(s_Initialized, "VirtualShadowMap must be initialized before marking a view dirty.");
         ASSERT(viewId < s_Views.size(), "Invalid VSM shadow-view index.");
-        if (!s_Initialized || viewId >= s_Views.size())
-            return;
 
         if (std::find(s_DirtyViewIds.begin(), s_DirtyViewIds.end(), viewId) == s_DirtyViewIds.end())
             s_DirtyViewIds.push_back(viewId);
@@ -1377,8 +1410,6 @@ namespace Renderer::VirtualShadowMap
     void MarkClipmapDirty(uint32_t clipmapId)
     {
         ASSERT(clipmapId < s_DirectionalClipmapsGpuData.size(), "Invalid directional VSM clipmap index.");
-        if (clipmapId >= s_DirectionalClipmapsGpuData.size())
-            return;
 
         const DirectionalVsmClipmapGpu& clipmap = s_DirectionalClipmapsGpuData[clipmapId];
         for (uint32_t level = 0; level < clipmap.LevelCount; ++level)
@@ -1388,12 +1419,6 @@ namespace Renderer::VirtualShadowMap
     const VsmShadowView& GetView(uint32_t viewId)
     {
         ASSERT(viewId < s_Views.size(), "Invalid VSM shadow-view index.");
-        if (viewId >= s_Views.size())
-        {
-            static const VsmShadowView invalidView{};
-            return invalidView;
-        }
-
         return s_Views[viewId];
     }
 
@@ -1407,12 +1432,15 @@ namespace Renderer::VirtualShadowMap
         return static_cast<uint32_t>(s_Views.size());
     }
 
+    const PageStatistics& GetPageStatistics()
+    {
+        return s_PageStatistics;
+    }
+
     void MarkRequestedPages(GraphicsContext& gfxContext, const Renderer::RenderView& receiverView)
     {
         ASSERT(s_Initialized, "VirtualShadowMap must be initialized before marking pages.");
-        ASSERT(s_MarkDirectionalPagesProgram != nullptr);
-        ASSERT(s_MarkLocalPagesProgram != nullptr);
-        if (!s_Initialized || !s_MarkDirectionalPagesProgram || !s_MarkLocalPagesProgram || s_Views.empty())
+        if (s_Views.empty())
             return;
 
         ScopedTimer timer(L"VSM: Mark Requested Pages", gfxContext);
@@ -1489,15 +1517,10 @@ namespace Renderer::VirtualShadowMap
     void AllocateRequestedPages(GraphicsContext& gfxContext)
     {
         ASSERT(s_Initialized, "VirtualShadowMap must be initialized before allocating pages.");
-        ASSERT(s_MarkViewDirtyProgram != nullptr);
-        ASSERT(s_ReuseRequestedPagesProgram != nullptr);
-        ASSERT(s_BuildFreePhysicalPageListProgram != nullptr);
-        ASSERT(s_AllocateNewPagesProgram != nullptr);
-        if (!s_Initialized || !s_MarkViewDirtyProgram || !s_ReuseRequestedPagesProgram ||
-            !s_BuildFreePhysicalPageListProgram || !s_AllocateNewPagesProgram || s_Views.empty())
-        {
+        if (s_Views.empty())
             return;
-        }
+
+        s_PageStatisticsRenderBudget = GetPhysicalPageRenderBudget();
 
         ScopedTimer timer(L"VSM: Manage Physical Pages", gfxContext);
 
@@ -1626,8 +1649,7 @@ namespace Renderer::VirtualShadowMap
     void BuildPhysicalPageViews(GraphicsContext& gfxContext)
     {
         ASSERT(s_Initialized, "VirtualShadowMap must be initialized before building physical page views.");
-        ASSERT(s_BuildPhysicalPageViewsProgram != nullptr);
-        if (!s_Initialized || !s_BuildPhysicalPageViewsProgram || s_Views.empty())
+        if (s_Views.empty())
             return;
 
         ScopedTimer timer(L"VSM: Build Physical Page Views", gfxContext);
@@ -1693,8 +1715,7 @@ namespace Renderer::VirtualShadowMap
             uint32_t instanceCount)
         {
             ASSERT(s_Initialized, "VirtualShadowMap must be initialized before clearing physical pages.");
-            ASSERT(s_ClearRequestedPhysicalPageProgram != nullptr);
-            if (!s_Initialized || !s_ClearRequestedPhysicalPageProgram || s_Views.empty() || instanceCount == 0u)
+            if (s_Views.empty() || instanceCount == 0u)
                 return;
 
             ScopedTimer timer(L"VSM: Clear Requested Physical Pages", gfxContext);
@@ -1732,60 +1753,13 @@ namespace Renderer::VirtualShadowMap
         ClearRequestedPhysicalPageRange(gfxContext, renderRequestIndex, 1u);
     }
 
-    void RenderRequestedPhysicalPagesDepthNoHZB(
-        GraphicsContext& gfxContext,
-        const Renderer::FrameConstants& frame)
-    {
-        ASSERT(s_Initialized, "VirtualShadowMap must be initialized before rendering physical pages.");
-        ASSERT(ArePhysicalPageNoHZBRenderProgramsReady());
-        ASSERT(s_PhysicalPagePoolInitialized, "VSM physical page pool must be initialized before rendering.");
-        if (!s_Initialized || !ArePhysicalPageNoHZBRenderProgramsReady() || !s_PhysicalPagePoolInitialized ||
-            s_Views.empty() || DrawCommandManager::GetNumPotentialDrawItems() == 0)
-        {
-            return;
-        }
-
-        ScopedTimer timer(L"VSM: Render Requested Physical Pages Depth No HZB", gfxContext);
-        PreparePhysicalPageRenderResources(gfxContext);
-
-        gfxContext.TransitionResource(s_RenderRequestPredicateGpu, D3D12_RESOURCE_STATE_PREDICATION);
-        gfxContext.FlushResourceBarriers();
-        gfxContext.SetPredication(
-            s_RenderRequestPredicateGpu.GetResource(),
-            GetRenderRequestPredicateOffset(0u),
-            D3D12_PREDICATION_OP_EQUAL_ZERO);
-
-        const uint32_t renderBudget = GetPhysicalPageRenderBudget();
-        ClearRequestedPhysicalPageRange(gfxContext, 0u, renderBudget);
-
-        for (uint32_t renderRequestIndex = 0; renderRequestIndex < renderBudget; ++renderRequestIndex)
-        {
-            gfxContext.SetPredication(
-                s_RenderRequestPredicateGpu.GetResource(),
-                GetRenderRequestPredicateOffset(renderRequestIndex),
-                D3D12_PREDICATION_OP_EQUAL_ZERO);
-
-            ResetPhysicalPageCullBuffers(gfxContext);
-            DispatchPhysicalPageCull(gfxContext, frame, nullptr, renderRequestIndex, 0u);
-            BuildPhysicalPageDrawCommand(gfxContext, frame, 0u);
-            DrawPhysicalPageDepth(gfxContext, frame, renderRequestIndex, 0u);
-            MarkPhysicalPageRendered(gfxContext, renderRequestIndex);
-        }
-
-        gfxContext.SetPredication(nullptr, 0, D3D12_PREDICATION_OP_EQUAL_ZERO);
-        GeneratePendingPhysicalHZB(gfxContext);
-        CommitPendingPhysicalHZB();
-    }
-
     void RenderRequestedPhysicalPagesDepth(
         GraphicsContext& gfxContext,
         const Renderer::FrameConstants& frame)
     {
         ASSERT(s_Initialized, "VirtualShadowMap must be initialized before rendering physical pages.");
-        ASSERT(ArePhysicalPageRenderProgramsReady());
         ASSERT(s_PhysicalPagePoolInitialized, "VSM physical page pool must be initialized before rendering.");
-        if (!s_Initialized || !ArePhysicalPageRenderProgramsReady() || !s_PhysicalPagePoolInitialized ||
-            s_Views.empty() || DrawCommandManager::GetNumPotentialDrawItems() == 0)
+        if (s_Views.empty() || DrawCommandManager::GetNumPotentialDrawItems() == 0)
         {
             return;
         }
@@ -1814,13 +1788,13 @@ namespace Renderer::VirtualShadowMap
 
             ResetPhysicalPageCullBuffers(gfxContext);
 
-            DispatchPhysicalPageCull(gfxContext, frame, &hzbResources, renderRequestIndex, 0u);
+            DispatchPhysicalPageCull(gfxContext, frame, hzbResources, renderRequestIndex, 0u);
             BuildPhysicalPageDrawCommand(gfxContext, frame, 0u);
             DrawPhysicalPageDepth(gfxContext, frame, renderRequestIndex, 0u);
 
             GeneratePendingPhysicalHZB(gfxContext);
 
-            DispatchPhysicalPageCull(gfxContext, frame, &hzbResources, renderRequestIndex, 1u);
+            DispatchPhysicalPageCull(gfxContext, frame, hzbResources, renderRequestIndex, 1u);
             BuildPhysicalPageDrawCommand(gfxContext, frame, 1u);
             DrawPhysicalPageDepth(gfxContext, frame, renderRequestIndex, 1u);
 
@@ -1838,11 +1812,8 @@ namespace Renderer::VirtualShadowMap
         uint32_t renderRequestIndex)
     {
         ASSERT(s_Initialized, "VirtualShadowMap must be initialized before rendering a physical page.");
-        ASSERT(ArePhysicalPageRenderProgramsReady());
         ASSERT(s_PhysicalPagePoolInitialized, "VSM physical page pool must be initialized before rendering.");
-        if (!s_Initialized || !ArePhysicalPageRenderProgramsReady() || !s_PhysicalPagePoolInitialized ||
-            s_Views.empty() ||
-            DrawCommandManager::GetNumPotentialDrawItems() == 0)
+        if (s_Views.empty() || DrawCommandManager::GetNumPotentialDrawItems() == 0)
         {
             return;
         }
@@ -1854,7 +1825,7 @@ namespace Renderer::VirtualShadowMap
         const Renderer::HZBResources hzbResources = GetPhysicalHZBResources();
         for (uint32_t passIndex = 0; passIndex < 2; ++passIndex)
         {
-            DispatchPhysicalPageCull(gfxContext, frame, &hzbResources, renderRequestIndex, passIndex);
+            DispatchPhysicalPageCull(gfxContext, frame, hzbResources, renderRequestIndex, passIndex);
             BuildPhysicalPageDrawCommand(gfxContext, frame, passIndex);
             DrawPhysicalPageDepth(gfxContext, frame, renderRequestIndex, passIndex);
             GeneratePendingPhysicalHZB(gfxContext);
@@ -1867,8 +1838,6 @@ namespace Renderer::VirtualShadowMap
     void BindSamplingResources(ComputeContext& context, ProgramBinder& binder)
     {
         ASSERT(s_Initialized, "VirtualShadowMap must be initialized before binding sampling resources.");
-        if (!s_Initialized)
-            return;
 
         context.TransitionResource(s_ShadowViewsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_DirectionalClipmapsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);

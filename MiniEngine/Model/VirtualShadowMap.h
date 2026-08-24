@@ -19,6 +19,23 @@ namespace Renderer::VirtualShadowMap
     inline constexpr uint32_t kMaxDirectionalClipmapLevels = 16;
     inline constexpr float kDirectionalClipmapSelectionRadiusScale = 0.25f;
 
+    struct PageStatistics
+    {
+        uint32_t RequestedPages = 0;
+        uint32_t ReusedPages = 0;
+        uint32_t NewPages = 0;
+        uint32_t OverflowPages = 0;
+        uint32_t RenderRequests = 0;
+        uint32_t FreePagesBeforeAllocation = 0;
+        uint32_t RenderBudget = 0;
+        uint32_t RenderBacklog = 0;
+
+        bool Ready = false;
+        bool PhysicalPoolExhausted = false;
+        bool RenderBudgetExceeded = false;
+        bool CountersValid = false;
+    };
+
     struct DirectionalVsmClipmapDesc
     {
         Math::Matrix3 WorldToLightRotation = Math::Matrix3(Math::kIdentity);
@@ -86,9 +103,6 @@ namespace Renderer::VirtualShadowMap
     // The batch entry becomes the active path once all selected requests are rendered in the same frame.
     void ClearRequestedPhysicalPages(GraphicsContext& gfxContext);
     void ClearRequestedPhysicalPage(GraphicsContext& gfxContext, uint32_t renderRequestIndex);
-    void RenderRequestedPhysicalPagesDepthNoHZB(
-        GraphicsContext& gfxContext,
-        const Renderer::FrameConstants& frame);
     void RenderRequestedPhysicalPagesDepth(
         GraphicsContext& gfxContext,
         const Renderer::FrameConstants& frame);
@@ -102,4 +116,5 @@ namespace Renderer::VirtualShadowMap
     bool IsInitialized();
     uint32_t GetViewCount();
     const VsmShadowView& GetView(uint32_t viewId);
+    const PageStatistics& GetPageStatistics();
 } // namespace Renderer::VirtualShadowMap
