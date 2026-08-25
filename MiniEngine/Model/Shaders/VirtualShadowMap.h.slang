@@ -120,6 +120,32 @@ uint GetVsmPageTableEntryIndex(VsmShadowView shadowView, uint2 pageTableCoord)
     return GetVsmPageTableEntryIndex(shadowView, GetVsmPageTableIndex(pageTableCoord));
 }
 
+uint EncodeVsmPageTableEntry(uint physicalPageIndex, uint levelOffset)
+{
+    return (physicalPageIndex & VSM_PAGE_TABLE_PHYSICAL_PAGE_INDEX_MASK) |
+        ((levelOffset & VSM_PAGE_TABLE_LEVEL_OFFSET_MASK) << VSM_PAGE_TABLE_LEVEL_OFFSET_SHIFT);
+}
+
+bool IsVsmPageTableEntryValid(uint pageTableEntry)
+{
+    return pageTableEntry != VSM_INVALID_PAGE_TABLE_ENTRY;
+}
+
+uint GetVsmPageTablePhysicalPageIndex(uint pageTableEntry)
+{
+    return pageTableEntry & VSM_PAGE_TABLE_PHYSICAL_PAGE_INDEX_MASK;
+}
+
+uint GetVsmPageTableLevelOffset(uint pageTableEntry)
+{
+    return (pageTableEntry >> VSM_PAGE_TABLE_LEVEL_OFFSET_SHIFT) & VSM_PAGE_TABLE_LEVEL_OFFSET_MASK;
+}
+
+bool IsVsmPageTableEntryExact(uint pageTableEntry)
+{
+    return IsVsmPageTableEntryValid(pageTableEntry) && GetVsmPageTableLevelOffset(pageTableEntry) == 0u;
+}
+
 uint GetVsmRequestMaskWordByteAddress(VsmShadowView shadowView, uint wordIndex)
 {
     return (shadowView.RequestMaskWordBase + wordIndex) * sizeof(uint);
@@ -168,7 +194,10 @@ uint GetVsmPhysicalPageIndex(
     VsmShadowView shadowView,
     uint2 pageTableCoord)
 {
-    return pageTable[GetVsmPageTableEntryIndex(shadowView, pageTableCoord)];
+    uint pageTableEntry = pageTable[GetVsmPageTableEntryIndex(shadowView, pageTableCoord)];
+    return IsVsmPageTableEntryValid(pageTableEntry)
+        ? GetVsmPageTablePhysicalPageIndex(pageTableEntry)
+        : VSM_INVALID_PHYSICAL_PAGE;
 }
 
 bool IsVsmPhysicalPageOwnedByView(VsmPhysicalPageMetadata metadata, VsmShadowView shadowView)

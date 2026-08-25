@@ -123,7 +123,11 @@ void reuseRequestedPages(uint3 dispatchThreadId : SV_DispatchThreadID)
         requestWord &= requestWord - 1u;
 
         uint pageTableIndex = GetRequestedPageTableIndex(wordIndex, bitIndex);
-        uint physicalPageIndex = g_VsmPreviousPageTable[shadowView.PreviousPageTableBase + pageTableIndex];
+        uint previousPageTableEntry = g_VsmPreviousPageTable[shadowView.PreviousPageTableBase + pageTableIndex];
+        if (!IsVsmPageTableEntryExact(previousPageTableEntry))
+            continue;
+
+        uint physicalPageIndex = GetVsmPageTablePhysicalPageIndex(previousPageTableEntry);
         if (physicalPageIndex >= VSM_PHYSICAL_PAGE_CAPACITY)
             continue;
 
@@ -141,7 +145,8 @@ void reuseRequestedPages(uint3 dispatchThreadId : SV_DispatchThreadID)
 
         metadata.LastRequestedFrame = g_VsmPageManagement.FrameNumber;
         g_VsmPhysicalPageMetadataUAV[physicalPageIndex] = metadata;
-        g_VsmCurrentPageTable[shadowView.PageTableBase + pageTableIndex] = physicalPageIndex;
+        g_VsmCurrentPageTable[shadowView.PageTableBase + pageTableIndex] =
+            EncodeVsmPageTableEntry(physicalPageIndex, 0u);
 
         uint originalValue;
         if (needsRender)
@@ -202,7 +207,7 @@ void allocateNewPages(uint3 dispatchThreadId : SV_DispatchThreadID)
 
         uint pageTableIndex = GetRequestedPageTableIndex(wordIndex, bitIndex);
         uint pageTableEntryIndex = shadowView.PageTableBase + pageTableIndex;
-        if (g_VsmCurrentPageTable[pageTableEntryIndex] != VSM_INVALID_PHYSICAL_PAGE)
+        if (IsVsmPageTableEntryValid(g_VsmCurrentPageTable[pageTableEntryIndex]))
             continue;
 
         int2 virtualPage;
@@ -220,7 +225,7 @@ void allocateNewPages(uint3 dispatchThreadId : SV_DispatchThreadID)
 
         uint physicalPageIndex = g_VsmFreePhysicalPagesSRV[freePageIndex];
         g_VsmPhysicalPageMetadataUAV[physicalPageIndex] = MakePhysicalPageMetadata(shadowView, virtualPage);
-        g_VsmCurrentPageTable[pageTableEntryIndex] = physicalPageIndex;
+        g_VsmCurrentPageTable[pageTableEntryIndex] = EncodeVsmPageTableEntry(physicalPageIndex, 0u);
         AppendRenderRequest(viewId, pageTableIndex, physicalPageIndex, 0u);
 
         uint originalValue;

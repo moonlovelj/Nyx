@@ -23,6 +23,12 @@
 #define VSM_PHYSICAL_HZB_PAGE_SIZE (VSM_PAGE_SIZE >> 1u)
 #define VSM_PHYSICAL_HZB_MAX_PAGE_MIP (VSM_PAGE_SIZE_LOG2 - 1u)
 #define VSM_INVALID_PHYSICAL_PAGE 0xffffffffu
+#define VSM_INVALID_PAGE_TABLE_ENTRY 0xffffffffu
+#define VSM_PAGE_TABLE_PHYSICAL_PAGE_INDEX_BITS 16u
+#define VSM_PAGE_TABLE_PHYSICAL_PAGE_INDEX_MASK ((1u << VSM_PAGE_TABLE_PHYSICAL_PAGE_INDEX_BITS) - 1u)
+#define VSM_PAGE_TABLE_LEVEL_OFFSET_SHIFT VSM_PAGE_TABLE_PHYSICAL_PAGE_INDEX_BITS
+#define VSM_PAGE_TABLE_LEVEL_OFFSET_BITS 4u
+#define VSM_PAGE_TABLE_LEVEL_OFFSET_MASK ((1u << VSM_PAGE_TABLE_LEVEL_OFFSET_BITS) - 1u)
 #define VSM_INVALID_PAGE_TABLE_BASE 0xffffffffu
 
 #define VSM_PHYSICAL_PAGE_METADATA_VALID 0x1u
@@ -97,6 +103,7 @@ namespace Renderer::VirtualShadowMap
     inline constexpr uint32_t kPhysicalHZBPageSize = VSM_PHYSICAL_HZB_PAGE_SIZE;
     inline constexpr uint32_t kPhysicalHZBMaxPageMip = VSM_PHYSICAL_HZB_MAX_PAGE_MIP;
     inline constexpr uint32_t kInvalidPhysicalPage = VSM_INVALID_PHYSICAL_PAGE;
+    inline constexpr uint32_t kInvalidPageTableEntry = VSM_INVALID_PAGE_TABLE_ENTRY;
     inline constexpr uint32_t kInvalidPageTableBase = VSM_INVALID_PAGE_TABLE_BASE;
 
     inline constexpr uint32_t kRequestMaskWordBits = VSM_REQUEST_MASK_WORD_BITS;
@@ -104,6 +111,7 @@ namespace Renderer::VirtualShadowMap
     inline constexpr uint32_t kInvalidViewId = VSM_INVALID_VIEW_ID;
 
     static_assert(kPagesPerView % kRequestMaskWordBits == 0);
+    static_assert(kPhysicalPageCapacity <= VSM_PAGE_TABLE_PHYSICAL_PAGE_INDEX_MASK + 1u);
     static_assert(kPhysicalPageCapacity == 1024);
     static_assert(kPhysicalPoolResolution == 4096);
     static_assert(VSM_RENDER_REQUEST_PREDICATE_STRIDE == sizeof(uint64_t));

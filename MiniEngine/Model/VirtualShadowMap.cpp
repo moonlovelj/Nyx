@@ -1249,8 +1249,8 @@ namespace Renderer::VirtualShadowMap
         clearBuffer(s_ProjectionsGpu);
         clearBuffer(s_PageRequestMaskGpu);
         clearBuffer(s_RequestStatisticsGpu);
-        clearBuffer(s_PageTablesGpu[0], kInvalidPhysicalPage);
-        clearBuffer(s_PageTablesGpu[1], kInvalidPhysicalPage);
+        clearBuffer(s_PageTablesGpu[0], kInvalidPageTableEntry);
+        clearBuffer(s_PageTablesGpu[1], kInvalidPageTableEntry);
         clearBuffer(s_PageRenderRequestsGpu);
         clearBuffer(s_PhysicalPageMetadataGpu);
         clearBuffer(s_FreePhysicalPagesGpu);
@@ -1538,7 +1538,7 @@ namespace Renderer::VirtualShadowMap
         StructuredBuffer& previousPageTable = GetPreviousPageTable();
         const size_t pageTableBytes = s_Views.size() * kPagesPerView * sizeof(uint32_t);
         const size_t physicalPageUsedMaskBytes = kPhysicalPageCapacity / kRequestMaskWordBits * sizeof(uint32_t);
-        context.ClearBufferUAV(currentPageTable, pageTableBytes, kInvalidPhysicalPage);
+        context.ClearBufferUAV(currentPageTable, pageTableBytes, kInvalidPageTableEntry);
         context.ClearBufferUAV(s_PhysicalPageUsedMaskGpu, physicalPageUsedMaskBytes, 0);
         context.ClearBufferUAV(s_PageManagementCountersGpu, VSM_PAGE_MANAGEMENT_COUNTERS_SIZE, 0);
         context.ClearBufferUAV(
