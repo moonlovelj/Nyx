@@ -41,6 +41,8 @@ namespace Renderer::VirtualShadowMap
         IntVar s_ReusedPageCount("Renderer/VSM/Page Statistics/Reused", 0);
         IntVar s_NewPageCount("Renderer/VSM/Page Statistics/New", 0);
         IntVar s_OverflowPageCount("Renderer/VSM/Page Statistics/Overflow", 0);
+        IntVar s_CoarseMappedPageCount("Renderer/VSM/Page Statistics/Coarse Mapped", 0);
+        IntVar s_CoarseOverflowPageCount("Renderer/VSM/Page Statistics/Coarse Overflow", 0);
         IntVar s_RenderRequestCount("Renderer/VSM/Page Statistics/Render Request", 0);
         IntVar s_RenderBacklogCount("Renderer/VSM/Page Statistics/Render Backlog", 0);
         BoolVar s_PhysicalPoolExhausted("Renderer/VSM/Page Statistics/Physical Pool Exhausted", false);
@@ -144,6 +146,11 @@ namespace Renderer::VirtualShadowMap
         bool s_PhysicalPagePoolInitialized = false;
 
         constexpr uint32_t kPageStatisticsReadbackCount = 3;
+        constexpr uint32_t kPageManagementThreadCount = 64;
+        constexpr uint32_t kRequestWordGroupCount =
+            (kRequestMaskWordCountPerView + kPageManagementThreadCount - 1u) / kPageManagementThreadCount;
+        constexpr uint32_t kPhysicalPageGroupCount =
+            (kPhysicalPageCapacity + kPageManagementThreadCount - 1u) / kPageManagementThreadCount;
         constexpr size_t kManagementStatisticsReadbackOffset = 0;
         constexpr size_t kRequestStatisticsReadbackOffset = VSM_PAGE_MANAGEMENT_COUNTERS_SIZE;
         constexpr size_t kPageStatisticsReadbackSize =
@@ -175,6 +182,8 @@ namespace Renderer::VirtualShadowMap
             s_ReusedPageCount = static_cast<int32_t>(statistics.ReusedPages);
             s_NewPageCount = static_cast<int32_t>(statistics.NewPages);
             s_OverflowPageCount = static_cast<int32_t>(statistics.OverflowPages);
+            s_CoarseMappedPageCount = static_cast<int32_t>(statistics.CoarseMappedPages);
+            s_CoarseOverflowPageCount = static_cast<int32_t>(statistics.CoarseOverflowPages);
             s_RenderRequestCount = static_cast<int32_t>(statistics.RenderRequests);
             s_RenderBacklogCount = static_cast<int32_t>(statistics.RenderBacklog);
             s_PhysicalPoolExhausted = statistics.PhysicalPoolExhausted;
@@ -199,6 +208,10 @@ namespace Renderer::VirtualShadowMap
                 kManagementStatisticsReadbackOffset + VSM_NEW_PAGE_COUNT_OFFSET);
             statistics.OverflowPages = readValue(
                 kManagementStatisticsReadbackOffset + VSM_OVERFLOW_PAGE_COUNT_OFFSET);
+            statistics.CoarseMappedPages = readValue(
+                kManagementStatisticsReadbackOffset + VSM_COARSE_MAPPED_PAGE_COUNT_OFFSET);
+            statistics.CoarseOverflowPages = readValue(
+                kManagementStatisticsReadbackOffset + VSM_COARSE_OVERFLOW_PAGE_COUNT_OFFSET);
             statistics.RenderRequests = readValue(
                 kManagementStatisticsReadbackOffset + VSM_RENDER_REQUEST_COUNT_OFFSET);
             statistics.FreePagesBeforeAllocation = readValue(
@@ -226,6 +239,8 @@ namespace Renderer::VirtualShadowMap
                 statistics.NewPages <= statistics.FreePagesBeforeAllocation &&
                 (!statistics.PhysicalPoolExhausted ||
                     statistics.NewPages == statistics.FreePagesBeforeAllocation) &&
+                statistics.CoarseMappedPages <= mappedPages &&
+                statistics.CoarseOverflowPages <= statistics.OverflowPages &&
                 statistics.RenderRequests <= mappedPages &&
                 statistics.RenderRequests <= kPhysicalPageCapacity;
             return statistics;
@@ -352,6 +367,73 @@ namespace Renderer::VirtualShadowMap
         void BindPageManagementConstants(ProgramBinder& binder)
         {
             binder["g_VsmPageManagement"]["FrameNumber"].Set(s_FrameNumber);
+        }
+
+        void BindPageManagementConstants(ProgramBinder& binder, uint32_t allocationClass)
+        {
+            BindPageManagementConstants(binder);
+            binder["g_VsmPageManagement"]["AllocationClass"].Set(allocationClass);
+        }
+
+        void InsertPageMappingUAVBarriers(ComputeContext& context, bool includeUsedMask)
+        {
+            context.InsertUAVBarrier(s_PageTablesGpu[s_CurrentPageTableIndex]);
+            context.InsertUAVBarrier(s_PhysicalPageMetadataGpu);
+            context.InsertUAVBarrier(s_PageRenderRequestsGpu);
+            context.InsertUAVBarrier(s_PageManagementCountersGpu);
+            context.InsertUAVBarrier(s_RenderRequestPredicateGpu);
+
+            if (includeUsedMask)
+                context.InsertUAVBarrier(s_PhysicalPageUsedMaskGpu);
+        }
+
+        void DispatchReuseRequestedPages(
+            ComputeContext& context,
+            StructuredBuffer& currentPageTable,
+            StructuredBuffer& previousPageTable)
+        {
+            ProgramBinder binder(*s_ReuseRequestedPagesProgram, context);
+            binder.SetRootSignature();
+            context.SetPipelineState(s_ReuseRequestedPagesPSO);
+
+            binder.SetRootBufferSRV("g_VsmShadowViews", s_ShadowViewsGpu);
+            binder.SetRootBufferSRV("g_DirectionalVsmAddresses", s_DirectionalAddressesGpu);
+            binder.SetRootBufferSRV("g_VsmPageRequestMask", s_PageRequestMaskGpu);
+            binder.SetRootBufferSRV("g_VsmPreviousPageTable", previousPageTable);
+            binder.SetRootBufferUAV("g_VsmPhysicalPageMetadataUAV", s_PhysicalPageMetadataGpu);
+            binder.SetRootBufferUAV("g_VsmCurrentPageTable", currentPageTable);
+            binder.SetRootBufferUAV("g_VsmPhysicalPageUsedMaskUAV", s_PhysicalPageUsedMaskGpu);
+            binder.SetRootBufferUAV("g_VsmPageRenderRequests", s_PageRenderRequestsGpu);
+            binder.SetRootBufferUAV("g_VsmPageManagementCounters", s_PageManagementCountersGpu);
+            binder.SetRootBufferUAV("g_VsmRenderRequestPredicate", s_RenderRequestPredicateGpu);
+            BindPageManagementConstants(binder);
+            binder.Apply();
+
+            context.Dispatch(kRequestWordGroupCount, static_cast<uint32_t>(s_Views.size()), 1);
+        }
+
+        void DispatchAllocateNewPages(
+            ComputeContext& context,
+            StructuredBuffer& currentPageTable,
+            uint32_t allocationClass)
+        {
+            ProgramBinder binder(*s_AllocateNewPagesProgram, context);
+            binder.SetRootSignature();
+            context.SetPipelineState(s_AllocateNewPagesPSO);
+
+            binder.SetRootBufferSRV("g_VsmShadowViews", s_ShadowViewsGpu);
+            binder.SetRootBufferSRV("g_DirectionalVsmAddresses", s_DirectionalAddressesGpu);
+            binder.SetRootBufferSRV("g_VsmPageRequestMask", s_PageRequestMaskGpu);
+            binder.SetRootBufferSRV("g_VsmFreePhysicalPagesSRV", s_FreePhysicalPagesGpu);
+            binder.SetRootBufferUAV("g_VsmCurrentPageTable", currentPageTable);
+            binder.SetRootBufferUAV("g_VsmPhysicalPageMetadataUAV", s_PhysicalPageMetadataGpu);
+            binder.SetRootBufferUAV("g_VsmPageRenderRequests", s_PageRenderRequestsGpu);
+            binder.SetRootBufferUAV("g_VsmPageManagementCounters", s_PageManagementCountersGpu);
+            binder.SetRootBufferUAV("g_VsmRenderRequestPredicate", s_RenderRequestPredicateGpu);
+            BindPageManagementConstants(binder, allocationClass);
+            binder.Apply();
+
+            context.Dispatch(kRequestWordGroupCount, static_cast<uint32_t>(s_Views.size()), 1);
         }
 
         void MarkPendingViewsDirty(ComputeContext& context)
@@ -1353,6 +1435,8 @@ namespace Renderer::VirtualShadowMap
             ASSERT(viewId == firstViewId + level, "Directional VSM clipmap views must be contiguous.");
         }
 
+        s_Views[firstViewId + desc.LevelCount - 1u].Flags |= VSM_SHADOW_VIEW_FLAG_COARSE_FALLBACK;
+
         DirectionalVsmClipmapGpu clipmap{};
         clipmap.OriginAndFirstLevelRadius = PackFloat4(
             desc.OriginWS,
@@ -1561,40 +1645,13 @@ namespace Renderer::VirtualShadowMap
         context.TransitionResource(s_PageManagementCountersGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         context.FlushResourceBarriers();
 
-        constexpr uint32_t kPageManagementThreadCount = 64;
-        constexpr uint32_t kRequestWordGroupCount =
-            (kRequestMaskWordCountPerView + kPageManagementThreadCount - 1u) / kPageManagementThreadCount;
-        constexpr uint32_t kPhysicalPageGroupCount =
-            (kPhysicalPageCapacity + kPageManagementThreadCount - 1u) / kPageManagementThreadCount;
-
         MarkPendingViewsDirty(context);
 
-        {
-            ProgramBinder binder(*s_ReuseRequestedPagesProgram, context);
-            binder.SetRootSignature();
-            context.SetPipelineState(s_ReuseRequestedPagesPSO);
-
-            binder.SetRootBufferSRV("g_VsmShadowViews", s_ShadowViewsGpu);
-            binder.SetRootBufferSRV("g_DirectionalVsmAddresses", s_DirectionalAddressesGpu);
-            binder.SetRootBufferSRV("g_VsmPageRequestMask", s_PageRequestMaskGpu);
-            binder.SetRootBufferSRV("g_VsmPreviousPageTable", previousPageTable);
-            binder.SetRootBufferUAV("g_VsmPhysicalPageMetadataUAV", s_PhysicalPageMetadataGpu);
-            binder.SetRootBufferUAV("g_VsmCurrentPageTable", currentPageTable);
-            binder.SetRootBufferUAV("g_VsmPhysicalPageUsedMaskUAV", s_PhysicalPageUsedMaskGpu);
-            binder.SetRootBufferUAV("g_VsmPageRenderRequests", s_PageRenderRequestsGpu);
-            binder.SetRootBufferUAV("g_VsmPageManagementCounters", s_PageManagementCountersGpu);
-            binder.SetRootBufferUAV("g_VsmRenderRequestPredicate", s_RenderRequestPredicateGpu);
-            BindPageManagementConstants(binder);
-            binder.Apply();
-
-            context.Dispatch(kRequestWordGroupCount, static_cast<uint32_t>(s_Views.size()), 1);
-        }
-
-        context.InsertUAVBarrier(currentPageTable);
-        context.InsertUAVBarrier(s_PhysicalPageMetadataGpu);
-        context.InsertUAVBarrier(s_PhysicalPageUsedMaskGpu);
-        context.InsertUAVBarrier(s_PageRenderRequestsGpu);
-        context.InsertUAVBarrier(s_PageManagementCountersGpu);
+        DispatchReuseRequestedPages(
+            context,
+            currentPageTable,
+            previousPageTable);
+        InsertPageMappingUAVBarriers(context, true);
 
         context.TransitionResource(s_PhysicalPageUsedMaskGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_FreePhysicalPagesGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -1619,25 +1676,10 @@ namespace Renderer::VirtualShadowMap
         context.TransitionResource(s_PhysicalPageMetadataGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         context.FlushResourceBarriers();
 
-        {
-            ProgramBinder binder(*s_AllocateNewPagesProgram, context);
-            binder.SetRootSignature();
-            context.SetPipelineState(s_AllocateNewPagesPSO);
+        DispatchAllocateNewPages(context, currentPageTable, VSM_PAGE_ALLOCATION_CLASS_COARSE);
+        InsertPageMappingUAVBarriers(context, false);
 
-            binder.SetRootBufferSRV("g_VsmShadowViews", s_ShadowViewsGpu);
-            binder.SetRootBufferSRV("g_DirectionalVsmAddresses", s_DirectionalAddressesGpu);
-            binder.SetRootBufferSRV("g_VsmPageRequestMask", s_PageRequestMaskGpu);
-            binder.SetRootBufferSRV("g_VsmFreePhysicalPagesSRV", s_FreePhysicalPagesGpu);
-            binder.SetRootBufferUAV("g_VsmCurrentPageTable", currentPageTable);
-            binder.SetRootBufferUAV("g_VsmPhysicalPageMetadataUAV", s_PhysicalPageMetadataGpu);
-            binder.SetRootBufferUAV("g_VsmPageRenderRequests", s_PageRenderRequestsGpu);
-            binder.SetRootBufferUAV("g_VsmPageManagementCounters", s_PageManagementCountersGpu);
-            binder.SetRootBufferUAV("g_VsmRenderRequestPredicate", s_RenderRequestPredicateGpu);
-            BindPageManagementConstants(binder);
-            binder.Apply();
-
-            context.Dispatch(kRequestWordGroupCount, static_cast<uint32_t>(s_Views.size()), 1);
-        }
+        DispatchAllocateNewPages(context, currentPageTable, VSM_PAGE_ALLOCATION_CLASS_DETAIL);
 
         context.TransitionResource(currentPageTable, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_PageRenderRequestsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);

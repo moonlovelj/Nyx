@@ -66,6 +66,18 @@ bool TryGetReceiverWorldPosition(uint2 pixelPosition, out float3 worldPosition)
     return true;
 }
 
+bool TryMarkDirectionalPage(uint viewId, float3 worldPosition)
+{
+    VsmShadowView shadowView = g_VsmShadowViews[viewId];
+    DirectionalVsmAddressGpu addressData = g_DirectionalVsmAddresses[shadowView.AddressDataIndex];
+    VsmVirtualAddress address = GetDirectionalVsmVirtualAddress(worldPosition, addressData);
+    if (address.Valid == 0u)
+        return false;
+
+    MarkRequestedPage(viewId, shadowView, address);
+    return true;
+}
+
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void markDirectionalMain(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -76,20 +88,17 @@ void markDirectionalMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     DirectionalVsmClipmapGpu clipmap = g_DirectionalVsmClipmaps[g_MarkVsmPages.TargetId];
     uint firstLevel = SelectDirectionalVsmClipmapLevel(worldPosition, clipmap);
-    for (uint level = firstLevel; level < clipmap.LevelCount; ++level)
-    {
-        uint viewId = clipmap.FirstViewId + level;
-        VsmShadowView shadowView = g_VsmShadowViews[viewId];
-        DirectionalVsmAddressGpu addressData = g_DirectionalVsmAddresses[shadowView.AddressDataIndex];
-        VsmVirtualAddress address = GetDirectionalVsmVirtualAddress(worldPosition, addressData);
-        if (address.Valid != 0u)
-        {
-            MarkRequestedPage(viewId, shadowView, address);
-            return;
-        }
-    }
+    uint selectedViewId = clipmap.FirstViewId + firstLevel;
+    bool anyPageRequested = TryMarkDirectionalPage(selectedViewId, worldPosition);
 
-    uint statisticsBase = (clipmap.FirstViewId + firstLevel) * VSM_REQUEST_STATISTICS_STRIDE;
+    uint coarseViewId = clipmap.FirstViewId + clipmap.LevelCount - 1u;
+    if (coarseViewId != selectedViewId)
+        anyPageRequested = TryMarkDirectionalPage(coarseViewId, worldPosition) || anyPageRequested;
+
+    if (anyPageRequested)
+        return;
+
+    uint statisticsBase = selectedViewId * VSM_REQUEST_STATISTICS_STRIDE;
     uint originalValue;
     g_VsmRequestStatistics.InterlockedAdd(
         statisticsBase + VSM_INVALID_ADDRESS_PIXEL_COUNT_OFFSET,

@@ -21,6 +21,7 @@ RWByteAddressBuffer g_VsmRenderRequestPredicate;
 struct VsmPageManagementConstants
 {
     uint FrameNumber;
+    uint AllocationClass;
 };
 
 struct MarkPhysicalPageRenderedConstants
@@ -40,6 +41,17 @@ ConstantBuffer<MarkVsmViewDirtyConstants> g_MarkVsmViewDirty;
 uint GetRequestedPageTableIndex(uint wordIndex, uint bitIndex)
 {
     return wordIndex * VSM_REQUEST_MASK_WORD_BITS + bitIndex;
+}
+
+bool IsCoarseFallbackView(VsmShadowView shadowView)
+{
+    return (shadowView.Flags & VSM_SHADOW_VIEW_FLAG_COARSE_FALLBACK) != 0u;
+}
+
+bool ShouldProcessView(VsmShadowView shadowView)
+{
+    bool processCoarse = g_VsmPageManagement.AllocationClass == VSM_PAGE_ALLOCATION_CLASS_COARSE;
+    return IsCoarseFallbackView(shadowView) == processCoarse;
 }
 
 bool TryGetRequestedVirtualPage(VsmShadowView shadowView, uint pageTableIndex, out int2 virtualPage)
@@ -168,6 +180,13 @@ void reuseRequestedPages(uint3 dispatchThreadId : SV_DispatchThreadID)
         }
 
         g_VsmPageManagementCounters.InterlockedAdd(VSM_REUSED_PAGE_COUNT_OFFSET, 1u, originalValue);
+        if (IsCoarseFallbackView(shadowView))
+        {
+            g_VsmPageManagementCounters.InterlockedAdd(
+                VSM_COARSE_MAPPED_PAGE_COUNT_OFFSET,
+                1u,
+                originalValue);
+        }
     }
 }
 
@@ -199,6 +218,9 @@ void allocateNewPages(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
 
     VsmShadowView shadowView = g_VsmShadowViews[viewId];
+    if (!ShouldProcessView(shadowView))
+        return;
+
     uint requestWord = g_VsmPageRequestMask.Load(GetVsmRequestMaskWordByteAddress(shadowView, wordIndex));
     while (requestWord != 0u)
     {
@@ -220,6 +242,13 @@ void allocateNewPages(uint3 dispatchThreadId : SV_DispatchThreadID)
         {
             uint originalValue;
             g_VsmPageManagementCounters.InterlockedAdd(VSM_OVERFLOW_PAGE_COUNT_OFFSET, 1u, originalValue);
+            if (IsCoarseFallbackView(shadowView))
+            {
+                g_VsmPageManagementCounters.InterlockedAdd(
+                    VSM_COARSE_OVERFLOW_PAGE_COUNT_OFFSET,
+                    1u,
+                    originalValue);
+            }
             continue;
         }
 
@@ -230,6 +259,13 @@ void allocateNewPages(uint3 dispatchThreadId : SV_DispatchThreadID)
 
         uint originalValue;
         g_VsmPageManagementCounters.InterlockedAdd(VSM_NEW_PAGE_COUNT_OFFSET, 1u, originalValue);
+        if (IsCoarseFallbackView(shadowView))
+        {
+            g_VsmPageManagementCounters.InterlockedAdd(
+                VSM_COARSE_MAPPED_PAGE_COUNT_OFFSET,
+                1u,
+                originalValue);
+        }
     }
 }
 
