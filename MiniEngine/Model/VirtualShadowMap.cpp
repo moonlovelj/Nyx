@@ -146,11 +146,20 @@ namespace Renderer::VirtualShadowMap
         std::vector<uint32_t> s_LocalViewIds;
         std::vector<uint32_t> s_DirtyViewIds;
 
+        struct DirectionalVsmLevelDepthState
+        {
+            float CenterZ = 0.0f;
+            float RadiusZ = 0.0f;
+            bool Valid = false;
+        };
+
         struct DirectionalResidencySlot
         {
             uint32_t StableShadowMapId = 0;
+            uint32_t AddressGeneration = 0;
             uint32_t LastUsedFrame = 0;
             bool Occupied = false;
+            std::array<DirectionalVsmLevelDepthState, kMaxDirectionalClipmapLevels> LevelDepthStates;
         };
 
         std::array<DirectionalResidencySlot, kMaxDirectionalClipmaps> s_DirectionalResidencySlots;
@@ -169,6 +178,8 @@ namespace Renderer::VirtualShadowMap
         constexpr float kResidencyTargetPoolLoad = 0.85f;
         constexpr float kResidencyResolutionDownLerpFactor = 0.5f;
         constexpr float kResidencyResolutionUpLerpFactor = 0.1f;
+        constexpr float kDirectionalClipmapZRangeScale = 1000.0f;
+        constexpr float kDirectionalClipmapZGuardBand = 0.9f;
         constexpr uint32_t kResidencyRecoveryFrameCount = 10;
         constexpr size_t kManagementStatisticsReadbackOffset = 0;
         constexpr size_t kRequestStatisticsReadbackOffset = VSM_PAGE_MANAGEMENT_COUNTERS_SIZE;
@@ -223,9 +234,34 @@ namespace Renderer::VirtualShadowMap
 
             ASSERT(slotIt->LastUsedFrame != s_FrameNumber, "Exceeded the directional VSM residency-state limit.");
             const uint32_t slotIndex = static_cast<uint32_t>(slotIt - s_DirectionalResidencySlots.begin());
-            *slotIt = { stableShadowMapId, s_FrameNumber, true };
+            *slotIt = {};
+            slotIt->StableShadowMapId = stableShadowMapId;
+            slotIt->LastUsedFrame = s_FrameNumber;
+            slotIt->Occupied = true;
             s_ResidencyStatesToInitialize.push_back(slotIndex);
             return slotIndex;
+        }
+
+        bool UpdateDirectionalLevelDepthState(
+            DirectionalVsmLevelDepthState& state,
+            float desiredCenterZ,
+            float levelRadius)
+        {
+            const float desiredRadiusZ = std::max(levelRadius * kDirectionalClipmapZRangeScale, levelRadius);
+            if (!state.Valid)
+            {
+                state = { desiredCenterZ, desiredRadiusZ, true };
+                return false;
+            }
+
+            const bool radiusChanged = state.RadiusZ != desiredRadiusZ;
+            const bool outsideGuardBand =
+                std::fabs(desiredCenterZ - state.CenterZ) + levelRadius > state.RadiusZ * kDirectionalClipmapZGuardBand;
+            if (!radiusChanged && !outsideGuardBand)
+                return false;
+
+            state = { desiredCenterZ, desiredRadiusZ, true };
+            return true;
         }
 
         void PublishPageStatistics(const PageStatistics& statistics)
@@ -838,12 +874,12 @@ namespace Renderer::VirtualShadowMap
 
         VsmProjectionGpu BuildDirectionalVsmProjectionGpu(
             const DirectionalVsmAddressDesc& desc,
-            const DirectionalVsmAddressGpu& addressData)
+            const DirectionalVsmAddressGpu& addressData,
+            const DirectionalVsmLevelDepthState& depthState)
         {
-            VsmProjectionGpu projectionData = BuildVsmProjectionGpu(
-                desc.ViewProjMatrix,
-                desc.FocusPositionWS,
-                VSM_PROJECTION_TYPE_ORTHOGRAPHIC);
+            ASSERT(depthState.Valid && depthState.RadiusZ > 0.0f, "Directional VSM depth range must be valid.");
+
+            VsmProjectionGpu projectionData{};
             projectionData.ViewProjRow0 = BuildDirectionalVirtualProjectionRow(
                 addressData.WorldToLightRow0,
                 addressData.AddressOriginAndInvWorldUnitsPerPage,
@@ -852,6 +888,16 @@ namespace Renderer::VirtualShadowMap
                 addressData.WorldToLightRow1,
                 addressData.AddressOriginAndInvWorldUnitsPerPage,
                 1.0f);
+
+            const float invDepthRange = 0.5f / depthState.RadiusZ;
+            projectionData.ViewProjRow2 = DirectX::XMFLOAT4(
+                addressData.WorldToLightRow2.x * invDepthRange,
+                addressData.WorldToLightRow2.y * invDepthRange,
+                addressData.WorldToLightRow2.z * invDepthRange,
+                0.5f - depthState.CenterZ * invDepthRange);
+            projectionData.ViewProjRow3 = DirectX::XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f);
+            projectionData.ViewerPositionAndProjectionType =
+                PackFloat4(desc.FocusPositionWS, static_cast<float>(VSM_PROJECTION_TYPE_ORTHOGRAPHIC));
             return projectionData;
         }
 
@@ -1531,7 +1577,9 @@ namespace Renderer::VirtualShadowMap
 
     namespace
     {
-        uint32_t AddDirectionalLevelView(const DirectionalVsmAddressDesc& desc)
+        uint32_t AddDirectionalLevelView(
+            const DirectionalVsmAddressDesc& desc,
+            const DirectionalVsmLevelDepthState& depthState)
         {
             const DirectionalVsmAddressConstants addressConstants = BuildDirectionalVsmAddressConstants(desc);
             const DirectionalVsmAddressGpu addressData = BuildDirectionalVsmAddressGpu(addressConstants);
@@ -1559,7 +1607,7 @@ namespace Renderer::VirtualShadowMap
 
             s_Views.push_back(view);
             s_DirectionalAddressesGpuData.push_back(addressData);
-            s_ProjectionsGpuData.push_back(BuildDirectionalVsmProjectionGpu(desc, addressData));
+            s_ProjectionsGpuData.push_back(BuildDirectionalVsmProjectionGpu(desc, addressData, depthState));
             return viewId;
         }
     } // namespace
@@ -1579,20 +1627,34 @@ namespace Renderer::VirtualShadowMap
 
         const uint32_t clipmapId = static_cast<uint32_t>(s_DirectionalClipmapsGpuData.size());
         const uint32_t firstViewId = static_cast<uint32_t>(s_Views.size());
+        const uint32_t residencyStateIndex = AcquireDirectionalResidencyState(desc.StableShadowMapId);
+        DirectionalResidencySlot& residencySlot = s_DirectionalResidencySlots[residencyStateIndex];
+        if (residencySlot.AddressGeneration != desc.AddressGeneration)
+        {
+            residencySlot.AddressGeneration = desc.AddressGeneration;
+            residencySlot.LevelDepthStates = {};
+        }
+
+        const Math::Vector3 originLS = desc.WorldToLightRotation * desc.OriginWS;
+        const float desiredCenterZ = static_cast<float>(originLS.GetZ());
         for (uint32_t level = 0; level < desc.LevelCount; ++level)
         {
             DirectionalVsmAddressDesc levelDesc;
             levelDesc.WorldToLightRotation = desc.WorldToLightRotation;
             levelDesc.FocusPositionWS = desc.OriginWS;
-            levelDesc.ViewProjMatrix = desc.ViewProjMatrix;
             levelDesc.LevelWorldExtent = std::ldexp(desc.FirstLevelExtent, static_cast<int>(level));
             levelDesc.LightIndex = desc.LightIndex;
             levelDesc.StableShadowMapId = desc.StableShadowMapId;
             levelDesc.ClipmapLevel = level;
             levelDesc.AddressGeneration = desc.AddressGeneration;
 
-            const uint32_t viewId = AddDirectionalLevelView(levelDesc);
+            DirectionalVsmLevelDepthState& depthState = residencySlot.LevelDepthStates[level];
+            const bool depthRangeChanged =
+                UpdateDirectionalLevelDepthState(depthState, desiredCenterZ, levelDesc.LevelWorldExtent * 0.5f);
+            const uint32_t viewId = AddDirectionalLevelView(levelDesc, depthState);
             ASSERT(viewId == firstViewId + level, "Directional VSM clipmap views must be contiguous.");
+            if (depthRangeChanged)
+                MarkViewDirty(viewId);
         }
 
         s_Views[firstViewId + desc.LevelCount - 1u].Flags |= VSM_SHADOW_VIEW_FLAG_COARSE_FALLBACK;
@@ -1603,7 +1665,7 @@ namespace Renderer::VirtualShadowMap
             desc.FirstLevelExtent * kDirectionalClipmapSelectionRadiusScale);
         clipmap.FirstViewId = firstViewId;
         clipmap.LevelCount = desc.LevelCount;
-        clipmap.ResidencyStateIndex = AcquireDirectionalResidencyState(desc.StableShadowMapId);
+        clipmap.ResidencyStateIndex = residencyStateIndex;
         s_DirectionalClipmapsGpuData.push_back(clipmap);
         return clipmapId;
     }

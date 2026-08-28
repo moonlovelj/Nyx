@@ -42,7 +42,6 @@ namespace Renderer::VirtualShadowMap
     {
         Math::Matrix3 WorldToLightRotation = Math::Matrix3(Math::kIdentity);
         Math::Vector3 OriginWS = Math::Vector3(Math::kZero);
-        Math::Matrix4 ViewProjMatrix = Math::Matrix4(Math::kIdentity);
 
         // Every level has the same virtual resolution. Its world extent doubles
         // from FirstLevelExtent for each successive level.
@@ -58,7 +57,6 @@ namespace Renderer::VirtualShadowMap
     {
         Math::Matrix3 WorldToLightRotation = Math::Matrix3(Math::kIdentity);
         Math::Vector3 FocusPositionWS = Math::Vector3(Math::kZero);
-        Math::Matrix4 ViewProjMatrix = Math::Matrix4(Math::kIdentity);
 
         // Full world-space width and height covered by this clipmap level.
         float LevelWorldExtent = 1024.0f;

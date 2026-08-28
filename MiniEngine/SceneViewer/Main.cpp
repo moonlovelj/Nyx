@@ -681,7 +681,6 @@ void SceneViewer::RenderScene( void )
         Renderer::VirtualShadowMap::DirectionalVsmClipmapDesc vsmClipmapDesc;
         vsmClipmapDesc.WorldToLightRotation = Matrix3(~m_SunShadowCamera.GetRotation());
         vsmClipmapDesc.OriginWS = m_Camera.GetPosition();
-        vsmClipmapDesc.ViewProjMatrix = m_SunShadowCamera.GetViewProjMatrix();
         vsmClipmapDesc.FirstLevelExtent = kSunVsmFirstLevelExtent;
         vsmClipmapDesc.LevelCount = Renderer::VirtualShadowMap::kMaxDirectionalClipmapLevels;
         vsmClipmapDesc.StableShadowMapId = kSunStableShadowMapId;
