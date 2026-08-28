@@ -5,13 +5,14 @@
 
 uint SelectDirectionalVsmClipmapLevel(
     float3 receiverPositionWS,
-    DirectionalVsmClipmapGpu clipmap)
+    DirectionalVsmClipmapGpu clipmap,
+    float lodBias)
 {
     float firstLevelRadius = max(clipmap.OriginAndFirstLevelRadius.w, 1e-6f);
     float distanceToOrigin = length(receiverPositionWS - clipmap.OriginAndFirstLevelRadius.xyz);
-    float levelFloat = ceil(log2(max(distanceToOrigin / firstLevelRadius, 1.0f)) + clipmap.LodBias);
+    float levelFloat = log2(max(distanceToOrigin / firstLevelRadius, 1e-6f)) + lodBias;
     int maxLevel = max(int(clipmap.LevelCount) - 1, 0);
-    return uint(clamp(int(levelFloat), 0, maxLevel));
+    return uint(clamp(int(ceil(levelFloat)), 0, maxLevel));
 }
 
 int VsmFloorMod(int value, int divisor)

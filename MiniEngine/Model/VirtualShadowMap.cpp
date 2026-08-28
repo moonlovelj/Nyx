@@ -53,8 +53,12 @@ namespace Renderer::VirtualShadowMap
 
         ComputePSO s_MarkDirectionalPagesPSO(L"VSM: Mark Directional Pages");
         ComputePSO s_MarkLocalPagesPSO(L"VSM: Mark Local Pages");
+        ComputePSO s_CommitResidencyStatesPSO(L"VSM: Commit Residency States");
+        ComputePSO s_UpdateResidencyStatesPSO(L"VSM: Update Residency States");
         std::shared_ptr<Program> s_MarkDirectionalPagesProgram;
         std::shared_ptr<Program> s_MarkLocalPagesProgram;
+        std::shared_ptr<Program> s_CommitResidencyStatesProgram;
+        std::shared_ptr<Program> s_UpdateResidencyStatesProgram;
         ComputePSO s_MarkViewDirtyPSO(L"VSM: Mark View Dirty");
         ComputePSO s_ReuseRequestedPagesPSO(L"VSM: Reuse Requested Pages");
         ComputePSO s_BuildFreePhysicalPageListPSO(L"VSM: Build Free Physical Page List");
@@ -89,6 +93,7 @@ namespace Renderer::VirtualShadowMap
 
         StructuredBuffer s_ShadowViewsGpu;
         StructuredBuffer s_DirectionalClipmapsGpu;
+        StructuredBuffer s_ResidencyStatesGpu;
         StructuredBuffer s_DirectionalAddressesGpu;
         StructuredBuffer s_ProjectionsGpu;
         ByteAddressBuffer s_PageRequestMaskGpu;
@@ -140,6 +145,16 @@ namespace Renderer::VirtualShadowMap
         std::vector<VsmProjectionGpu> s_ProjectionsGpuData;
         std::vector<uint32_t> s_LocalViewIds;
         std::vector<uint32_t> s_DirtyViewIds;
+
+        struct DirectionalResidencySlot
+        {
+            uint32_t StableShadowMapId = 0;
+            uint32_t LastUsedFrame = 0;
+            bool Occupied = false;
+        };
+
+        std::array<DirectionalResidencySlot, kMaxDirectionalClipmaps> s_DirectionalResidencySlots;
+        std::vector<uint32_t> s_ResidencyStatesToInitialize;
         uint32_t s_CurrentPageTableIndex = 0;
         uint32_t s_CommittedPhysicalHZBIndex = 0;
         uint32_t s_FrameNumber = 0;
@@ -151,6 +166,10 @@ namespace Renderer::VirtualShadowMap
             (kRequestMaskWordCountPerView + kPageManagementThreadCount - 1u) / kPageManagementThreadCount;
         constexpr uint32_t kPhysicalPageGroupCount =
             (kPhysicalPageCapacity + kPageManagementThreadCount - 1u) / kPageManagementThreadCount;
+        constexpr float kResidencyTargetPoolLoad = 0.85f;
+        constexpr float kResidencyResolutionDownLerpFactor = 0.5f;
+        constexpr float kResidencyResolutionUpLerpFactor = 0.1f;
+        constexpr uint32_t kResidencyRecoveryFrameCount = 10;
         constexpr size_t kManagementStatisticsReadbackOffset = 0;
         constexpr size_t kRequestStatisticsReadbackOffset = VSM_PAGE_MANAGEMENT_COUNTERS_SIZE;
         constexpr size_t kPageStatisticsReadbackSize =
@@ -173,6 +192,40 @@ namespace Renderer::VirtualShadowMap
         uint32_t GetPhysicalPageRenderBudget()
         {
             return static_cast<uint32_t>(s_PhysicalPageRenderBudget);
+        }
+
+        uint32_t AcquireDirectionalResidencyState(uint32_t stableShadowMapId)
+        {
+            for (uint32_t index = 0; index < s_DirectionalResidencySlots.size(); ++index)
+            {
+                DirectionalResidencySlot& slot = s_DirectionalResidencySlots[index];
+                if (slot.Occupied && slot.StableShadowMapId == stableShadowMapId)
+                {
+                    slot.LastUsedFrame = s_FrameNumber;
+                    return index;
+                }
+            }
+
+            auto slotIt = std::find_if(
+                s_DirectionalResidencySlots.begin(),
+                s_DirectionalResidencySlots.end(),
+                [](const DirectionalResidencySlot& slot) { return !slot.Occupied; });
+            if (slotIt == s_DirectionalResidencySlots.end())
+            {
+                slotIt = std::min_element(
+                    s_DirectionalResidencySlots.begin(),
+                    s_DirectionalResidencySlots.end(),
+                    [](const DirectionalResidencySlot& lhs, const DirectionalResidencySlot& rhs)
+                    {
+                        return lhs.LastUsedFrame < rhs.LastUsedFrame;
+                    });
+            }
+
+            ASSERT(slotIt->LastUsedFrame != s_FrameNumber, "Exceeded the directional VSM residency-state limit.");
+            const uint32_t slotIndex = static_cast<uint32_t>(slotIt - s_DirectionalResidencySlots.begin());
+            *slotIt = { stableShadowMapId, s_FrameNumber, true };
+            s_ResidencyStatesToInitialize.push_back(slotIndex);
+            return slotIndex;
         }
 
         void PublishPageStatistics(const PageStatistics& statistics)
@@ -850,10 +903,77 @@ namespace Renderer::VirtualShadowMap
                     s_ProjectionsGpuData.size() * sizeof(VsmProjectionGpu));
             }
 
+            for (uint32_t stateIndex : s_ResidencyStatesToInitialize)
+            {
+                const VsmResidencyStateGpu initialState{};
+                context.WriteBuffer(
+                    s_ResidencyStatesGpu,
+                    static_cast<size_t>(stateIndex) * sizeof(VsmResidencyStateGpu),
+                    &initialState,
+                    sizeof(initialState));
+            }
+            s_ResidencyStatesToInitialize.clear();
+
             context.TransitionResource(s_ShadowViewsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_DirectionalClipmapsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(s_ResidencyStatesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_DirectionalAddressesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_ProjectionsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        }
+
+        void CommitResidencyStates(ComputeContext& context)
+        {
+            const uint32_t clipmapCount = static_cast<uint32_t>(s_DirectionalClipmapsGpuData.size());
+            if (clipmapCount == 0u)
+                return;
+
+            context.TransitionResource(s_DirectionalClipmapsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(s_ResidencyStatesGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            context.FlushResourceBarriers();
+
+            ProgramBinder binder(*s_CommitResidencyStatesProgram, context);
+            binder.SetRootSignature();
+            context.SetPipelineState(s_CommitResidencyStatesPSO);
+            binder.SetRootBufferSRV("g_DirectionalVsmClipmaps", s_DirectionalClipmapsGpu);
+            binder.SetRootBufferUAV("g_VsmResidencyStates", s_ResidencyStatesGpu);
+            binder["g_VsmResidency"]["ClipmapCount"].Set(clipmapCount);
+            binder.Apply();
+
+            context.Dispatch1D(clipmapCount);
+            context.TransitionResource(s_ResidencyStatesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.FlushResourceBarriers();
+        }
+
+        void UpdateResidencyStates(ComputeContext& context)
+        {
+            const uint32_t clipmapCount = static_cast<uint32_t>(s_DirectionalClipmapsGpuData.size());
+            if (clipmapCount == 0u)
+                return;
+
+            context.TransitionResource(s_DirectionalClipmapsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(s_PageManagementCountersGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(s_ResidencyStatesGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            context.FlushResourceBarriers();
+
+            ProgramBinder binder(*s_UpdateResidencyStatesProgram, context);
+            binder.SetRootSignature();
+            context.SetPipelineState(s_UpdateResidencyStatesPSO);
+            binder.SetRootBufferSRV("g_DirectionalVsmClipmaps", s_DirectionalClipmapsGpu);
+            binder.SetRootBufferSRV("g_VsmPageManagementCounters", s_PageManagementCountersGpu);
+            binder.SetRootBufferUAV("g_VsmResidencyStates", s_ResidencyStatesGpu);
+
+            ProgramVar constants = binder["g_VsmResidency"];
+            constants["ClipmapCount"].Set(clipmapCount);
+            constants["PhysicalPageCapacity"].Set(kPhysicalPageCapacity);
+            constants["TargetPoolLoad"].Set(kResidencyTargetPoolLoad);
+            constants["ResolutionDownLerpFactor"].Set(kResidencyResolutionDownLerpFactor);
+            constants["ResolutionUpLerpFactor"].Set(kResidencyResolutionUpLerpFactor);
+            constants["RecoveryFrameCount"].Set(kResidencyRecoveryFrameCount);
+            binder.Apply();
+
+            context.Dispatch1D(clipmapCount);
+            context.TransitionResource(s_ResidencyStatesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.FlushResourceBarriers();
         }
     } // namespace
 
@@ -903,6 +1023,7 @@ namespace Renderer::VirtualShadowMap
             ProgramUtils::BindlessMode::ResourceHeap);
         markDirectionalPagesDesc.AddRootBufferSRV("g_VsmShadowViews");
         markDirectionalPagesDesc.AddRootBufferSRV("g_DirectionalVsmClipmaps");
+        markDirectionalPagesDesc.AddRootBufferSRV("g_VsmResidencyStates");
         markDirectionalPagesDesc.AddRootBufferSRV("g_DirectionalVsmAddresses");
         markDirectionalPagesDesc.AddRootBufferUAV("g_VsmPageRequestMask");
         markDirectionalPagesDesc.AddRootBufferUAV("g_VsmRequestStatistics");
@@ -931,6 +1052,33 @@ namespace Renderer::VirtualShadowMap
 
         ProgramUtils::SetProgram(s_MarkLocalPagesPSO, *s_MarkLocalPagesProgram);
         s_MarkLocalPagesPSO.Finalize();
+
+        const std::string residencyShaderPath = Renderer::GetModelShaderPath("VsmResidency.slang");
+
+        ProgramDesc commitResidencyStatesDesc =
+            ProgramUtils::MakeComputeDesc(residencyShaderPath, "commitResidencyStates");
+        commitResidencyStatesDesc.AddRootBufferSRV("g_DirectionalVsmClipmaps");
+        commitResidencyStatesDesc.AddRootBufferUAV("g_VsmResidencyStates");
+        s_CommitResidencyStatesProgram =
+            ProgramUtils::GetProgram(commitResidencyStatesDesc, "VSM: Commit Residency States");
+        if (!s_CommitResidencyStatesProgram)
+            return false;
+
+        ProgramUtils::SetProgram(s_CommitResidencyStatesPSO, *s_CommitResidencyStatesProgram);
+        s_CommitResidencyStatesPSO.Finalize();
+
+        ProgramDesc updateResidencyStatesDesc =
+            ProgramUtils::MakeComputeDesc(residencyShaderPath, "updateResidencyStates");
+        updateResidencyStatesDesc.AddRootBufferSRV("g_DirectionalVsmClipmaps");
+        updateResidencyStatesDesc.AddRootBufferSRV("g_VsmPageManagementCounters");
+        updateResidencyStatesDesc.AddRootBufferUAV("g_VsmResidencyStates");
+        s_UpdateResidencyStatesProgram =
+            ProgramUtils::GetProgram(updateResidencyStatesDesc, "VSM: Update Residency States");
+        if (!s_UpdateResidencyStatesProgram)
+            return false;
+
+        ProgramUtils::SetProgram(s_UpdateResidencyStatesPSO, *s_UpdateResidencyStatesProgram);
+        s_UpdateResidencyStatesPSO.Finalize();
 
         const std::string pageManagementShaderPath = Renderer::GetModelShaderPath("VsmPageManagement.slang");
 
@@ -1153,6 +1301,10 @@ namespace Renderer::VirtualShadowMap
             L"VSM Directional Clipmaps",
             kMaxDirectionalClipmaps,
             sizeof(DirectionalVsmClipmapGpu));
+        s_ResidencyStatesGpu.Create(
+            L"VSM Residency States",
+            kMaxDirectionalClipmaps,
+            sizeof(VsmResidencyStateGpu));
         s_DirectionalAddressesGpu.Create(
             L"VSM Directional Addresses",
             kMaxShadowViews,
@@ -1228,6 +1380,8 @@ namespace Renderer::VirtualShadowMap
         s_ProjectionsGpuData.reserve(kMaxShadowViews);
         s_LocalViewIds.reserve(kMaxShadowViews);
         s_DirtyViewIds.reserve(kMaxShadowViews);
+        s_ResidencyStatesToInitialize.reserve(kMaxDirectionalClipmaps);
+        s_DirectionalResidencySlots = {};
         s_CurrentPageTableIndex = 0;
         s_CommittedPhysicalHZBIndex = 0;
         s_FrameNumber = 0;
@@ -1248,9 +1402,12 @@ namespace Renderer::VirtualShadowMap
         s_ProjectionsGpuData.clear();
         s_LocalViewIds.clear();
         s_DirtyViewIds.clear();
+        s_ResidencyStatesToInitialize.clear();
+        s_DirectionalResidencySlots = {};
 
         s_ShadowViewsGpu.Destroy();
         s_DirectionalClipmapsGpu.Destroy();
+        s_ResidencyStatesGpu.Destroy();
         s_DirectionalAddressesGpu.Destroy();
         s_ProjectionsGpu.Destroy();
         s_PageRequestMaskGpu.Destroy();
@@ -1275,6 +1432,8 @@ namespace Renderer::VirtualShadowMap
         s_PhysicalHZBs[1].Destroy();
         s_MarkDirectionalPagesProgram.reset();
         s_MarkLocalPagesProgram.reset();
+        s_CommitResidencyStatesProgram.reset();
+        s_UpdateResidencyStatesProgram.reset();
         s_MarkViewDirtyProgram.reset();
         s_ReuseRequestedPagesProgram.reset();
         s_BuildFreePhysicalPageListProgram.reset();
@@ -1310,6 +1469,8 @@ namespace Renderer::VirtualShadowMap
         s_ProjectionsGpuData.clear();
         s_LocalViewIds.clear();
         s_DirtyViewIds.clear();
+        s_ResidencyStatesToInitialize.clear();
+        s_DirectionalResidencySlots = {};
         s_CurrentPageTableIndex = 0;
         s_CommittedPhysicalHZBIndex = 0;
         s_FrameNumber = 0;
@@ -1410,7 +1571,6 @@ namespace Renderer::VirtualShadowMap
         ASSERT(desc.LevelCount <= kMaxDirectionalClipmapLevels, "Exceeded the directional VSM clipmap level limit.");
         ASSERT(std::isfinite(desc.FirstLevelExtent) && desc.FirstLevelExtent > 0.0f,
                "The directional VSM first-level extent must be positive and finite.");
-        ASSERT(std::isfinite(desc.LodBias), "The directional VSM clipmap LOD bias must be finite.");
         if (s_DirectionalClipmapsGpuData.size() >= kMaxDirectionalClipmaps ||
             s_Views.size() + desc.LevelCount > kMaxShadowViews)
         {
@@ -1443,7 +1603,7 @@ namespace Renderer::VirtualShadowMap
             desc.FirstLevelExtent * kDirectionalClipmapSelectionRadiusScale);
         clipmap.FirstViewId = firstViewId;
         clipmap.LevelCount = desc.LevelCount;
-        clipmap.LodBias = desc.LodBias;
+        clipmap.ResidencyStateIndex = AcquireDirectionalResidencyState(desc.StableShadowMapId);
         s_DirectionalClipmapsGpuData.push_back(clipmap);
         return clipmapId;
     }
@@ -1530,6 +1690,7 @@ namespace Renderer::VirtualShadowMap
         ScopedTimer timer(L"VSM: Mark Requested Pages", gfxContext);
         ComputeContext& context = gfxContext.GetComputeContext();
         UploadFrameData(context);
+        CommitResidencyStates(context);
 
         const size_t requestMaskBytes = s_Views.size() * kRequestMaskWordCountPerView * sizeof(uint32_t);
         const size_t statisticsBytes = s_Views.size() * VSM_REQUEST_STATISTICS_STRIDE;
@@ -1557,6 +1718,7 @@ namespace Renderer::VirtualShadowMap
 
             binder.SetRootBufferSRV("g_VsmShadowViews", s_ShadowViewsGpu);
             binder.SetRootBufferSRV("g_DirectionalVsmClipmaps", s_DirectionalClipmapsGpu);
+            binder.SetRootBufferSRV("g_VsmResidencyStates", s_ResidencyStatesGpu);
             binder.SetRootBufferSRV("g_DirectionalVsmAddresses", s_DirectionalAddressesGpu);
             binder.SetRootBufferUAV("g_VsmPageRequestMask", s_PageRequestMaskGpu);
             binder.SetRootBufferUAV("g_VsmRequestStatistics", s_RequestStatisticsGpu);
@@ -1680,6 +1842,8 @@ namespace Renderer::VirtualShadowMap
         InsertPageMappingUAVBarriers(context, false);
 
         DispatchAllocateNewPages(context, currentPageTable, VSM_PAGE_ALLOCATION_CLASS_DETAIL);
+
+        UpdateResidencyStates(context);
 
         context.TransitionResource(currentPageTable, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_PageRenderRequestsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -1883,6 +2047,7 @@ namespace Renderer::VirtualShadowMap
 
         context.TransitionResource(s_ShadowViewsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_DirectionalClipmapsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_ResidencyStatesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_DirectionalAddressesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_ProjectionsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_PageRequestMaskGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -1892,6 +2057,7 @@ namespace Renderer::VirtualShadowMap
 
         binder.SetRootBufferSRV("g_VsmShadowViews", s_ShadowViewsGpu);
         binder.SetRootBufferSRV("g_DirectionalVsmClipmaps", s_DirectionalClipmapsGpu);
+        binder.SetRootBufferSRV("g_VsmResidencyStates", s_ResidencyStatesGpu);
         binder.SetRootBufferSRV("g_DirectionalVsmAddresses", s_DirectionalAddressesGpu);
         binder.SetRootBufferSRV("g_VsmProjections", s_ProjectionsGpu);
         binder.SetRootBufferSRV("g_VsmPageRequestMask", s_PageRequestMaskGpu);

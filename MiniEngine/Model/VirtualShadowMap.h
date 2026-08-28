@@ -47,7 +47,6 @@ namespace Renderer::VirtualShadowMap
         // Every level has the same virtual resolution. Its world extent doubles
         // from FirstLevelExtent for each successive level.
         float FirstLevelExtent = 64.0f;
-        float LodBias = 0.0f;
         uint32_t LevelCount = 1;
 
         uint32_t LightIndex = 0;

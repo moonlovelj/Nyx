@@ -85,7 +85,7 @@ float3 VisualizeDirectionalVsmPageState(uint2 pixelPosition)
         return float3(0.15f);
 
     DirectionalVsmClipmapGpu clipmap = g_DirectionalVsmClipmaps[g_DeferredLighting.VsmClipmapId];
-    uint level = SelectDirectionalVsmClipmapLevel(worldPosition, clipmap);
+    uint level = SelectResidentDirectionalVsmClipmapLevel(worldPosition, clipmap);
     VsmShadowView shadowView = g_VsmShadowViews[clipmap.FirstViewId + level];
     DirectionalVsmAddressGpu addressData = g_DirectionalVsmAddresses[shadowView.AddressDataIndex];
     VsmVirtualAddress address = GetDirectionalVsmVirtualAddress(worldPosition, addressData);
@@ -138,7 +138,7 @@ float3 VisualizeDirectionalVsmClipmapLevel(uint2 pixelPosition)
         return float3(0.15f);
 
     DirectionalVsmClipmapGpu clipmap = g_DirectionalVsmClipmaps[g_DeferredLighting.VsmClipmapId];
-    uint level = SelectDirectionalVsmClipmapLevel(worldPosition, clipmap);
+    uint level = SelectResidentDirectionalVsmClipmapLevel(worldPosition, clipmap);
     VsmShadowView shadowView = g_VsmShadowViews[clipmap.FirstViewId + level];
     DirectionalVsmAddressGpu addressData = g_DirectionalVsmAddresses[shadowView.AddressDataIndex];
     VsmVirtualAddress address = GetDirectionalVsmVirtualAddress(worldPosition, addressData);

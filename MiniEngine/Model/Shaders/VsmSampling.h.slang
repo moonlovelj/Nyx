@@ -6,6 +6,7 @@
 
 StructuredBuffer<VsmShadowView> g_VsmShadowViews;
 StructuredBuffer<DirectionalVsmClipmapGpu> g_DirectionalVsmClipmaps;
+StructuredBuffer<VsmResidencyStateGpu> g_VsmResidencyStates;
 StructuredBuffer<DirectionalVsmAddressGpu> g_DirectionalVsmAddresses;
 StructuredBuffer<VsmProjectionGpu> g_VsmProjections;
 StructuredBuffer<uint> g_VsmPageTable;
@@ -19,6 +20,12 @@ bool IsVsmPhysicalPageReady(
     bool isRendered = (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_RENDERED) != 0u;
     bool isDirty = (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_DIRTY) != 0u;
     return IsVsmPhysicalPageMetadataMatch(metadata, shadowView, virtualPage) && isRendered && !isDirty;
+}
+
+uint SelectResidentDirectionalVsmClipmapLevel(float3 worldPosition, DirectionalVsmClipmapGpu clipmap)
+{
+    float lodBias = g_VsmResidencyStates[clipmap.ResidencyStateIndex].CurrentLodBias;
+    return SelectDirectionalVsmClipmapLevel(worldPosition, clipmap, lodBias);
 }
 
 bool TrySampleDirectionalVsmView(float3 worldPosition, uint viewId, out float shadow)
@@ -64,12 +71,18 @@ float SampleDirectionalVsmClipmapHard(float3 worldPosition, uint clipmapId)
         return 1.0f;
 
     DirectionalVsmClipmapGpu clipmap = g_DirectionalVsmClipmaps[clipmapId];
-    uint firstLevel = SelectDirectionalVsmClipmapLevel(worldPosition, clipmap);
-    for (uint level = firstLevel; level < clipmap.LevelCount; ++level)
+    uint firstLevel = SelectResidentDirectionalVsmClipmapLevel(worldPosition, clipmap);
+
+    float shadow;
+    if (TrySampleDirectionalVsmView(worldPosition, clipmap.FirstViewId + firstLevel, shadow))
     {
-        float shadow;
-        if (TrySampleDirectionalVsmView(worldPosition, clipmap.FirstViewId + level, shadow))
-            return shadow;
+        return shadow;
+    }
+
+    uint coarseLevel = clipmap.LevelCount - 1u;
+    if (firstLevel != coarseLevel && TrySampleDirectionalVsmView(worldPosition, clipmap.FirstViewId + coarseLevel, shadow))
+    {
+        return shadow;
     }
 
     return 1.0f;

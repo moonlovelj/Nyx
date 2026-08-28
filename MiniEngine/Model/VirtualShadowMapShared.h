@@ -166,7 +166,18 @@ namespace Renderer::VirtualShadowMap
 
         VSM_UINT FirstViewId;
         VSM_UINT LevelCount;
-        float LodBias;
+        VSM_UINT ResidencyStateIndex;
+        VSM_UINT Padding;
+    };
+
+    // Persistent GPU feedback used to control directional clipmap page pressure.
+    // CurrentLodBias is immutable for a frame; allocation feedback only updates
+    // NextLodBias, which is committed before the next request pass.
+    struct VSM_ALIGN_16 VsmResidencyStateGpu
+    {
+        float CurrentLodBias;
+        float NextLodBias;
+        VSM_UINT StableFrameCount;
         VSM_UINT Padding;
     };
 
@@ -293,6 +304,7 @@ namespace Renderer::VirtualShadowMap
 #ifdef __cplusplus
     static_assert(sizeof(VsmShadowView) == 48);
     static_assert(sizeof(DirectionalVsmClipmapGpu) == 32);
+    static_assert(sizeof(VsmResidencyStateGpu) == 16);
     static_assert(sizeof(DirectionalVsmAddressGpu) == 80);
     static_assert(sizeof(VsmProjectionGpu) == 80);
     static_assert(sizeof(VsmPageRenderRequest) == 16);

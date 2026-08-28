@@ -155,6 +155,7 @@ void Lighting::InitializeResources( void )
         ProgramUtils::BindlessMode::ResourceHeap);
     deferredLightingDesc.AddRootBufferSRV("g_VsmShadowViews");
     deferredLightingDesc.AddRootBufferSRV("g_DirectionalVsmClipmaps");
+    deferredLightingDesc.AddRootBufferSRV("g_VsmResidencyStates");
     deferredLightingDesc.AddRootBufferSRV("g_DirectionalVsmAddresses");
     deferredLightingDesc.AddRootBufferSRV("g_VsmProjections");
     deferredLightingDesc.AddRootBufferSRV("g_VsmPageRequestMask");

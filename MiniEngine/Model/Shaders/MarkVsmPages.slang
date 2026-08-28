@@ -14,6 +14,7 @@ ConstantBuffer<MarkVsmPagesConstants> g_MarkVsmPages;
 
 StructuredBuffer<VsmShadowView> g_VsmShadowViews;
 StructuredBuffer<DirectionalVsmClipmapGpu> g_DirectionalVsmClipmaps;
+StructuredBuffer<VsmResidencyStateGpu> g_VsmResidencyStates;
 StructuredBuffer<DirectionalVsmAddressGpu> g_DirectionalVsmAddresses;
 StructuredBuffer<VsmProjectionGpu> g_VsmProjections;
 RWByteAddressBuffer g_VsmPageRequestMask;
@@ -87,7 +88,8 @@ void markDirectionalMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
 
     DirectionalVsmClipmapGpu clipmap = g_DirectionalVsmClipmaps[g_MarkVsmPages.TargetId];
-    uint firstLevel = SelectDirectionalVsmClipmapLevel(worldPosition, clipmap);
+    VsmResidencyStateGpu residencyState = g_VsmResidencyStates[clipmap.ResidencyStateIndex];
+    uint firstLevel = SelectDirectionalVsmClipmapLevel(worldPosition, clipmap, residencyState.CurrentLodBias);
     uint selectedViewId = clipmap.FirstViewId + firstLevel;
     bool anyPageRequested = TryMarkDirectionalPage(selectedViewId, worldPosition);
 

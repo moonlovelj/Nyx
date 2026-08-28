@@ -48,21 +48,7 @@ using namespace std;
 namespace
 {
     constexpr uint32_t kSunStableShadowMapId = 1u;
-    constexpr float kSunVsmFirstLevelExtent = 64.0f;
-
-    uint32_t CalculateSunVsmClipmapLevelCount(float shadowDistance)
-    {
-        float selectionRadius =
-            kSunVsmFirstLevelExtent * Renderer::VirtualShadowMap::kDirectionalClipmapSelectionRadiusScale;
-        uint32_t levelCount = 1u;
-        while (selectionRadius < shadowDistance &&
-               levelCount < Renderer::VirtualShadowMap::kMaxDirectionalClipmapLevels)
-        {
-            selectionRadius *= 2.0f;
-            ++levelCount;
-        }
-        return levelCount;
-    }
+    constexpr float kSunVsmFirstLevelExtent = 5.12f;
 
     void UpdateDirectionalShadowCamera(
         ShadowCamera& shadowCamera,
@@ -697,7 +683,7 @@ void SceneViewer::RenderScene( void )
         vsmClipmapDesc.OriginWS = m_Camera.GetPosition();
         vsmClipmapDesc.ViewProjMatrix = m_SunShadowCamera.GetViewProjMatrix();
         vsmClipmapDesc.FirstLevelExtent = kSunVsmFirstLevelExtent;
-        vsmClipmapDesc.LevelCount = CalculateSunVsmClipmapLevelCount(sunShadowDistance);
+        vsmClipmapDesc.LevelCount = Renderer::VirtualShadowMap::kMaxDirectionalClipmapLevels;
         vsmClipmapDesc.StableShadowMapId = kSunStableShadowMapId;
         if (!m_HasSunVsmAddressGeneration || sunOrientation != m_PreviousSunOrientation ||
             sunInclination != m_PreviousSunInclination || sunShadowDistance != m_PreviousSunShadowDistance)
