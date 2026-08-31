@@ -212,9 +212,6 @@
     <None Include="Shaders\MarkVsmPages.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
-    <None Include="Shaders\PCSS.h.slang">
-      <Filter>Source Files\Shaders</Filter>
-    </None>
     <None Include="Shaders\DataCodec.h.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>

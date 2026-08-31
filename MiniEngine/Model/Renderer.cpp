@@ -21,7 +21,6 @@
 #include "../Core/PipelineState.h"
 #include "../Core/GraphicsCommon.h"
 #include "../Core/BufferManager.h"
-#include "../Core/ShadowCamera.h"
 #include "../Core/TemporalEffects.h"
 #include "../Core/ProgramBinder.h"
 #include "../Core/ProgramUtils.h"
@@ -162,7 +161,6 @@ namespace Renderer
     DescriptorHeap s_TextureHeap;
     DescriptorHeap s_SamplerHeap;
     HZBDescriptorSet m_SceneHZBDescriptors;
-    HZBDescriptorSet m_ShadowHZBDescriptors;
 
 	CommandSignature GPUDrivenDrawIndirectCommandSignature;
 
@@ -171,7 +169,6 @@ namespace Renderer
     float s_SpecularIBLRange;
     float s_SpecularIBLBias;
     uint32_t g_SSAOFullScreenID;
-    uint32_t g_ShadowBufferID;
     uint32_t g_SceneHZBIDs[2];
 
     //RootSignature m_RootSig;
@@ -379,7 +376,6 @@ void Renderer::Initialize(void)
     m_BindlessResources = s_TextureHeap.Alloc(BINDLESS_CAPACITY);
     const uint32_t descriptorSize = s_TextureHeap.GetDescriptorSize();
     m_SceneHZBDescriptors.SRVs = m_BindlessResources + SRV_SCENE_HZB0 * descriptorSize;
-    m_ShadowHZBDescriptors.SRVs = m_BindlessResources + SRV_SHADOW_HZB0 * descriptorSize;
 
     // Maybe only need 2 for wrap vs. clamp?  Currently we allocate 1 for 1 with textures
     s_SamplerHeap.Create(L"Scene Sampler Descriptors", D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 2048);
@@ -389,7 +385,6 @@ void Renderer::Initialize(void)
         return;
 
     g_SSAOFullScreenID = g_SSAOFullScreen.GetVersionID();
-    g_ShadowBufferID = g_ShadowBuffer.GetVersionID();
     g_SceneHZBIDs[0] = g_FurthestHZB[0].GetVersionID();
     g_SceneHZBIDs[1] = g_FurthestHZB[1].GetVersionID();
 
@@ -496,7 +491,7 @@ void Renderer::Initialize(void)
         m_DepthOnlyMeshPSO[passIndex].SetRasterizerState(RasterizerShadowTwoSided);
         m_DepthOnlyMeshPSO[passIndex].SetDepthStencilState(DepthStateReadWrite);
         m_DepthOnlyMeshPSO[passIndex].SetBlendState(BlendDisable);
-        m_DepthOnlyMeshPSO[passIndex].SetRenderTargetFormats(0, {}, SHADOW_FORMAT);
+        m_DepthOnlyMeshPSO[passIndex].SetRenderTargetFormats(0, {}, DXGI_FORMAT_D32_FLOAT);
         ProgramUtils::SetProgram(m_DepthOnlyMeshPSO[passIndex], *m_DepthOnlyMeshProgram[passIndex]);
         m_DepthOnlyMeshPSO[passIndex].Finalize();
     }
@@ -534,12 +529,9 @@ void Renderer::Initialize(void)
 		SetBindlessResourceDescriptor(SRV_IBL_SPECULAR_LD, GetDefaultTexture(kBlackCubeMap));
 		SetBindlessResourceDescriptor(SRV_IBL_LUT, GetDefaultTexture(kBlackTransparent2D));
 		SetBindlessResourceDescriptor(SRV_SSAO, g_SSAOFullScreen.GetSRV());
-		SetBindlessResourceDescriptor(SRV_SHADOW_MAP, g_ShadowBuffer.GetSRV());
 		SetBindlessResourceDescriptor(SRV_SCENE_HZB0, g_FurthestHZB[0].GetSRV());
 		SetBindlessResourceDescriptor(SRV_SCENE_HZB1, g_FurthestHZB[1].GetSRV());
 		SetBindlessResourceDescriptor(SRV_VBUFFER, g_VisibilityBuffer.GetSRV());
-        SetBindlessResourceDescriptor(SRV_SHADOW_HZB0, g_ShadowHZBBuffer[0].GetSRV());
-        SetBindlessResourceDescriptor(SRV_SHADOW_HZB1, g_ShadowHZBBuffer[1].GetSRV());
 
         // uav
 		SetBindlessResourceDescriptor(UAV_SCENE_COLOR, g_SceneColorBuffer.GetUAV());
@@ -556,7 +548,6 @@ void Renderer::Initialize(void)
 void Renderer::UpdateGlobalDescriptors(void)
 {
     if (g_SSAOFullScreenID == g_SSAOFullScreen.GetVersionID() &&
-        g_ShadowBufferID == g_ShadowBuffer.GetVersionID() &&
         g_SceneHZBIDs[0] == g_FurthestHZB[0].GetVersionID() &&
         g_SceneHZBIDs[1] == g_FurthestHZB[1].GetVersionID())
     {
@@ -564,12 +555,10 @@ void Renderer::UpdateGlobalDescriptors(void)
     }
 
 	SetBindlessResourceDescriptor(SRV_SSAO, g_SSAOFullScreen.GetSRV());
-	SetBindlessResourceDescriptor(SRV_SHADOW_MAP, g_ShadowBuffer.GetSRV());
     SetBindlessResourceDescriptor(SRV_SCENE_HZB0, g_FurthestHZB[0].GetSRV());
     SetBindlessResourceDescriptor(SRV_SCENE_HZB1, g_FurthestHZB[1].GetSRV());
 
     g_SSAOFullScreenID = g_SSAOFullScreen.GetVersionID();
-    g_ShadowBufferID = g_ShadowBuffer.GetVersionID();
     g_SceneHZBIDs[0] = g_FurthestHZB[0].GetVersionID();
     g_SceneHZBIDs[1] = g_FurthestHZB[1].GetVersionID();
 
@@ -1078,7 +1067,7 @@ void Renderer::RenderSceneDepth(
     HZBResources* hzbResources,
     DepthBuffer& depthTarget)
 {
-    ASSERT(depthTarget.GetFormat() == SHADOW_FORMAT);
+    ASSERT(depthTarget.GetFormat() == DXGI_FORMAT_D32_FLOAT);
 
     ScopedTimer _prof0(L"Renderer::RenderSceneDepth", gfxContext);
 
@@ -1228,13 +1217,5 @@ HZBResources Renderer::GetSceneHZBResources()
     return MakeHZBResources(
         g_FurthestHZB,
         m_SceneHZBDescriptors,
-        TemporalEffects::GetFrameIndexMod2());
-}
-
-HZBResources Renderer::GetShadowHZBResources()
-{
-    return MakeHZBResources(
-        g_ShadowHZBBuffer,
-        m_ShadowHZBDescriptors,
         TemporalEffects::GetFrameIndexMod2());
 }

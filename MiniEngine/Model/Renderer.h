@@ -33,8 +33,6 @@
 class GraphicsPSO;
 class RootSignature;
 class DescriptorHeap;
-class ShadowCamera;
-class ShadowBuffer;
 class Program;
 struct Mesh;
 struct Joint;
@@ -89,12 +87,10 @@ namespace Renderer
     struct FrameConstants
     {
         FrameConstants()
-            : SunShadowMatrix(kIdentity)
-            , SunVsmClipmapId(VirtualShadowMap::kInvalidViewId)
-            , EnableSunShadowSampling(1)
+            : SunVsmClipmapId(VirtualShadowMap::kInvalidViewId)
+            , EnableSunVsmSampling(1)
             , SunDirection(kZero)
             , SunIntensity(kZero)
-            , ShadowTexelSize(kZero)
             , InvTileDim(kZero)
             , TileCount{}
             , FirstLightIndex{}
@@ -105,12 +101,10 @@ namespace Renderer
         {
         }
 
-        Matrix4 SunShadowMatrix;
         uint32_t SunVsmClipmapId;
-        uint32_t EnableSunShadowSampling;
+        uint32_t EnableSunVsmSampling;
         Vector3 SunDirection;
         Vector3 SunIntensity;
-        Vector4 ShadowTexelSize;
         Vector4 InvTileDim;
 
         uint32_t TileCount[4];
@@ -324,7 +318,6 @@ namespace Renderer
 	HierarchicalDepthBuffer& GetPrevHZB();
 	HierarchicalDepthBuffer& GetCurrentHZB();
     HZBResources GetSceneHZBResources();
-    HZBResources GetShadowHZBResources();
 
     void RenderSceneDepth(
         GraphicsContext& gfxContext,

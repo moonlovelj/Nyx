@@ -15,7 +15,6 @@
 
 #include "ColorBuffer.h"
 #include "DepthBuffer.h"
-#include "ShadowBuffer.h"
 #include "HierarchicalDepthBuffer.h"
 #include "GpuBuffer.h"
 #include "GraphicsCore.h"
@@ -40,9 +39,6 @@ namespace Graphics
 	extern ColorBuffer g_VisibilityBuffer;  // R32G32_UINT
 
     extern ColorBuffer g_VelocityBuffer;    // R10G10B10  (3D velocity)
-    extern ShadowBuffer g_ShadowBuffer;
-    extern HierarchicalDepthBuffer g_ShadowHZBBuffer[2];
-
     extern ColorBuffer g_SSAOFullScreen;	// R8_UNORM
     extern ColorBuffer g_LinearDepth[2];	// Normalized planar distance (0 at eye, 1 at far plane) computed from the SceneDepthBuffer
     extern ColorBuffer g_MinMaxDepth8;		// Min and max depth values of 8x8 tiles

@@ -185,7 +185,6 @@
     <None Include="Shaders\LightingCommon.h.slang" />
     <None Include="Shaders\MarkVsmPages.slang" />
     <None Include="Shaders\MeshBufferGen.slang" />
-    <None Include="Shaders\PCSS.h.slang" />
     <None Include="Shaders\ExportDepth.slang" />
     <None Include="Shaders\ResolveVBufferToGBuffer.slang" />
     <None Include="Shaders\Skybox.slang" />

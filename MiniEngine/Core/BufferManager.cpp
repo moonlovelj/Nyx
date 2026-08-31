@@ -39,9 +39,6 @@ namespace Graphics
     HierarchicalDepthBuffer g_FurthestHZB[2];
     ColorBuffer g_VisibilityBuffer;
 
-    ShadowBuffer g_ShadowBuffer;
-    HierarchicalDepthBuffer g_ShadowHZBBuffer[2];
-
     ColorBuffer g_SSAOFullScreen(Color(1.0f, 1.0f, 1.0f));
     ColorBuffer g_LinearDepth[2];
     ColorBuffer g_MinMaxDepth8;
@@ -176,10 +173,6 @@ void Graphics::InitializeRenderingBuffers( uint32_t bufferWidth, uint32_t buffer
                         g_AOHighQuality4.Create( L"AO High Quality 4", bufferWidth4, bufferHeight4, 1, DXGI_FORMAT_R8_UNORM, esram );
                     esram.PopStack();	// End generating SSAO
 
-                    g_ShadowBuffer.Create( L"Shadow Map", 2048, 2048, esram );
-                    g_ShadowHZBBuffer[0].Create(L"Shadow Map HZB 0", 2048, 2048, DXGI_FORMAT_R32_FLOAT, esram);
-                    g_ShadowHZBBuffer[1].Create(L"Shadow Map HZB 1", 2048, 2048, DXGI_FORMAT_R32_FLOAT, esram);
-
                 esram.PopStack();	// End Shading
 
                 esram.PushStack();	// Begin depth of field
@@ -286,11 +279,6 @@ void Graphics::DestroyRenderingBuffers()
     g_HorizontalBuffer.Destroy();
     g_PostEffectsBuffer.Destroy();
 	g_VisibilityBuffer.Destroy();
-
-    g_ShadowBuffer.Destroy();
-    g_ShadowHZBBuffer[0].Destroy();
-    g_ShadowHZBBuffer[1].Destroy();
-
     g_SSAOFullScreen.Destroy();
     g_LinearDepth[0].Destroy();
     g_LinearDepth[1].Destroy();

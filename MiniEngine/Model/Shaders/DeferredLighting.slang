@@ -15,29 +15,25 @@
 struct DeferredLightingConstants
 {
     float4x4 InverseViewProjMatrix;
-    float4x4 SunShadowMatrix;
     float3 ViewerPos;
     float3 SunDirection;
     float3 SunIntensity;
-    float4 ShadowTexelSize;
     float4 InvTileDim;
     uint ViewportWidth;
     uint ViewportHeight;
     uint TileCountX;
     uint IBLSpecularLDMapMipCount;
     uint VsmClipmapId;
-    uint EnableSunShadowSampling;
+    uint EnableSunVsmSampling;
 };
 
 ConstantBuffer<DeferredLightingConstants> g_DeferredLighting;
 ByteAddressBuffer g_VsmPageRequestMask;
 
 #define InverseViewProjMatrix g_DeferredLighting.InverseViewProjMatrix
-#define SunShadowMatrix g_DeferredLighting.SunShadowMatrix
 #define ViewerPos g_DeferredLighting.ViewerPos
 #define SunDirection g_DeferredLighting.SunDirection
 #define SunIntensity g_DeferredLighting.SunIntensity
-#define ShadowTexelSize g_DeferredLighting.ShadowTexelSize
 #define InvTileDim g_DeferredLighting.InvTileDim
 #define ViewportWidth g_DeferredLighting.ViewportWidth
 #define ViewportHeight g_DeferredLighting.ViewportHeight
@@ -186,7 +182,6 @@ void computeMain(
             float bShading = gBufferA[DTid].w;
             if (bShading > 1e-6)
             {
-                float2 ScreenUV = (float2(0.5, 0.5) + DTid) / float2(ViewportWidth, ViewportHeight);
                 float4 colorAccum = sceneColor[DTid];
                 float3 posW = ReconstructWorldPosition(
                     DTid,
@@ -210,7 +205,7 @@ void computeMain(
                 Surface.alphaSqr = Surface.alpha * Surface.alpha;
 
                 float sunShadow = 1.0f;
-                if (g_DeferredLighting.EnableSunShadowSampling != 0u &&
+                if (g_DeferredLighting.EnableSunVsmSampling != 0u &&
                     g_DeferredLighting.VsmClipmapId != VSM_INVALID_VIEW_ID)
                 {
                     sunShadow = SampleDirectionalVsmClipmapHard(posW, g_DeferredLighting.VsmClipmapId);

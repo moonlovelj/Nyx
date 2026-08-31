@@ -196,11 +196,6 @@ Texture2D<float> GetSSAOSRV()
     return GetBindlessResourceHandle<Texture2D<float>>(SRV_SSAO);
 }
 
-Texture2D<float> GetShadowMapSRV()
-{
-    return GetBindlessResourceHandle<Texture2D<float>>(SRV_SHADOW_MAP);
-}
-
 Texture2D<float> GetVsmPhysicalPagePoolSRV()
 {
     return GetBindlessResourceHandle<Texture2D<float>>(SRV_VSM_PHYSICAL_PAGE_POOL);

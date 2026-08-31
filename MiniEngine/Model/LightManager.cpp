@@ -26,6 +26,7 @@
 #include "IBL.h"
 #include "ModelInstanceManager.h"
 #include "../Core/GraphicsCommon.h"
+#include "../Core/ShadowBuffer.h"
 #include "../Core/ProgramBinder.h"
 #include "../Core/ProgramUtils.h"
 
@@ -169,14 +170,9 @@ void Lighting::InitializeResources( void )
     linearSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
     linearSamplerDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
 
-    SamplerDesc pointSamplerDesc;
-    pointSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-    pointSamplerDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
-
     deferredLightingDesc.AddStaticSampler("shadowSampler", SamplerShadowDesc);
     deferredLightingDesc.AddStaticSampler("cubeMapSampler", cubeMapSamplerDesc);
     deferredLightingDesc.AddStaticSampler("linearSampler", linearSamplerDesc);
-    deferredLightingDesc.AddStaticSampler("pointSampler", pointSamplerDesc);
 
     m_DeferredLightingProgram = ProgramUtils::GetProgram(
         deferredLightingDesc,
@@ -447,7 +443,6 @@ void Lighting::RenderDeferredLighting(
     Context.TransitionResource(g_GBufferD, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
     Context.TransitionResource(g_SSAOFullScreen, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    Context.TransitionResource(g_ShadowBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
     Context.TransitionResource(m_LightBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     Context.TransitionResource(m_LightGrid, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -464,18 +459,16 @@ void Lighting::RenderDeferredLighting(
     const Renderer::ViewConstants& viewConstants = view.GetConstants();
     ProgramVar constants = binder["g_DeferredLighting"];
     constants["InverseViewProjMatrix"].Set(viewConstants.InverseViewProjMatrix);
-    constants["SunShadowMatrix"].Set(frame.SunShadowMatrix);
     constants["ViewerPos"].Set(viewConstants.ViewerPos);
     constants["SunDirection"].Set(frame.SunDirection);
     constants["SunIntensity"].Set(frame.SunIntensity);
-    constants["ShadowTexelSize"].Set(frame.ShadowTexelSize);
     constants["InvTileDim"].Set(frame.InvTileDim);
     constants["ViewportWidth"].Set(viewConstants.ViewportWidth);
     constants["ViewportHeight"].Set(viewConstants.ViewportHeight);
     constants["TileCountX"].Set(frame.TileCount[0]);
     constants["IBLSpecularLDMapMipCount"].Set(frame.IBLSpecularLDMapMipCount);
     constants["VsmClipmapId"].Set(frame.SunVsmClipmapId);
-    constants["EnableSunShadowSampling"].Set(frame.EnableSunShadowSampling);
+    constants["EnableSunVsmSampling"].Set(frame.EnableSunVsmSampling);
     Renderer::VirtualShadowMap::BindSamplingResources(Context, binder);
     SetCommonResources(binder, frame);
     binder.Apply();

@@ -6,14 +6,10 @@
 #include "../../Core/Shaders/BSDF.hlsli"
 #include "../../Core/Shaders/IBL.hlsli"
 #include "LightGrid.h.slang"
-#include "PCSS.h.slang"
 
 SamplerComparisonState shadowSampler;
 SamplerState cubeMapSampler;
 SamplerState linearSampler;
-SamplerState pointSampler;
-
-#define PCSS_SHADOW     0
 
 static const float3 kDielectricSpecular = float3(0.04, 0.04, 0.04);
 
@@ -109,37 +105,6 @@ float3 EvaluateIBLSpecular(SurfaceProperties Surface)
     return PreLD * (Surface.c_spec * PreDFG.x + saturate(50.0f * Surface.c_spec.g) * PreDFG.y);
 }
 
-float GetDirectionalShadow(float2 ScreenUV, float3 ShadowCoord)
-{
-    Texture2D<float> texShadow = GetShadowMapSRV();
-#ifdef SINGLE_SAMPLE
-    float result = texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy, ShadowCoord.z );
-    return result * result;
-#elif PCSS_SHADOW
-    float result =  PCSS(texShadow, shadowSampler, pointSampler, ScreenUV, ShadowCoord, ShadowTexelSize);
-    return result;
-#else
-    const float Dilation = 2.0;
-    float d1 = Dilation * ShadowTexelSize.x * 0.125;
-    float d2 = Dilation * ShadowTexelSize.x * 0.875;
-    float d3 = Dilation * ShadowTexelSize.x * 0.625;
-    float d4 = Dilation * ShadowTexelSize.x * 0.375;
-    float shadowBias = 1e-3;
-    float result = (
-        2.0 * texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy, ShadowCoord.z ) +
-        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2(-d2,  d1), ShadowCoord.z + shadowBias ) +
-        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2(-d1, -d2), ShadowCoord.z + shadowBias ) +
-        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2( d2, -d1), ShadowCoord.z + shadowBias ) +
-        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2( d1,  d2), ShadowCoord.z + shadowBias ) +
-        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2(-d4,  d3), ShadowCoord.z + shadowBias ) +
-        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2(-d3, -d4), ShadowCoord.z + shadowBias ) +
-        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2( d4, -d3), ShadowCoord.z + shadowBias ) +
-        texShadow.SampleCmpLevelZero( shadowSampler, ShadowCoord.xy + float2( d3,  d4), ShadowCoord.z + shadowBias )
-        ) / 10.0;
-    return result * result;
-#endif
-}
-
 float GetShadowConeLight(uint lightIndex, float3 shadowCoord)
 {
     Texture2DArray<float> lightShadowArrayTex = GetLightShadowArraySRV();
@@ -171,33 +136,6 @@ float3 ApplyLightCommon(
 
     return Light.NdotL * c_light * (diffuse + specular);
 }
-
-// float3 ApplyDirectionalLight(
-//     float3	diffuseColor,	// Diffuse albedo
-//     float3	specularColor,	// Specular albedo
-//     float	specularMask,	// Where is it shiny or dingy?
-//     float	gloss,			// Specular power
-//     float3	normal,			// World-space normal
-//     float3	viewDir,		// World-space vector from eye to point
-//     float3	lightDir,		// World-space vector from point to light
-//     float3	lightColor,		// Radiance of directional light
-//     float3	shadowCoord,	// Shadow coordinate (Shadow map UV & light-relative Z)
-// 	Texture2D<float> ShadowMap
-//     )
-// {
-//     float shadow = GetDirectionalShadow(shadowCoord, ShadowMap);
-//
-//     return shadow * ApplyLightCommon(
-//         diffuseColor,
-//         specularColor,
-//         specularMask,
-//         gloss,
-//         normal,
-//         viewDir,
-//         lightDir,
-//         lightColor
-//         );
-// }
 
 float3 ApplyPointLight(
     SurfaceProperties Surface,

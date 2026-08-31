@@ -552,7 +552,6 @@
     <ClCompile Include="RootSignature.cpp" />
     <ClCompile Include="SamplerManager.cpp" />
     <ClCompile Include="ShadowBuffer.cpp" />
-    <ClCompile Include="ShadowCamera.cpp" />
     <ClCompile Include="SSAO.cpp" />
     <ClCompile Include="XeGTAO.cpp" />
     <ClCompile Include="SystemTime.cpp" />
@@ -646,7 +645,6 @@
     <ClInclude Include="RootSignature.h" />
     <ClInclude Include="SamplerManager.h" />
     <ClInclude Include="ShadowBuffer.h" />
-    <ClInclude Include="ShadowCamera.h" />
     <ClInclude Include="SSAO.h" />
     <ClInclude Include="XeGTAO.h" />
     <ClInclude Include="SystemTime.h" />
