@@ -34,8 +34,8 @@ std::unordered_map<uint32_t, uint32_t> g_SamplerPermutations;
 D3D12_CPU_DESCRIPTOR_HANDLE GetSampler(uint32_t addressModes)
 {
     SamplerDesc samplerDesc;
-    samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE(addressModes & 0x3);
-    samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE(addressModes >> 2);
+    samplerDesc.AddressU = static_cast<D3D12_TEXTURE_ADDRESS_MODE>(addressModes & 0x3u);
+    samplerDesc.AddressV = static_cast<D3D12_TEXTURE_ADDRESS_MODE>((addressModes >> 2u) & 0x3u);
     return samplerDesc.CreateDescriptor();
 }
 

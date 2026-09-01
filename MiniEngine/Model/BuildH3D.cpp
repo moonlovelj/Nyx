@@ -41,7 +41,14 @@ bool ModelH3D::BuildModel(ModelData& model, Renderer::GlobalStreamingContext& st
     {
         const Material& material = GetMaterial(i);
         MaterialTextureData& textureData = model.m_MaterialTextures[i];
-        textureData.addressModes = 0x55555;
+        const uint32_t wrapMode = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        const uint32_t defaultAddressModes = wrapMode | (wrapMode << 2u);
+        textureData.addressModes = 0;
+        for (uint32_t slot = 0; slot < kNumTextures; ++slot)
+        {
+            textureData.stringIdx[slot] = 0xFFFF;
+            textureData.addressModes |= defaultAddressModes << (slot * 4u);
+        }
 
         const string& baseColorPath = material.texDiffusePath;
         const string& metallicRoughnessPath = material.texSpecularPath;
@@ -52,12 +59,6 @@ bool ModelH3D::BuildModel(ModelData& model, Renderer::GlobalStreamingContext& st
         const wstring metallicRoughnessFullPath = basePath + Utility::UTF8ToWideString(metallicRoughnessPath);
         const wstring emissiveFullPath = basePath + Utility::UTF8ToWideString(emissivePath);
         const wstring normalFullPath = basePath + Utility::UTF8ToWideString(normalPath);
-
-        textureData.stringIdx[kBaseColor] = 0xFFFF;
-        textureData.stringIdx[kMetallicRoughness] = 0xFFFF;
-        textureData.stringIdx[kOcclusion] = 0xFFFF;
-        textureData.stringIdx[kEmissive] = 0xFFFF;
-        textureData.stringIdx[kNormal] = 0xFFFF;
 
         bool alphaTest = false;
         const string lowerCaseName = Utility::ToLower(baseColorPath);

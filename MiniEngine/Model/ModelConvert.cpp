@@ -445,6 +445,27 @@ inline void CompileTexture(const std::wstring& basePath, const std::string& file
     CompileTextureOnDemand(basePath + Utility::UTF8ToWideString(fileName), flags);
 }
 
+namespace
+{
+    uint32_t GetTextureAddressModes(const cgltf_texture* texture)
+    {
+        const auto convertAddressMode = [](cgltf_wrap_mode mode) -> uint32_t
+        {
+            switch (mode)
+            {
+            case cgltf_wrap_mode_clamp_to_edge: return D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+            case cgltf_wrap_mode_mirrored_repeat: return D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+            default: return D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+            }
+        };
+
+        const cgltf_sampler* sampler = texture ? texture->sampler : nullptr;
+        const uint32_t addressU = convertAddressMode(sampler ? sampler->wrap_s : cgltf_wrap_mode_repeat);
+        const uint32_t addressV = convertAddressMode(sampler ? sampler->wrap_t : cgltf_wrap_mode_repeat);
+        return addressU | (addressV << 2u);
+    }
+}
+
 void BuildMaterials(ModelData& model, const glTF::GltfAsset& asset)
 {
 	cgltf_data* data = asset.m_Data;
@@ -476,173 +497,61 @@ void BuildMaterials(ModelData& model, const glTF::GltfAsset& asset)
 		matConst.baseColorFactor[3] = 1.0f;
 		matConst.metallicFactor = 1.0f;
 		matConst.roughnessFactor = 1.0f;
-		matConst.emissiveFactor[0] = 0.0f;
-		matConst.emissiveFactor[1] = 0.0f;
-		matConst.emissiveFactor[2] = 0.0f;
+		memcpy(matConst.emissiveFactor, srcMat.emissive_factor, sizeof(matConst.emissiveFactor));
+		matConst.normalTextureScale = srcMat.normal_texture.texture ? srcMat.normal_texture.scale : 1.0f;
 		matConst.flags = 0;
-		matTex.addressModes = 0;
-
-		for (int j = 0; j < kNumTextures; ++j) matTex.stringIdx[j] = 0xFFFF;
-
-		const uint32_t defaultAddressMode = 0x5;
-		auto mapGltfSamplerAddressModeToDX12 = [](cgltf_sampler* gltfSampler, glTF::Material::eMaterialTexture mTex)
-			{
-				uint32_t modeSValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-				if (gltfSampler)
-				{
-					switch (gltfSampler->wrap_s)
-					{
-					case cgltf_wrap_mode_clamp_to_edge:
-						modeSValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-						break;
-					case cgltf_wrap_mode_mirrored_repeat:
-						modeSValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
-						break;
-					default:
-						modeSValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-						break;
-					}
-				}
-
-				uint32_t modeTValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-				if (gltfSampler)
-				{
-					switch (gltfSampler->wrap_t)
-					{
-					case cgltf_wrap_mode_clamp_to_edge:
-						modeTValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-						break;
-					case cgltf_wrap_mode_mirrored_repeat:
-						modeTValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
-						break;
-					default:
-						modeTValue = (uint32_t)D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-						break;
-					}
-				}
-
-				const uint32_t finalValue = (modeTValue << 2 | modeSValue) << ((uint32_t)mTex * 4);
-				return finalValue;
-			};
 
 		// PBR parameter mapping
+		const auto& pbr = srcMat.pbr_metallic_roughness;
 		if (srcMat.has_pbr_metallic_roughness)
 		{
-			const auto& pbr = srcMat.pbr_metallic_roughness;
 			memcpy(matConst.baseColorFactor, pbr.base_color_factor, sizeof(float) * 4);
 			matConst.metallicFactor = pbr.metallic_factor;
 			matConst.roughnessFactor = pbr.roughness_factor;
-
-			if (pbr.base_color_texture.texture) 
-			{
-				matTex.stringIdx[glTF::Material::kBaseColor] = (uint16_t)cgltf_image_index(data, pbr.base_color_texture.texture->image);
-				matConst.baseColorUV = (uint32_t)pbr.base_color_texture.texcoord;
-				matTex.addressModes |= mapGltfSamplerAddressModeToDX12(
-					pbr.base_color_texture.texture->sampler,
-					glTF::Material::kBaseColor);
-			}
-			else
-			{
-				matTex.addressModes |= (defaultAddressMode << ((uint32_t)glTF::Material::kBaseColor * 4));
-			}
-
-			if (pbr.metallic_roughness_texture.texture) 
-			{
-				matTex.stringIdx[glTF::Material::kMetallicRoughness] = (uint16_t)cgltf_image_index(data, pbr.metallic_roughness_texture.texture->image);
-				matConst.metallicRoughnessUV = (uint32_t)pbr.metallic_roughness_texture.texcoord;
-				matTex.addressModes |= mapGltfSamplerAddressModeToDX12(
-					pbr.metallic_roughness_texture.texture->sampler,
-					glTF::Material::kMetallicRoughness);
-			}
-			else
-			{
-				matTex.addressModes |= (defaultAddressMode << ((uint32_t)glTF::Material::kMetallicRoughness * 4));
-			}
-
-			if (srcMat.normal_texture.texture) 
-			{
-				matTex.stringIdx[glTF::Material::kNormal] = (uint16_t)cgltf_image_index(data, srcMat.normal_texture.texture->image);
-				matConst.normalTextureScale = srcMat.normal_texture.scale;
-				matConst.normalUV = (uint32_t)srcMat.normal_texture.texcoord;
-				matTex.addressModes |= mapGltfSamplerAddressModeToDX12(
-					srcMat.normal_texture.texture->sampler,
-					glTF::Material::kNormal);
-			}
-			else
-			{
-				matTex.addressModes |= (defaultAddressMode << ((uint32_t)glTF::Material::kNormal * 4));
-			}
-
-			if (srcMat.emissive_texture.texture)
-			{
-				matTex.stringIdx[glTF::Material::kEmissive] = (uint16_t)cgltf_image_index(data, srcMat.emissive_texture.texture->image);
-				memcpy(matConst.emissiveFactor, srcMat.emissive_factor, sizeof(float) * 3);
-				matConst.emissiveUV = (uint32_t)srcMat.emissive_texture.texcoord;
-				matTex.addressModes |= mapGltfSamplerAddressModeToDX12(
-					srcMat.emissive_texture.texture->sampler,
-					glTF::Material::kEmissive);
-			}
-			else
-			{
-				matTex.addressModes |= (defaultAddressMode << ((uint32_t)glTF::Material::kEmissive * 4));
-			}
-
-			if (srcMat.occlusion_texture.texture)
-			{
-				matTex.stringIdx[glTF::Material::kOcclusion] = (uint16_t)cgltf_image_index(data, srcMat.occlusion_texture.texture->image);
-				matConst.occlusionUV = (uint32_t)srcMat.occlusion_texture.texcoord;
-				matTex.addressModes |= mapGltfSamplerAddressModeToDX12(
-					srcMat.occlusion_texture.texture->sampler,
-					glTF::Material::kOcclusion);
-			}
-			else
-			{
-				matTex.addressModes |= (defaultAddressMode << ((uint32_t)glTF::Material::kOcclusion * 4));
-			}
-
-			if (srcMat.specular.specular_texture.texture)
-			{
-				matTex.stringIdx[glTF::Material::kSpecular] = (uint16_t)cgltf_image_index(data, srcMat.specular.specular_texture.texture->image);
-				matTex.addressModes |= mapGltfSamplerAddressModeToDX12(
-					srcMat.specular.specular_texture.texture->sampler,
-					glTF::Material::kSpecular);
-			}
-			else
-			{
-				matTex.addressModes |= (defaultAddressMode << ((uint32_t)glTF::Material::kSpecular * 4));
-			}
-
-			if (srcMat.specular.specular_color_texture.texture)
-			{
-				matTex.stringIdx[glTF::Material::kSpecularColor] = (uint16_t)cgltf_image_index(data, srcMat.specular.specular_color_texture.texture->image);
-				matTex.addressModes |= mapGltfSamplerAddressModeToDX12(
-					srcMat.specular.specular_color_texture.texture->sampler,
-					glTF::Material::kSpecularColor);
-			}
-			else
-			{
-				matTex.addressModes |= (defaultAddressMode << ((uint32_t)glTF::Material::kSpecularColor * 4));
-			}
-
-			if (srcMat.double_sided) matConst.twoSided = 1;
-			if (srcMat.alpha_mode == cgltf_alpha_mode_blend) matConst.alphaBlend = 1;
-			if (srcMat.alpha_mode == cgltf_alpha_mode_mask) {
-				matConst.alphaTest = 1;
-				matConst.alphaRef = F32ToF16(srcMat.alpha_cutoff);
-			}
-
-			auto RegisterOpt = [&](int slot, bool srgb) {
-				if (matTex.stringIdx[slot] != 0xFFFF)
-					textureOptions[model.m_TextureNames[matTex.stringIdx[slot]]] = TextureOptions(srgb, (srcMat.alpha_mode != cgltf_alpha_mode_opaque));
-				};
-			RegisterOpt(glTF::Material::kBaseColor, true);
-			RegisterOpt(glTF::Material::kMetallicRoughness, false);
-			RegisterOpt(glTF::Material::kEmissive, true);
-			RegisterOpt(glTF::Material::kNormal, false);
-			RegisterOpt(glTF::Material::kOcclusion, false);
-			RegisterOpt(glTF::Material::kSpecular, false);
-			RegisterOpt(glTF::Material::kSpecularColor, true);
 		}
+
+		matConst.twoSided = srcMat.double_sided;
+		matConst.alphaBlend = srcMat.alpha_mode == cgltf_alpha_mode_blend;
+		matConst.alphaTest = srcMat.alpha_mode == cgltf_alpha_mode_mask;
+		if (matConst.alphaTest)
+			matConst.alphaRef = F32ToF16(srcMat.alpha_cutoff);
+
+		// Keep the texture slots in glTF::Material::eMaterialTexture order.
+		const cgltf_texture_view* textureViews[kNumTextures] = {
+			&pbr.base_color_texture,
+			&pbr.metallic_roughness_texture,
+			&srcMat.occlusion_texture,
+			&srcMat.emissive_texture,
+			&srcMat.normal_texture,
+			&srcMat.specular.specular_texture,
+			&srcMat.specular.specular_color_texture
+		};
+
+		matTex.addressModes = 0;
+		for (uint32_t slot = 0; slot < kNumTextures; ++slot)
+		{
+			const cgltf_texture_view& textureView = *textureViews[slot];
+			const cgltf_texture* texture = textureView.texture;
+			matTex.stringIdx[slot] = 0xFFFF;
+			matTex.addressModes |= GetTextureAddressModes(texture) << (slot * 4u);
+			if (texture == nullptr)
+				continue;
+
+			ASSERT(textureView.texcoord >= 0 && textureView.texcoord <= 1,
+				"Material %zu, texture slot %u: only TEXCOORD_0 and TEXCOORD_1 are supported (got %d).",
+				i, slot, textureView.texcoord);
+
+			matTex.stringIdx[slot] = static_cast<uint16_t>(cgltf_image_index(data, texture->image));
+			const bool srgb = slot == kBaseColor || slot == kEmissive || slot == kSpecularColor;
+			textureOptions[model.m_TextureNames[matTex.stringIdx[slot]]] =
+				TextureOptions(srgb, srcMat.alpha_mode != cgltf_alpha_mode_opaque);
+		}
+
+		matConst.baseColorUV = static_cast<uint32_t>(pbr.base_color_texture.texcoord);
+		matConst.metallicRoughnessUV = static_cast<uint32_t>(pbr.metallic_roughness_texture.texcoord);
+		matConst.normalUV = static_cast<uint32_t>(srcMat.normal_texture.texcoord);
+		matConst.emissiveUV = static_cast<uint32_t>(srcMat.emissive_texture.texcoord);
+		matConst.occlusionUV = static_cast<uint32_t>(srcMat.occlusion_texture.texcoord);
 	}
 
 	for (size_t i = 0; i < model.m_TextureNames.size(); ++i)
@@ -680,7 +589,7 @@ void BuildAnimations(ModelData& model, const glTF::GltfAsset& asset, const NodeM
 			const cgltf_animation_channel& channel = srcAnim.channels[j];
 			const cgltf_animation_sampler& sampler = *channel.sampler;
 
-			AnimationCurve curve;
+			AnimationCurve curve{};
 			auto it = nodeMap.find(channel.target_node);
 			if (it != nodeMap.end())
 			{
@@ -693,30 +602,30 @@ void BuildAnimations(ModelData& model, const glTF::GltfAsset& asset, const NodeM
 
 			switch (channel.target_path) 
             {
-			case cgltf_animation_path_type_translation: curve.targetPath = glTF::AnimChannel::kTranslation; break;
-			case cgltf_animation_path_type_rotation:    curve.targetPath = glTF::AnimChannel::kRotation; break;
-			case cgltf_animation_path_type_scale:       curve.targetPath = glTF::AnimChannel::kScale; break;
-			case cgltf_animation_path_type_weights:     curve.targetPath = glTF::AnimChannel::kWeights; break;
+			case cgltf_animation_path_type_translation: curve.targetPath = AnimationCurve::kTranslation; break;
+			case cgltf_animation_path_type_rotation:    curve.targetPath = AnimationCurve::kRotation; break;
+			case cgltf_animation_path_type_scale:       curve.targetPath = AnimationCurve::kScale; break;
+			case cgltf_animation_path_type_weights:     curve.targetPath = AnimationCurve::kWeights; break;
 			default: continue;
 			}
 
 			// Interpolation mapping
 			switch (sampler.interpolation) 
             {
-			case cgltf_interpolation_type_linear:       curve.interpolation = glTF::AnimSampler::kLinear; break;
-			case cgltf_interpolation_type_step:         curve.interpolation = glTF::AnimSampler::kStep; break;
-			case cgltf_interpolation_type_cubic_spline: curve.interpolation = glTF::AnimSampler::kCubicSpline; break;
-			default: curve.interpolation = glTF::AnimSampler::kLinear; break;
+			case cgltf_interpolation_type_linear:       curve.interpolation = AnimationCurve::kLinear; break;
+			case cgltf_interpolation_type_step:         curve.interpolation = AnimationCurve::kStep; break;
+			case cgltf_interpolation_type_cubic_spline: curve.interpolation = AnimationCurve::kCubicSpline; break;
+			default: curve.interpolation = AnimationCurve::kLinear; break;
 			}
 
 			// Keyframe data offset and format
 			curve.keyFrameOffset = (uint32_t)model.m_AnimationKeyFrameData.size();
-			curve.keyFrameFormat = glTF::GltfAsset::MapComponentType(sampler.output->component_type);
+			curve.keyFrameFormat = AnimationCurve::kFloat;
 			curve.numSegments = (float)(sampler.input->count - 1);
 
-			// Compute stride (float count)
-			uint32_t numComps = (uint32_t)cgltf_num_components(sampler.output->type);
-			curve.keyFrameStride = numComps; // Assume float; adjust if short integers
+			// Runtime keyframes are tightly packed floats, regardless of the source format.
+			const uint32_t numComps = static_cast<uint32_t>(cgltf_num_components(sampler.output->type));
+			curve.keyFrameStride = numComps;
 
 			// Extract timestamps to compute duration
 			std::vector<float> times(sampler.input->count);
@@ -729,13 +638,15 @@ void BuildAnimations(ModelData& model, const glTF::GltfAsset& asset, const NodeM
 				curve.rangeScale = curve.numSegments / (endTime - curve.startTime);
 			animSet.duration = std::max(animSet.duration, endTime);
 
-			// Extract keyframe data
-			size_t dataSize = sampler.output->count * cgltf_calc_size(sampler.output->type, sampler.output->component_type);
-			const uint8_t* srcData = (const uint8_t*)sampler.output->buffer_view->buffer->data + sampler.output->offset + sampler.output->buffer_view->offset;
+			std::vector<float> keyFrames(sampler.output->count * numComps);
+			const size_t decodedCount =
+				cgltf_accessor_unpack_floats(sampler.output, keyFrames.data(), keyFrames.size());
+			ASSERT(decodedCount == keyFrames.size(), "Failed to decode animation keyframes.");
 
-			size_t currentByteSize = model.m_AnimationKeyFrameData.size();
+			const size_t dataSize = keyFrames.size() * sizeof(float);
+			const size_t currentByteSize = model.m_AnimationKeyFrameData.size();
 			model.m_AnimationKeyFrameData.resize(currentByteSize + dataSize);
-			memcpy(model.m_AnimationKeyFrameData.data() + currentByteSize, srcData, dataSize);
+			memcpy(model.m_AnimationKeyFrameData.data() + currentByteSize, keyFrames.data(), dataSize);
 
 			model.m_AnimationCurves.push_back(curve);
 			animSet.numCurves++;
