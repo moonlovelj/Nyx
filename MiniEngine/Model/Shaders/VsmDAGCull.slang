@@ -7,9 +7,9 @@
 // A PARTICULAR PURPOSE, OR NON-INFRINGEMENT.
 //
 
-//#ifndef DAG_CULL_PASS_INDEX
-//#error DAG_CULL_PASS_INDEX must be supplied through ProgramDesc::AddDefine().
-//#endif
+#ifndef DAG_CULL_PASS_INDEX
+#error DAG_CULL_PASS_INDEX must be supplied through ProgramDesc::AddDefine().
+#endif
 
 #if DAG_CULL_PASS_INDEX == 1
 #define DAG_CULL_PASS1
@@ -57,7 +57,6 @@ globallycoherent RWStructuredBuffer<QueueState> g_TaskQueueStateUAV;
 #ifdef VSM_MULTI_VIEW_CULL
 globallycoherent RWStructuredBuffer<VsmNodeTask> g_VsmNodeTasksUAV;
 globallycoherent RWStructuredBuffer<VsmCandidateMeshlet> g_VsmCandidateMeshletsUAV;
-StructuredBuffer<uint> g_VsmRasterWindowPageMasks;
 RWStructuredBuffer<VsmRasterItem> g_VsmRasterItemsUAV;
 RWByteAddressBuffer g_VsmCullCounters;
 #else
@@ -163,8 +162,8 @@ DAGCullViewData GetDAGCullViewData(uint viewId)
     view.LodScale = view.ShadowView.LodScale;
     view.IsPerspective = false;
     view.HasHistory = false;
-    view.HZBSourceWidth = VSM_VIRTUAL_RESOLUTION;
-    view.HZBSourceHeight = VSM_VIRTUAL_RESOLUTION;
+    view.HZBSourceWidth = VSM_PHYSICAL_POOL_RESOLUTION;
+    view.HZBSourceHeight = VSM_PHYSICAL_POOL_RESOLUTION;
     view.HZBUvScaleBias = float4(1.0f, 1.0f, 0.0f, 0.0f);
 #elif defined(VSM_PHYSICAL_PAGE_PASS)
     VsmPhysicalPageView pageView;
@@ -223,7 +222,19 @@ bool EvaluateNodeVisibility(
         bboxMax,
         worldMatrix,
         view.ShadowView);
-    return DoesVsmPageBoundsContainRequestedPage(view.ViewId, bounds);
+    Texture2D<float> previousHzb = g_DAGCull.PreviousHZB;
+    Texture2D<float> currentHzb = g_DAGCull.CurrentHZB;
+    return DoesVsmPageBoundsNeedTraversal(
+        bboxMin,
+        bboxMax,
+        worldMatrix,
+        view.ViewId,
+        bounds,
+        DAG_CULL_PASS_INDEX,
+        previousHzb,
+        currentHzb,
+        g_HZBSampler,
+        context);
 #elif !defined(DISABLE_HZB_CULL)
 #ifdef DAG_CULL_PASS1
     return view.HasHistory && EvaluateBoundsVisibility(
@@ -584,6 +595,20 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
                     uint requestedPageMask =
                         g_VsmRasterWindowPageMasks[GetVsmRasterWindowIndex(cullView.ViewId, windowCoord)];
                     uint pageMask = requestedPageMask & GetVsmRasterWindowCoverageMask(pageBounds, windowCoord);
+                    Texture2D<float> previousHzb = g_DAGCull.PreviousHZB;
+                    Texture2D<float> currentHzb = g_DAGCull.CurrentHZB;
+                    pageMask = FilterVsmRasterPageMaskByHzb(
+                        meshletHeader.BBoxMin,
+                        meshletHeader.BBoxMax,
+                        meshInstance.WorldMatrix,
+                        cullView.ViewId,
+                        windowCoord,
+                        pageMask,
+                        passIndex,
+                        previousHzb,
+                        currentHzb,
+                        g_HZBSampler,
+                        cullContext);
                     if (pageMask == 0u)
                         continue;
 

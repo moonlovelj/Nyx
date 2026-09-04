@@ -1,3 +1,7 @@
+#ifndef VSM_CULL_PASS_INDEX
+#error VSM_CULL_PASS_INDEX must be supplied through ProgramDesc::AddDefine().
+#endif
+
 #include "CommonResources.slang"
 #include "CullCommon.slang"
 #include "VsmCull.h.slang"
@@ -5,6 +9,9 @@
 struct VsmInstanceCullConstants
 {
     uint MaxCommands;
+    float4 HZBSizeAndInv;
+    DescriptorHandle<Texture2D<float>> PreviousHZB;
+    DescriptorHandle<Texture2D<float>> CurrentHZB;
 };
 
 ConstantBuffer<VsmInstanceCullConstants> g_VsmInstanceCull;
@@ -13,6 +20,7 @@ StructuredBuffer<uint> g_VsmActiveViews;
 RWStructuredBuffer<QueueState> g_VsmCullQueueState;
 RWStructuredBuffer<VsmNodeTask> g_VsmNodeTasks;
 RWByteAddressBuffer g_VsmCullCounters;
+SamplerState g_HZBSampler;
 
 void CountVsmCullOverflow(uint count)
 {
@@ -45,7 +53,29 @@ void computeMain(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
         instanceData.BBoxMax,
         meshData.WorldMatrix,
         shadowView);
-    bool visible = DoesVsmPageBoundsContainRequestedPage(viewId, bounds);
+
+    CullCommonContext cullContext;
+    cullContext.ViewportWidth = VSM_PAGE_SIZE;
+    cullContext.ViewportHeight = VSM_PAGE_SIZE;
+    cullContext.HZBSourceWidth = VSM_PHYSICAL_POOL_RESOLUTION;
+    cullContext.HZBSourceHeight = VSM_PHYSICAL_POOL_RESOLUTION;
+    cullContext.HZBSizeAndInv = g_VsmInstanceCull.HZBSizeAndInv;
+    cullContext.HZBUvScaleBias = float4(1.0f, 1.0f, 0.0f, 0.0f);
+
+    Texture2D<float> previousHzb = g_VsmInstanceCull.PreviousHZB;
+    Texture2D<float> currentHzb = g_VsmInstanceCull.CurrentHZB;
+    const uint passIndex = VSM_CULL_PASS_INDEX;
+    bool visible = DoesVsmPageBoundsNeedTraversal(
+        instanceData.BBoxMin,
+        instanceData.BBoxMax,
+        meshData.WorldMatrix,
+        viewId,
+        bounds,
+        passIndex,
+        previousHzb,
+        currentHzb,
+        g_HZBSampler,
+        cullContext);
 
     uint waveTaskCount = WaveActiveCountBits(visible);
     uint waveTaskStart = 0u;
@@ -53,7 +83,7 @@ void computeMain(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
     if (WaveIsFirstLane() && waveTaskCount > 0u)
     {
         InterlockedAdd(
-            g_VsmCullQueueState[0].PassState[0].NodeWriteOffset,
+            g_VsmCullQueueState[0].PassState[passIndex].NodeWriteOffset,
             waveTaskCount,
             waveTaskStart);
 
@@ -65,7 +95,7 @@ void computeMain(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
         {
             uint unused;
             InterlockedAdd(
-                g_VsmCullQueueState[0].PassState[0].NodeCount,
+                g_VsmCullQueueState[0].PassState[passIndex].NodeCount,
                 waveWritableCount,
                 unused);
         }

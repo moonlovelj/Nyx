@@ -9,6 +9,9 @@ StructuredBuffer<VsmShadowView> g_VsmCullShadowViews;
 StructuredBuffer<DirectionalVsmAddressGpu> g_VsmCullDirectionalAddresses;
 StructuredBuffer<VsmProjectionGpu> g_VsmCullProjections;
 StructuredBuffer<uint> g_VsmPageFlags;
+StructuredBuffer<uint> g_VsmRasterWindowPageMasks;
+StructuredBuffer<uint> g_VsmCullPageTable;
+StructuredBuffer<VsmPhysicalPageView> g_VsmCullPhysicalPageViews;
 
 struct VsmCullPageBounds
 {
@@ -144,6 +147,227 @@ uint PackVsmRasterWindow(uint2 windowCoord, uint pageMask)
     return ((windowCoord.x & VSM_RASTER_WINDOW_COORD_MASK) << VSM_RASTER_WINDOW_X_SHIFT) |
         ((windowCoord.y & VSM_RASTER_WINDOW_COORD_MASK) << VSM_RASTER_WINDOW_Y_SHIFT) |
         ((pageMask & VSM_RASTER_WINDOW_PAGE_MASK_MASK) << VSM_RASTER_WINDOW_PAGE_MASK_SHIFT);
+}
+
+float4x4 GetVsmCullPageViewProj(VsmPhysicalPageView pageView)
+{
+    return float4x4(
+        pageView.ViewProjRow0,
+        pageView.ViewProjRow1,
+        pageView.ViewProjRow2,
+        pageView.ViewProjRow3);
+}
+
+float4x4 GetVsmCullPagePrevViewProj(VsmPhysicalPageView pageView)
+{
+    return float4x4(
+        pageView.PrevViewProjRow0,
+        pageView.PrevViewProjRow1,
+        pageView.PrevViewProjRow2,
+        pageView.PrevViewProjRow3);
+}
+
+bool HasVsmCullPageHistory(VsmPhysicalPageView pageView)
+{
+    return (pageView.Flags & VSM_PAGE_RENDER_REQUEST_HISTORY_VALID) != 0u;
+}
+
+bool TryGetDirectionalVsmCullPageView(
+    uint viewId,
+    uint2 localPage,
+    out VsmPhysicalPageView pageView)
+{
+    pageView = {};
+    VsmShadowView shadowView = g_VsmCullShadowViews[viewId];
+    if (shadowView.AddressType != VSM_ADDRESS_TYPE_DIRECTIONAL_CLIPMAP)
+        return false;
+
+    DirectionalVsmAddressGpu addressData = g_VsmCullDirectionalAddresses[shadowView.AddressDataIndex];
+    int2 globalPage = addressData.AddressAndWindowOriginPage.zw + int2(localPage);
+    uint pageTableIndex = shadowView.PageTableBase + GetVsmPageTableIndex(GetVsmPageTableCoord(globalPage));
+    uint pageTableEntry = g_VsmCullPageTable[pageTableIndex];
+    if (!IsVsmPageTableEntryExact(pageTableEntry))
+        return false;
+
+    uint physicalPageIndex = GetVsmPageTablePhysicalPageIndex(pageTableEntry);
+    if (physicalPageIndex >= VSM_PHYSICAL_PAGE_CAPACITY)
+        return false;
+
+    pageView = g_VsmCullPhysicalPageViews[physicalPageIndex];
+    return pageView.PhysicalPageIndex == physicalPageIndex &&
+        pageView.ViewId == viewId &&
+        all(pageView.VirtualPage == globalPage);
+}
+
+bool EvaluateVsmCullPageHzb(
+    float3 bboxMin,
+    float3 bboxMax,
+    float4x4 worldMatrix,
+    VsmPhysicalPageView pageView,
+    Texture2D<float> hzb,
+    SamplerState hzbSampler,
+    CullCommonContext context,
+    bool usePreviousProjection)
+{
+    context.HZBUvScaleBias = pageView.PhysicalAtlasUvScaleBias;
+    float4x4 viewProjMatrix = usePreviousProjection
+        ? GetVsmCullPagePrevViewProj(pageView)
+        : GetVsmCullPageViewProj(pageView);
+
+    return EvaluateBoundsVisibility(
+        bboxMin,
+        bboxMax,
+        worldMatrix,
+        viewProjMatrix,
+        hzb,
+        hzbSampler,
+        context,
+        VSM_PHYSICAL_HZB_MAX_PAGE_MIP);
+}
+
+bool IsVsmCullPageVisible(
+    float3 bboxMin,
+    float3 bboxMax,
+    float4x4 worldMatrix,
+    uint viewId,
+    uint2 localPage,
+    uint passIndex,
+    Texture2D<float> previousHzb,
+    Texture2D<float> currentHzb,
+    SamplerState hzbSampler,
+    CullCommonContext context,
+    bool requirePreviousOcclusion)
+{
+    VsmPhysicalPageView pageView;
+    if (!TryGetDirectionalVsmCullPageView(viewId, localPage, pageView))
+        return false;
+
+    if (!HasVsmCullPageHistory(pageView))
+        return passIndex == 0u;
+
+    // Pass 1 nodes only test current depth. Final meshlets additionally prove
+    // that the page was hidden in the previous HZB to avoid duplicate draws.
+    if (passIndex == 0u || requirePreviousOcclusion)
+    {
+        bool previousVisible = EvaluateVsmCullPageHzb(
+            bboxMin,
+            bboxMax,
+            worldMatrix,
+            pageView,
+            previousHzb,
+            hzbSampler,
+            context,
+            true);
+        if (passIndex == 0u || previousVisible)
+            return passIndex == 0u && previousVisible;
+    }
+
+    return EvaluateVsmCullPageHzb(
+        bboxMin,
+        bboxMax,
+        worldMatrix,
+        pageView,
+        currentHzb,
+        hzbSampler,
+        context,
+        false);
+}
+
+bool DoesVsmPageBoundsNeedTraversal(
+    float3 bboxMin,
+    float3 bboxMax,
+    float4x4 worldMatrix,
+    uint viewId,
+    VsmCullPageBounds bounds,
+    uint passIndex,
+    Texture2D<float> previousHzb,
+    Texture2D<float> currentHzb,
+    SamplerState hzbSampler,
+    CullCommonContext context)
+{
+    if (!DoesVsmPageBoundsContainRequestedPage(viewId, bounds))
+        return false;
+
+    uint2 windowMin = uint2(bounds.Min) >> VSM_RASTER_WINDOW_PAGES_LOG2;
+    uint2 windowMax = uint2(bounds.Max) >> VSM_RASTER_WINDOW_PAGES_LOG2;
+    // Physical atlas pages are discontinuous. Keep large nodes conservative
+    // instead of turning one node test into an unbounded page-table walk.
+    if (any(windowMin != windowMax))
+        return true;
+
+    uint pageMask = g_VsmRasterWindowPageMasks[GetVsmRasterWindowIndex(viewId, windowMin)] &
+        GetVsmRasterWindowCoverageMask(bounds, windowMin);
+    while (pageMask != 0u)
+    {
+        uint pageBitIndex = uint(firstbitlow(pageMask));
+        uint2 pageInWindow = uint2(
+            pageBitIndex & (VSM_RASTER_WINDOW_PAGES - 1u),
+            pageBitIndex >> VSM_RASTER_WINDOW_PAGES_LOG2);
+        uint2 localPage = (windowMin << VSM_RASTER_WINDOW_PAGES_LOG2) + pageInWindow;
+        if (IsVsmCullPageVisible(
+                bboxMin,
+                bboxMax,
+                worldMatrix,
+                viewId,
+                localPage,
+                passIndex,
+                previousHzb,
+                currentHzb,
+                hzbSampler,
+                context,
+                false))
+        {
+            return true;
+        }
+
+        pageMask &= pageMask - 1u;
+    }
+
+    return false;
+}
+
+uint FilterVsmRasterPageMaskByHzb(
+    float3 bboxMin,
+    float3 bboxMax,
+    float4x4 worldMatrix,
+    uint viewId,
+    uint2 windowCoord,
+    uint pageMask,
+    uint passIndex,
+    Texture2D<float> previousHzb,
+    Texture2D<float> currentHzb,
+    SamplerState hzbSampler,
+    CullCommonContext context)
+{
+    uint visiblePageMask = 0u;
+    while (pageMask != 0u)
+    {
+        uint pageBitIndex = uint(firstbitlow(pageMask));
+        uint pageBit = 1u << pageBitIndex;
+        uint2 pageInWindow = uint2(
+            pageBitIndex & (VSM_RASTER_WINDOW_PAGES - 1u),
+            pageBitIndex >> VSM_RASTER_WINDOW_PAGES_LOG2);
+        uint2 localPage = (windowCoord << VSM_RASTER_WINDOW_PAGES_LOG2) + pageInWindow;
+        if (IsVsmCullPageVisible(
+                bboxMin,
+                bboxMax,
+                worldMatrix,
+                viewId,
+                localPage,
+                passIndex,
+                previousHzb,
+                currentHzb,
+                hzbSampler,
+                context,
+                true))
+        {
+            visiblePageMask |= pageBit;
+        }
+
+        pageMask &= pageMask - 1u;
+    }
+
+    return visiblePageMask;
 }
 
 #endif

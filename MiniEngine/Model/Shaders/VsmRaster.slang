@@ -17,6 +17,13 @@ StructuredBuffer<DirectionalVsmAddressGpu> g_DirectionalVsmAddresses;
 StructuredBuffer<uint> g_VsmPageTable;
 StructuredBuffer<VsmPhysicalPageView> g_VsmPhysicalPageViews;
 
+struct VsmRasterConstants
+{
+    uint PassIndex;
+};
+
+ConstantBuffer<VsmRasterConstants> g_VsmRaster;
+
 struct VsmRasterPayload
 {
     VisibleMeshletPayload Meshlet;
@@ -71,10 +78,14 @@ void amplificationMain(
     uint3 groupId : SV_GroupID,
     uint groupThreadId : SV_GroupThreadID)
 {
-    uint rasterItemIndex = groupId.y * VSM_RASTER_DISPATCH_WIDTH + groupId.x;
+    uint passIndex = min(g_VsmRaster.PassIndex, 1u);
+    uint rasterItemOffset = passIndex == 0u
+        ? 0u
+        : min(g_VsmCullQueueState[0].PassState[0].VisibleMeshletCount, uint(MAX_VISIBLE_MESHLETS));
+    uint rasterItemIndex = rasterItemOffset + groupId.y * VSM_RASTER_DISPATCH_WIDTH + groupId.x;
     uint rasterItemCount = min(
-        g_VsmCullQueueState[0].PassState[0].VisibleMeshletCount,
-        uint(MAX_VISIBLE_MESHLETS));
+        g_VsmCullQueueState[0].PassState[passIndex].VisibleMeshletCount,
+        uint(MAX_VISIBLE_MESHLETS) - rasterItemOffset);
 
     if (groupThreadId == 0u)
     {
@@ -87,7 +98,7 @@ void amplificationMain(
         s_InstanceIndex = 0u;
         s_PackedMeshlet = 0u;
 
-        if (rasterItemIndex < rasterItemCount)
+        if (rasterItemIndex < rasterItemOffset + rasterItemCount)
         {
             VsmRasterItem rasterItem = g_VsmRasterItems[rasterItemIndex];
             VsmShadowView shadowView = g_VsmShadowViews[rasterItem.ViewId];

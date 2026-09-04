@@ -133,7 +133,8 @@ bool HZBVisible(
     SamplerState hzbSampler,
     float4 clipMin,
     float4 clipMax,
-    CullCommonContext context)
+    CullCommonContext context,
+    int maxMipLevel)
 {
     if (clipMin.x > 1.0 || clipMin.y > 1.0 || clipMax.x < -1.0 || clipMax.y < -1.0)
         return false;
@@ -154,7 +155,7 @@ bool HZBVisible(
     pixelsRect = int4(rectMin, rectMax);
 
     int4 coarseRect = pixelsRect >> 1;
-    int hzbMip = MipLevelForRect(coarseRect, HZB_TARGET_FOOTPRINT_PIXELS);
+    int hzbMip = min(MipLevelForRect(coarseRect, HZB_TARGET_FOOTPRINT_PIXELS), maxMipLevel);
     coarseRect >>= hzbMip;
 
     // TexelSize = (1 / HZBSize) * 2^mip. Assumes power-of-two HZB dimensions.
@@ -171,6 +172,16 @@ bool HZBVisible(
     float minDepth = min(min(min(depthMinByCol.x, depthMinByCol.y), depthMinByCol.z), depthMinByCol.w);
 
     return clipMax.z + DEPTH_EPSILON >= minDepth;
+}
+
+bool HZBVisible(
+    Texture2D<float> hzb,
+    SamplerState hzbSampler,
+    float4 clipMin,
+    float4 clipMax,
+    CullCommonContext context)
+{
+    return HZBVisible(hzb, hzbSampler, clipMin, clipMax, context, 0x7fffffff);
 }
 
 float2 GetScreenPos(float4 clipPos, CullCommonContext context)
@@ -240,7 +251,8 @@ bool EvaluateBoundsVisibility(
     float4x4 viewProjMatrix,
     Texture2D<float> hzbTexture,
     SamplerState hzbSampler,
-    CullCommonContext context)
+    CullCommonContext context,
+    int maxHZBMipLevel)
 {
     float4 clipMin;
     float4 clipMax;
@@ -261,7 +273,27 @@ bool EvaluateBoundsVisibility(
         return true;
 
     return LargeEnough(clipMin, clipMax, 1.0, context) &&
-        HZBVisible(hzbTexture, hzbSampler, clipMin, clipMax, context);
+        HZBVisible(hzbTexture, hzbSampler, clipMin, clipMax, context, maxHZBMipLevel);
+}
+
+bool EvaluateBoundsVisibility(
+    float3 bboxMin,
+    float3 bboxMax,
+    float4x4 worldMatrix,
+    float4x4 viewProjMatrix,
+    Texture2D<float> hzbTexture,
+    SamplerState hzbSampler,
+    CullCommonContext context)
+{
+    return EvaluateBoundsVisibility(
+        bboxMin,
+        bboxMax,
+        worldMatrix,
+        viewProjMatrix,
+        hzbTexture,
+        hzbSampler,
+        context,
+        0x7fffffff);
 }
 
 bool EvaluateBoundsInFrustum(

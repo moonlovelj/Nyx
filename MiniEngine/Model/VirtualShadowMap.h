@@ -104,7 +104,6 @@ namespace Renderer::VirtualShadowMap
 
     void AllocateRequestedPages(GraphicsContext& gfxContext);
     void BuildPhysicalPageRenderData(GraphicsContext& gfxContext);
-    void BuildDirectionalRasterItems(GraphicsContext& gfxContext, const Renderer::FrameConstants& frame);
     void RenderDirectionalPhysicalPagesDepth(
         GraphicsContext& gfxContext,
         const Renderer::FrameConstants& frame);
