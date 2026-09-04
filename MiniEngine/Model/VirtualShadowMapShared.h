@@ -12,6 +12,14 @@
 #define VSM_VIRTUAL_RESOLUTION (VSM_PAGE_SIZE * VSM_PAGE_TABLE_DIM)
 #define VSM_PAGES_PER_VIEW (VSM_PAGE_TABLE_DIM * VSM_PAGE_TABLE_DIM)
 
+#define VSM_RASTER_WINDOW_PAGES_LOG2 2u
+#define VSM_RASTER_WINDOW_PAGES (1u << VSM_RASTER_WINDOW_PAGES_LOG2)
+#define VSM_RASTER_WINDOW_DIM (VSM_PAGE_TABLE_DIM >> VSM_RASTER_WINDOW_PAGES_LOG2)
+#define VSM_RASTER_WINDOWS_PER_VIEW (VSM_RASTER_WINDOW_DIM * VSM_RASTER_WINDOW_DIM)
+
+#define VSM_PAGE_FLAGS_MIP_COUNT (VSM_PAGE_TABLE_DIM_LOG2 + 1u)
+#define VSM_PAGE_FLAGS_NODES_PER_VIEW ((4u * VSM_PAGES_PER_VIEW - 1u) / 3u)
+
 #define VSM_PHYSICAL_POOL_DIM_PAGES_LOG2 5u
 #define VSM_PHYSICAL_POOL_DIM_PAGES (1u << VSM_PHYSICAL_POOL_DIM_PAGES_LOG2)
 #define VSM_PHYSICAL_POOL_DIM_PAGES_MASK (VSM_PHYSICAL_POOL_DIM_PAGES - 1u)
@@ -102,6 +110,14 @@ namespace Renderer::VirtualShadowMap
     inline constexpr uint32_t kVirtualResolution = VSM_VIRTUAL_RESOLUTION;
     inline constexpr uint32_t kPagesPerView = VSM_PAGES_PER_VIEW;
 
+    inline constexpr uint32_t kRasterWindowPagesLog2 = VSM_RASTER_WINDOW_PAGES_LOG2;
+    inline constexpr uint32_t kRasterWindowPages = VSM_RASTER_WINDOW_PAGES;
+    inline constexpr uint32_t kRasterWindowDim = VSM_RASTER_WINDOW_DIM;
+    inline constexpr uint32_t kRasterWindowsPerView = VSM_RASTER_WINDOWS_PER_VIEW;
+
+    inline constexpr uint32_t kPageFlagsMipCount = VSM_PAGE_FLAGS_MIP_COUNT;
+    inline constexpr uint32_t kPageFlagsNodesPerView = VSM_PAGE_FLAGS_NODES_PER_VIEW;
+
     inline constexpr uint32_t kPhysicalPoolDimPagesLog2 = VSM_PHYSICAL_POOL_DIM_PAGES_LOG2;
     inline constexpr uint32_t kPhysicalPoolDimPages = VSM_PHYSICAL_POOL_DIM_PAGES;
     inline constexpr uint32_t kPhysicalPoolDimPagesMask = VSM_PHYSICAL_POOL_DIM_PAGES_MASK;
@@ -118,6 +134,7 @@ namespace Renderer::VirtualShadowMap
     inline constexpr uint32_t kInvalidViewId = VSM_INVALID_VIEW_ID;
 
     static_assert(kPagesPerView % kRequestMaskWordBits == 0);
+    static_assert(kPageFlagsNodesPerView == 21845);
     static_assert(kPhysicalPageCapacity <= VSM_PAGE_TABLE_PHYSICAL_PAGE_INDEX_MASK + 1u);
     static_assert(kPhysicalPageCapacity == 1024);
     static_assert(kPhysicalPoolResolution == 4096);

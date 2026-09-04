@@ -28,6 +28,12 @@ namespace Renderer::VirtualShadowMap
         uint32_t CoarseMappedPages = 0;
         uint32_t CoarseOverflowPages = 0;
         uint32_t RenderRequests = 0;
+        uint32_t RenderDataPages = 0;
+        uint32_t ActiveRenderViews = 0;
+        uint32_t RenderMaskPages = 0;
+        uint32_t InvalidRenderRequests = 0;
+        uint32_t RasterItems = 0;
+        uint32_t CullOverflow = 0;
         uint32_t FreePagesBeforeAllocation = 0;
         uint32_t RenderBudget = 0;
         uint32_t RenderBacklog = 0;
@@ -97,9 +103,10 @@ namespace Renderer::VirtualShadowMap
     void MarkClipmapDirty(uint32_t clipmapId);
 
     void AllocateRequestedPages(GraphicsContext& gfxContext);
-    void BuildPhysicalPageViews(GraphicsContext& gfxContext);
+    void BuildPhysicalPageRenderData(GraphicsContext& gfxContext);
+    void BuildDirectionalRasterItems(GraphicsContext& gfxContext, const Renderer::FrameConstants& frame);
 
-    // The batch entry becomes the active path once all selected requests are rendered in the same frame.
+    // The current per-page renderer remains the correctness baseline until the multi-view cull path is connected.
     void ClearRequestedPhysicalPages(GraphicsContext& gfxContext);
     void ClearRequestedPhysicalPage(GraphicsContext& gfxContext, uint32_t renderRequestIndex);
     void RenderRequestedPhysicalPagesDepth(

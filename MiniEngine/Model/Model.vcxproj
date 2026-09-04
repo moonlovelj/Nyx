@@ -127,6 +127,7 @@
     <ClInclude Include="StructsIO.h" />
     <ClInclude Include="TextureConvert.h" />
     <ClInclude Include="VirtualShadowMap.h" />
+    <ClInclude Include="VirtualShadowMapCullShared.h" />
     <ClInclude Include="VirtualShadowMapShared.h" />
   </ItemGroup>
   <ItemGroup>
@@ -170,7 +171,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
-    <None Include="Shaders\BuildVsmPhysicalPageViews.slang" />
+    <None Include="Shaders\BuildVsmCullDispatchArgs.slang" />
+    <None Include="Shaders\BuildVsmPageFlags.slang" />
+    <None Include="Shaders\BuildVsmPhysicalPageRenderData.slang" />
     <None Include="Shaders\ClearVsmPhysicalPage.slang" />
     <None Include="Shaders\BindlessIndices.h.slang" />
     <None Include="Shaders\CullCommon.slang" />
@@ -192,6 +195,9 @@
     <None Include="Shaders\ViewCommon.h.slang" />
     <None Include="Shaders\ViewMode.h.slang" />
     <None Include="Shaders\VirtualShadowMap.h.slang" />
+    <None Include="Shaders\VsmCull.h.slang" />
+    <None Include="Shaders\VsmDAGCull.slang" />
+    <None Include="Shaders\VsmInstanceCull.slang" />
     <None Include="Shaders\VsmPhysicalPagePass.h.slang" />
     <None Include="Shaders\VsmResidency.slang" />
     <None Include="Shaders\VsmSampling.h.slang" />

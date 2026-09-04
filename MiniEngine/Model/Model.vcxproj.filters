@@ -197,6 +197,9 @@
     <ClInclude Include="VirtualShadowMapShared.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="VirtualShadowMapCullShared.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="Shaders\FillLightGrid.slang">
@@ -275,7 +278,22 @@
     <None Include="Shaders\VsmPageManagement.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
-    <None Include="Shaders\BuildVsmPhysicalPageViews.slang">
+    <None Include="Shaders\BuildVsmPhysicalPageRenderData.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
+    <None Include="Shaders\BuildVsmCullDispatchArgs.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
+    <None Include="Shaders\BuildVsmPageFlags.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
+    <None Include="Shaders\VsmCull.h.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
+    <None Include="Shaders\VsmDAGCull.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
+    <None Include="Shaders\VsmInstanceCull.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\ClearVsmPhysicalPage.slang">

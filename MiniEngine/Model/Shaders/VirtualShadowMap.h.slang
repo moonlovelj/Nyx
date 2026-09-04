@@ -169,16 +169,33 @@ VsmRequestMaskLocation GetVsmRequestMaskLocation(VsmShadowView shadowView, uint2
     return location;
 }
 
-bool MarkVsmPageRequested(
-    RWByteAddressBuffer requestMask,
+bool MarkVsmPageInMask(
+    RWByteAddressBuffer pageMask,
     VsmShadowView shadowView,
     uint2 pageTableCoord)
 {
     VsmRequestMaskLocation location = GetVsmRequestMaskLocation(shadowView, pageTableCoord);
 
     uint previousMask;
-    requestMask.InterlockedOr(location.ByteAddress, location.BitMask, previousMask);
+    pageMask.InterlockedOr(location.ByteAddress, location.BitMask, previousMask);
     return (previousMask & location.BitMask) == 0u;
+}
+
+bool IsVsmPageInMask(
+    ByteAddressBuffer pageMask,
+    VsmShadowView shadowView,
+    uint2 pageTableCoord)
+{
+    VsmRequestMaskLocation location = GetVsmRequestMaskLocation(shadowView, pageTableCoord);
+    return (pageMask.Load(location.ByteAddress) & location.BitMask) != 0u;
+}
+
+bool MarkVsmPageRequested(
+    RWByteAddressBuffer requestMask,
+    VsmShadowView shadowView,
+    uint2 pageTableCoord)
+{
+    return MarkVsmPageInMask(requestMask, shadowView, pageTableCoord);
 }
 
 bool IsVsmPageRequested(
@@ -186,8 +203,7 @@ bool IsVsmPageRequested(
     VsmShadowView shadowView,
     uint2 pageTableCoord)
 {
-    VsmRequestMaskLocation location = GetVsmRequestMaskLocation(shadowView, pageTableCoord);
-    return (requestMask.Load(location.ByteAddress) & location.BitMask) != 0u;
+    return IsVsmPageInMask(requestMask, shadowView, pageTableCoord);
 }
 
 uint GetVsmPhysicalPageIndex(

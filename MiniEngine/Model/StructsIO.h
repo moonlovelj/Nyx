@@ -94,7 +94,7 @@ struct GeometryStreamingRequest
 		struct {
 			uint32_t GroupIndex : 24;
 			uint32_t Priority : 8;
-		};
+		} Fields;
 	};
 #else
 	uint PackedData;
