@@ -269,6 +269,9 @@
     <None Include="Shaders\VsmPhysicalPagePass.h.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
+    <None Include="Shaders\VsmRaster.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
     <None Include="Shaders\VsmResidency.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
@@ -282,6 +285,9 @@
       <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\BuildVsmCullDispatchArgs.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
+    <None Include="Shaders\BuildVsmRasterDispatchArgs.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\BuildVsmPageFlags.slang">

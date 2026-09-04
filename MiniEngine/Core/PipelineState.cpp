@@ -294,8 +294,8 @@ void MeshShaderPSO::Finalize()
 	struct MeshShaderPsoStream
 	{
 		CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE pRootSignature;
+        CD3DX12_PIPELINE_STATE_STREAM_AS pAS;
 		CD3DX12_PIPELINE_STATE_STREAM_MS pMS;
-		CD3DX12_PIPELINE_STATE_STREAM_AS pAS;
 		CD3DX12_PIPELINE_STATE_STREAM_PS pPS;
 		CD3DX12_PIPELINE_STATE_STREAM_RASTERIZER pRasterizer;
 		CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL pDepthStencil;
@@ -308,8 +308,8 @@ void MeshShaderPSO::Finalize()
 	} stream;
 
 	stream.pRootSignature = m_RootSignature->GetSignature();
-	stream.pMS = m_MS;
 	stream.pAS = m_AS;
+	stream.pMS = m_MS;
 	stream.pPS = m_PS;
 	stream.pRasterizer = CD3DX12_RASTERIZER_DESC(m_RasterizerState);
 	stream.pDepthStencil = CD3DX12_DEPTH_STENCIL_DESC(m_DepthStencilState);

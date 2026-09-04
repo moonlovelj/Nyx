@@ -3,9 +3,11 @@
 struct ClearVsmPhysicalPageConstants
 {
     uint FirstRenderRequestIndex;
+    uint AddressType;
 };
 
 ConstantBuffer<ClearVsmPhysicalPageConstants> g_ClearVsmPhysicalPage;
+StructuredBuffer<VsmShadowView> g_VsmShadowViews;
 StructuredBuffer<VsmPageRenderRequest> g_VsmPageRenderRequests;
 ByteAddressBuffer g_VsmPageManagementCounters;
 
@@ -36,7 +38,9 @@ VertexOutput vertexMain(uint vertexId : SV_VertexID, uint instanceId : SV_Instan
     }
 
     VsmPageRenderRequest request = g_VsmPageRenderRequests[renderRequestIndex];
-    if (request.PhysicalPageIndex >= VSM_PHYSICAL_PAGE_CAPACITY)
+    bool addressTypeMatches = g_ClearVsmPhysicalPage.AddressType == VSM_ADDRESS_TYPE_INVALID ||
+        g_VsmShadowViews[request.ViewId].AddressType == g_ClearVsmPhysicalPage.AddressType;
+    if (request.PhysicalPageIndex >= VSM_PHYSICAL_PAGE_CAPACITY || !addressTypeMatches)
     {
         output.Position = float4(-2.0f, -2.0f, 0.0f, 1.0f);
         return output;

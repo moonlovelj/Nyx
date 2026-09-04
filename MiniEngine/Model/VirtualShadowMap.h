@@ -105,8 +105,11 @@ namespace Renderer::VirtualShadowMap
     void AllocateRequestedPages(GraphicsContext& gfxContext);
     void BuildPhysicalPageRenderData(GraphicsContext& gfxContext);
     void BuildDirectionalRasterItems(GraphicsContext& gfxContext, const Renderer::FrameConstants& frame);
+    void RenderDirectionalPhysicalPagesDepth(
+        GraphicsContext& gfxContext,
+        const Renderer::FrameConstants& frame);
 
-    // The current per-page renderer remains the correctness baseline until the multi-view cull path is connected.
+    // Per-page renderer retained as a correctness baseline for the directional multi-view path.
     void ClearRequestedPhysicalPages(GraphicsContext& gfxContext);
     void ClearRequestedPhysicalPage(GraphicsContext& gfxContext, uint32_t renderRequestIndex);
     void RenderRequestedPhysicalPagesDepth(

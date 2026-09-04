@@ -1,4 +1,5 @@
 #include "VirtualShadowMap.h.slang"
+#include "../VirtualShadowMapCullShared.h"
 
 StructuredBuffer<VsmShadowView> g_VsmShadowViews;
 StructuredBuffer<DirectionalVsmAddressGpu> g_DirectionalVsmAddresses;
@@ -8,6 +9,7 @@ StructuredBuffer<uint> g_VsmFreePhysicalPagesSRV;
 ByteAddressBuffer g_VsmPhysicalPageUsedMaskSRV;
 StructuredBuffer<VsmPageRenderRequest> g_VsmPageRenderRequestsSRV;
 ByteAddressBuffer g_VsmPageManagementCountersSRV;
+ByteAddressBuffer g_VsmCullCounters;
 
 RWStructuredBuffer<uint> g_VsmCurrentPageTable;
 RWStructuredBuffer<VsmPhysicalPageMetadata> g_VsmPhysicalPageMetadataUAV;
@@ -26,7 +28,10 @@ struct VsmPageManagementConstants
 
 struct MarkPhysicalPageRenderedConstants
 {
-    uint RenderRequestIndex;
+    uint FirstRenderRequestIndex;
+    uint RenderRequestCount;
+    uint AddressType;
+    uint RequireCullSuccess;
 };
 
 struct MarkVsmViewDirtyConstants
@@ -292,15 +297,36 @@ void markViewDirty(uint3 dispatchThreadId : SV_DispatchThreadID)
 }
 
 [shader("compute")]
-[numthreads(1, 1, 1)]
-void markPhysicalPageRendered()
+[numthreads(64, 1, 1)]
+void markPhysicalPageRendered(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    uint renderRequestCount = g_VsmPageManagementCountersSRV.Load(VSM_RENDER_REQUEST_COUNT_OFFSET);
-    if (g_MarkPhysicalPageRendered.RenderRequestIndex >= renderRequestCount)
+    if (dispatchThreadId.x >= g_MarkPhysicalPageRendered.RenderRequestCount)
         return;
 
-    VsmPageRenderRequest request = g_VsmPageRenderRequestsSRV[g_MarkPhysicalPageRendered.RenderRequestIndex];
+    if (g_MarkPhysicalPageRendered.RequireCullSuccess != 0u &&
+        g_VsmCullCounters.Load(VSM_CULL_OVERFLOW_COUNT_OFFSET) != 0u)
+    {
+        return;
+    }
+
+    uint renderRequestIndex = g_MarkPhysicalPageRendered.FirstRenderRequestIndex + dispatchThreadId.x;
+    uint renderRequestCount = g_VsmPageManagementCountersSRV.Load(VSM_RENDER_REQUEST_COUNT_OFFSET);
+    if (renderRequestIndex >= renderRequestCount)
+        return;
+
+    VsmPageRenderRequest request = g_VsmPageRenderRequestsSRV[renderRequestIndex];
     if (request.PhysicalPageIndex >= VSM_PHYSICAL_PAGE_CAPACITY)
+        return;
+
+    VsmShadowView shadowView = g_VsmShadowViews[request.ViewId];
+    if (g_MarkPhysicalPageRendered.AddressType != VSM_ADDRESS_TYPE_INVALID &&
+        shadowView.AddressType != g_MarkPhysicalPageRendered.AddressType)
+    {
+        return;
+    }
+
+    VsmPhysicalPageView pageView = g_VsmPhysicalPageViewsUAV[request.PhysicalPageIndex];
+    if (pageView.PhysicalPageIndex != request.PhysicalPageIndex || pageView.ViewId != request.ViewId)
         return;
 
     VsmPhysicalPageMetadata metadata = g_VsmPhysicalPageMetadataUAV[request.PhysicalPageIndex];
@@ -308,7 +334,6 @@ void markPhysicalPageRendered()
     metadata.Flags &= ~VSM_PHYSICAL_PAGE_METADATA_DIRTY;
     g_VsmPhysicalPageMetadataUAV[request.PhysicalPageIndex] = metadata;
 
-    VsmPhysicalPageView pageView = g_VsmPhysicalPageViewsUAV[request.PhysicalPageIndex];
     pageView.PrevViewProjRow0 = pageView.ViewProjRow0;
     pageView.PrevViewProjRow1 = pageView.ViewProjRow1;
     pageView.PrevViewProjRow2 = pageView.ViewProjRow2;

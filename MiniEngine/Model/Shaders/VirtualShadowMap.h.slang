@@ -106,6 +106,27 @@ float4 ProjectWorldToPreviousVsmPageClip(VsmPhysicalPageView pageView, float3 wo
         dot(pageView.PrevViewProjRow3, position));
 }
 
+float4 TransformVsmPageClipToPhysicalAtlas(VsmPhysicalPageView pageView, float4 pageClipPosition)
+{
+    float2 pageUvTimesW = pageClipPosition.xy * float2(0.5f, -0.5f) + 0.5f * pageClipPosition.w;
+    float2 atlasUvTimesW = pageUvTimesW * pageView.PhysicalAtlasUvScaleBias.xy +
+        pageView.PhysicalAtlasUvScaleBias.zw * pageClipPosition.w;
+
+    return float4(
+        atlasUvTimesW * float2(2.0f, -2.0f) + float2(-1.0f, 1.0f) * pageClipPosition.w,
+        pageClipPosition.z,
+        pageClipPosition.w);
+}
+
+float4 GetVsmPageClipDistances(float4 pageClipPosition)
+{
+    return pageClipPosition.w + float4(
+        pageClipPosition.x,
+        -pageClipPosition.x,
+        pageClipPosition.y,
+        -pageClipPosition.y);
+}
+
 uint2 GetVsmPageTableCoord(uint pageTableIndex)
 {
     return uint2(pageTableIndex & VSM_PAGE_TABLE_DIM_MASK, pageTableIndex >> VSM_PAGE_TABLE_DIM_LOG2);

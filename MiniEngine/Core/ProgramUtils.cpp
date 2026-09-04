@@ -125,6 +125,12 @@ namespace ProgramUtils
         ASSERT(program.HasBytecode(ShaderStage::Mesh));
         pso.SetRootSignature(program.GetRootSignature());
 
+        if (program.HasBytecode(ShaderStage::Amplification))
+        {
+            const Program::Bytecode& bytecode = program.GetBytecode(ShaderStage::Amplification);
+            pso.SetAmplificationShader(bytecode.Data.data(), bytecode.Data.size());
+        }
+
         if (program.HasBytecode(ShaderStage::Mesh))
         {
             const Program::Bytecode& bytecode = program.GetBytecode(ShaderStage::Mesh);
