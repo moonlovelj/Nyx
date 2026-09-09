@@ -68,7 +68,7 @@ namespace Renderer::VirtualShadowMap
         std::shared_ptr<Program> s_CommitResidencyStatesProgram;
         std::shared_ptr<Program> s_UpdateResidencyStatesProgram;
         ComputePSO s_MarkViewDirtyPSO(L"VSM: Mark View Dirty");
-        ComputePSO s_ReuseRequestedPagesPSO(L"VSM: Reuse Requested Pages");
+        ComputePSO s_ReuseCachedPhysicalPagesPSO(L"VSM: Reuse Cached Physical Pages");
         ComputePSO s_BuildFreePhysicalPageListPSO(L"VSM: Build Free Physical Page List");
         ComputePSO s_AllocateNewPagesPSO(L"VSM: Allocate New Pages");
         ComputePSO s_MarkPhysicalPageRenderedPSO(L"VSM: Mark Physical Page Rendered");
@@ -102,7 +102,7 @@ namespace Renderer::VirtualShadowMap
             MeshShaderPSO(L"VSM: Physical Page Depth Pass 1")
         };
         std::shared_ptr<Program> s_MarkViewDirtyProgram;
-        std::shared_ptr<Program> s_ReuseRequestedPagesProgram;
+        std::shared_ptr<Program> s_ReuseCachedPhysicalPagesProgram;
         std::shared_ptr<Program> s_BuildFreePhysicalPageListProgram;
         std::shared_ptr<Program> s_AllocateNewPagesProgram;
         std::shared_ptr<Program> s_MarkPhysicalPageRenderedProgram;
@@ -131,7 +131,9 @@ namespace Renderer::VirtualShadowMap
         std::array<StructuredBuffer, 2> s_PageTablesGpu;
         StructuredBuffer s_PageRenderRequestsGpu;
         StructuredBuffer s_PhysicalPageMetadataGpu;
-        StructuredBuffer s_FreePhysicalPagesGpu;
+        StructuredBuffer s_PreviousToCurrentViewIdsGpu;
+        StructuredBuffer s_EmptyPhysicalPagesGpu;
+        StructuredBuffer s_CachedAvailablePagesGpu;
         ByteAddressBuffer s_PhysicalPageUsedMaskGpu;
         ByteAddressBuffer s_PageManagementCountersGpu;
         ByteAddressBuffer s_RenderRequestPredicateGpu;
@@ -232,6 +234,7 @@ namespace Renderer::VirtualShadowMap
 
         std::vector<VsmShadowView> s_Views;
         std::vector<VsmShadowView> s_PreviousViews;
+        std::vector<uint32_t> s_PreviousToCurrentViewIds;
         std::vector<DirectionalVsmClipmapGpu> s_DirectionalClipmapsGpuData;
         std::vector<DirectionalVsmAddressGpu> s_DirectionalAddressesGpuData;
         std::vector<VsmProjectionGpu> s_ProjectionsGpuData;
@@ -406,8 +409,9 @@ namespace Renderer::VirtualShadowMap
                 kManagementStatisticsReadbackOffset + VSM_COARSE_OVERFLOW_PAGE_COUNT_OFFSET);
             statistics.RenderRequests = readValue(
                 kManagementStatisticsReadbackOffset + VSM_RENDER_REQUEST_COUNT_OFFSET);
-            statistics.FreePagesBeforeAllocation = readValue(
-                kManagementStatisticsReadbackOffset + VSM_FREE_PAGE_COUNT_OFFSET);
+            statistics.FreePagesBeforeAllocation =
+                readValue(kManagementStatisticsReadbackOffset + VSM_EMPTY_PAGE_COUNT_OFFSET) +
+                readValue(kManagementStatisticsReadbackOffset + VSM_CACHED_AVAILABLE_PAGE_COUNT_OFFSET);
             statistics.RenderDataPages = readValue(
                 kPhysicalPageRenderStatisticsReadbackOffset + VSM_RENDER_PAGE_COUNT_OFFSET);
             statistics.ActiveRenderViews = readValue(
@@ -580,11 +584,6 @@ namespace Renderer::VirtualShadowMap
             return s_PageTablesGpu[s_CurrentPageTableIndex];
         }
 
-        StructuredBuffer& GetPreviousPageTable()
-        {
-            return s_PageTablesGpu[s_CurrentPageTableIndex ^ 1u];
-        }
-
         void BindMultiViewCullResources(ProgramBinder& binder)
         {
             binder.SetRootBufferSRV("g_VsmCullShadowViews", s_ShadowViewsGpu);
@@ -627,6 +626,9 @@ namespace Renderer::VirtualShadowMap
         void BindPageManagementConstants(ProgramBinder& binder)
         {
             binder["g_VsmPageManagement"]["FrameNumber"].Set(s_FrameNumber);
+            binder["g_VsmPageManagement"]["ViewCount"].Set(static_cast<uint32_t>(s_Views.size()));
+            binder["g_VsmPageManagement"]["PreviousViewCount"].Set(
+                static_cast<uint32_t>(s_PreviousViews.size()));
         }
 
         void BindPageManagementConstants(ProgramBinder& binder, uint32_t allocationClass)
@@ -647,19 +649,16 @@ namespace Renderer::VirtualShadowMap
                 context.InsertUAVBarrier(s_PhysicalPageUsedMaskGpu);
         }
 
-        void DispatchReuseRequestedPages(
-            ComputeContext& context,
-            StructuredBuffer& currentPageTable,
-            StructuredBuffer& previousPageTable)
+        void DispatchReuseCachedPhysicalPages(ComputeContext& context, StructuredBuffer& currentPageTable)
         {
-            ProgramBinder binder(*s_ReuseRequestedPagesProgram, context);
+            ProgramBinder binder(*s_ReuseCachedPhysicalPagesProgram, context);
             binder.SetRootSignature();
-            context.SetPipelineState(s_ReuseRequestedPagesPSO);
+            context.SetPipelineState(s_ReuseCachedPhysicalPagesPSO);
 
             binder.SetRootBufferSRV("g_VsmShadowViews", s_ShadowViewsGpu);
             binder.SetRootBufferSRV("g_DirectionalVsmAddresses", s_DirectionalAddressesGpu);
             binder.SetRootBufferSRV("g_VsmPageRequestMask", s_PageRequestMaskGpu);
-            binder.SetRootBufferSRV("g_VsmPreviousPageTable", previousPageTable);
+            binder.SetRootBufferSRV("g_VsmPreviousToCurrentViewIds", s_PreviousToCurrentViewIdsGpu);
             binder.SetRootBufferUAV("g_VsmPhysicalPageMetadataUAV", s_PhysicalPageMetadataGpu);
             binder.SetRootBufferUAV("g_VsmCurrentPageTable", currentPageTable);
             binder.SetRootBufferUAV("g_VsmPhysicalPageUsedMaskUAV", s_PhysicalPageUsedMaskGpu);
@@ -669,7 +668,7 @@ namespace Renderer::VirtualShadowMap
             BindPageManagementConstants(binder);
             binder.Apply();
 
-            context.Dispatch(kRequestWordGroupCount, static_cast<uint32_t>(s_Views.size()), 1);
+            context.Dispatch(kPhysicalPageGroupCount, 1, 1);
         }
 
         void DispatchAllocateNewPages(
@@ -684,7 +683,8 @@ namespace Renderer::VirtualShadowMap
             binder.SetRootBufferSRV("g_VsmShadowViews", s_ShadowViewsGpu);
             binder.SetRootBufferSRV("g_DirectionalVsmAddresses", s_DirectionalAddressesGpu);
             binder.SetRootBufferSRV("g_VsmPageRequestMask", s_PageRequestMaskGpu);
-            binder.SetRootBufferSRV("g_VsmFreePhysicalPagesSRV", s_FreePhysicalPagesGpu);
+            binder.SetRootBufferSRV("g_VsmEmptyPhysicalPagesSRV", s_EmptyPhysicalPagesGpu);
+            binder.SetRootBufferSRV("g_VsmCachedAvailablePagesSRV", s_CachedAvailablePagesGpu);
             binder.SetRootBufferUAV("g_VsmCurrentPageTable", currentPageTable);
             binder.SetRootBufferUAV("g_VsmPhysicalPageMetadataUAV", s_PhysicalPageMetadataGpu);
             binder.SetRootBufferUAV("g_VsmPageRenderRequests", s_PageRenderRequestsGpu);
@@ -956,6 +956,11 @@ namespace Renderer::VirtualShadowMap
                 1);
         }
 
+        bool HasSameStableIdentity(const VsmShadowView& view, uint32_t stableShadowMapId, uint32_t addressType, uint32_t layer)
+        {
+            return view.StableShadowMapId == stableShadowMapId && view.AddressType == addressType && view.Layer == layer;
+        }
+
         uint32_t FindPreviousPageTableBase(uint32_t stableShadowMapId, uint32_t addressType, uint32_t layer)
         {
             const auto previousView = std::find_if(
@@ -963,11 +968,37 @@ namespace Renderer::VirtualShadowMap
                 s_PreviousViews.end(),
                 [=](const VsmShadowView& view)
                 {
-                    return view.StableShadowMapId == stableShadowMapId && view.AddressType == addressType &&
-                        view.Layer == layer;
+                    return HasSameStableIdentity(view, stableShadowMapId, addressType, layer);
                 });
 
             return previousView != s_PreviousViews.end() ? previousView->PageTableBase : kInvalidPageTableBase;
+        }
+
+        void BuildPreviousToCurrentViewIds()
+        {
+            s_PreviousToCurrentViewIds.assign(s_PreviousViews.size(), kInvalidViewId);
+
+            for (size_t previousViewId = 0; previousViewId < s_PreviousViews.size(); ++previousViewId)
+            {
+                const VsmShadowView& previousView = s_PreviousViews[previousViewId];
+                const auto currentView = std::find_if(
+                    s_Views.begin(),
+                    s_Views.end(),
+                    [&previousView](const VsmShadowView& view)
+                    {
+                        return HasSameStableIdentity(
+                            view,
+                            previousView.StableShadowMapId,
+                            previousView.AddressType,
+                            previousView.Layer);
+                    });
+
+                if (currentView != s_Views.end())
+                {
+                    s_PreviousToCurrentViewIds[previousViewId] =
+                        static_cast<uint32_t>(std::distance(s_Views.begin(), currentView));
+                }
+            }
         }
 
         DirectX::XMFLOAT4 PackFloat4(Math::Vector3 value, float w)
@@ -1113,11 +1144,22 @@ namespace Renderer::VirtualShadowMap
 
         void UploadFrameData(ComputeContext& context)
         {
+            BuildPreviousToCurrentViewIds();
+
             context.WriteBuffer(
                 s_ShadowViewsGpu,
                 0,
                 s_Views.data(),
                 s_Views.size() * sizeof(VsmShadowView));
+
+            if (!s_PreviousToCurrentViewIds.empty())
+            {
+                context.WriteBuffer(
+                    s_PreviousToCurrentViewIdsGpu,
+                    0,
+                    s_PreviousToCurrentViewIds.data(),
+                    s_PreviousToCurrentViewIds.size() * sizeof(uint32_t));
+            }
 
             if (!s_DirectionalClipmapsGpuData.empty())
             {
@@ -1158,6 +1200,7 @@ namespace Renderer::VirtualShadowMap
             s_ResidencyStatesToInitialize.clear();
 
             context.TransitionResource(s_ShadowViewsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(s_PreviousToCurrentViewIdsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_DirectionalClipmapsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_ResidencyStatesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_DirectionalAddressesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -1336,28 +1379,32 @@ namespace Renderer::VirtualShadowMap
         ProgramUtils::SetProgram(s_MarkViewDirtyPSO, *s_MarkViewDirtyProgram);
         s_MarkViewDirtyPSO.Finalize();
 
-        ProgramDesc reuseRequestedPagesDesc = ProgramUtils::MakeComputeDesc(pageManagementShaderPath, "reuseRequestedPages");
-        reuseRequestedPagesDesc.AddRootBufferSRV("g_VsmShadowViews");
-        reuseRequestedPagesDesc.AddRootBufferSRV("g_DirectionalVsmAddresses");
-        reuseRequestedPagesDesc.AddRootBufferSRV("g_VsmPageRequestMask");
-        reuseRequestedPagesDesc.AddRootBufferSRV("g_VsmPreviousPageTable");
-        reuseRequestedPagesDesc.AddRootBufferUAV("g_VsmPhysicalPageMetadataUAV");
-        reuseRequestedPagesDesc.AddRootBufferUAV("g_VsmCurrentPageTable");
-        reuseRequestedPagesDesc.AddRootBufferUAV("g_VsmPhysicalPageUsedMaskUAV");
-        reuseRequestedPagesDesc.AddRootBufferUAV("g_VsmPageRenderRequests");
-        reuseRequestedPagesDesc.AddRootBufferUAV("g_VsmPageManagementCounters");
-        reuseRequestedPagesDesc.AddRootBufferUAV("g_VsmRenderRequestPredicate");
-        s_ReuseRequestedPagesProgram = ProgramUtils::GetProgram(reuseRequestedPagesDesc, "VSM: Reuse Requested Pages");
-        if (!s_ReuseRequestedPagesProgram)
+        ProgramDesc reuseCachedPhysicalPagesDesc =
+            ProgramUtils::MakeComputeDesc(pageManagementShaderPath, "reuseCachedPhysicalPages");
+        reuseCachedPhysicalPagesDesc.AddRootBufferSRV("g_VsmShadowViews");
+        reuseCachedPhysicalPagesDesc.AddRootBufferSRV("g_DirectionalVsmAddresses");
+        reuseCachedPhysicalPagesDesc.AddRootBufferSRV("g_VsmPageRequestMask");
+        reuseCachedPhysicalPagesDesc.AddRootBufferSRV("g_VsmPreviousToCurrentViewIds");
+        reuseCachedPhysicalPagesDesc.AddRootBufferUAV("g_VsmPhysicalPageMetadataUAV");
+        reuseCachedPhysicalPagesDesc.AddRootBufferUAV("g_VsmCurrentPageTable");
+        reuseCachedPhysicalPagesDesc.AddRootBufferUAV("g_VsmPhysicalPageUsedMaskUAV");
+        reuseCachedPhysicalPagesDesc.AddRootBufferUAV("g_VsmPageRenderRequests");
+        reuseCachedPhysicalPagesDesc.AddRootBufferUAV("g_VsmPageManagementCounters");
+        reuseCachedPhysicalPagesDesc.AddRootBufferUAV("g_VsmRenderRequestPredicate");
+        s_ReuseCachedPhysicalPagesProgram =
+            ProgramUtils::GetProgram(reuseCachedPhysicalPagesDesc, "VSM: Reuse Cached Physical Pages");
+        if (!s_ReuseCachedPhysicalPagesProgram)
             return false;
 
-        ProgramUtils::SetProgram(s_ReuseRequestedPagesPSO, *s_ReuseRequestedPagesProgram);
-        s_ReuseRequestedPagesPSO.Finalize();
+        ProgramUtils::SetProgram(s_ReuseCachedPhysicalPagesPSO, *s_ReuseCachedPhysicalPagesProgram);
+        s_ReuseCachedPhysicalPagesPSO.Finalize();
 
         ProgramDesc buildFreePhysicalPageListDesc =
             ProgramUtils::MakeComputeDesc(pageManagementShaderPath, "buildFreePhysicalPageList");
         buildFreePhysicalPageListDesc.AddRootBufferSRV("g_VsmPhysicalPageUsedMaskSRV");
-        buildFreePhysicalPageListDesc.AddRootBufferUAV("g_VsmFreePhysicalPagesUAV");
+        buildFreePhysicalPageListDesc.AddRootBufferUAV("g_VsmPhysicalPageMetadataUAV");
+        buildFreePhysicalPageListDesc.AddRootBufferUAV("g_VsmEmptyPhysicalPagesUAV");
+        buildFreePhysicalPageListDesc.AddRootBufferUAV("g_VsmCachedAvailablePagesUAV");
         buildFreePhysicalPageListDesc.AddRootBufferUAV("g_VsmPageManagementCounters");
         s_BuildFreePhysicalPageListProgram =
             ProgramUtils::GetProgram(buildFreePhysicalPageListDesc, "VSM: Build Free Physical Page List");
@@ -1371,7 +1418,8 @@ namespace Renderer::VirtualShadowMap
         allocateNewPagesDesc.AddRootBufferSRV("g_VsmShadowViews");
         allocateNewPagesDesc.AddRootBufferSRV("g_DirectionalVsmAddresses");
         allocateNewPagesDesc.AddRootBufferSRV("g_VsmPageRequestMask");
-        allocateNewPagesDesc.AddRootBufferSRV("g_VsmFreePhysicalPagesSRV");
+        allocateNewPagesDesc.AddRootBufferSRV("g_VsmEmptyPhysicalPagesSRV");
+        allocateNewPagesDesc.AddRootBufferSRV("g_VsmCachedAvailablePagesSRV");
         allocateNewPagesDesc.AddRootBufferUAV("g_VsmCurrentPageTable");
         allocateNewPagesDesc.AddRootBufferUAV("g_VsmPhysicalPageMetadataUAV");
         allocateNewPagesDesc.AddRootBufferUAV("g_VsmPageRenderRequests");
@@ -1727,7 +1775,15 @@ namespace Renderer::VirtualShadowMap
             L"VSM Physical Page Metadata",
             kPhysicalPageCapacity,
             sizeof(VsmPhysicalPageMetadata));
-        s_FreePhysicalPagesGpu.Create(L"VSM Free Physical Pages", kPhysicalPageCapacity, sizeof(uint32_t));
+        s_PreviousToCurrentViewIdsGpu.Create(
+            L"VSM Previous To Current View IDs",
+            kMaxShadowViews,
+            sizeof(uint32_t));
+        s_EmptyPhysicalPagesGpu.Create(L"VSM Empty Physical Pages", kPhysicalPageCapacity, sizeof(uint32_t));
+        s_CachedAvailablePagesGpu.Create(
+            L"VSM Cached Available Physical Pages",
+            kPhysicalPageCapacity,
+            sizeof(uint32_t));
         s_PhysicalPageUsedMaskGpu.Create(
             L"VSM Physical Page Used Mask",
             kPhysicalPageCapacity / kRequestMaskWordBits,
@@ -1786,6 +1842,7 @@ namespace Renderer::VirtualShadowMap
 
         s_Views.reserve(kMaxShadowViews);
         s_PreviousViews.reserve(kMaxShadowViews);
+        s_PreviousToCurrentViewIds.reserve(kMaxShadowViews);
         s_DirectionalClipmapsGpuData.reserve(kMaxDirectionalClipmaps);
         s_DirectionalAddressesGpuData.reserve(kMaxShadowViews);
         s_ProjectionsGpuData.reserve(kMaxShadowViews);
@@ -1808,6 +1865,7 @@ namespace Renderer::VirtualShadowMap
     {
         s_Views.clear();
         s_PreviousViews.clear();
+        s_PreviousToCurrentViewIds.clear();
         s_DirectionalClipmapsGpuData.clear();
         s_DirectionalAddressesGpuData.clear();
         s_ProjectionsGpuData.clear();
@@ -1827,7 +1885,9 @@ namespace Renderer::VirtualShadowMap
         s_PageTablesGpu[1].Destroy();
         s_PageRenderRequestsGpu.Destroy();
         s_PhysicalPageMetadataGpu.Destroy();
-        s_FreePhysicalPagesGpu.Destroy();
+        s_PreviousToCurrentViewIdsGpu.Destroy();
+        s_EmptyPhysicalPagesGpu.Destroy();
+        s_CachedAvailablePagesGpu.Destroy();
         s_PhysicalPageUsedMaskGpu.Destroy();
         s_PageManagementCountersGpu.Destroy();
         s_RenderRequestPredicateGpu.Destroy();
@@ -1851,7 +1911,7 @@ namespace Renderer::VirtualShadowMap
         s_CommitResidencyStatesProgram.reset();
         s_UpdateResidencyStatesProgram.reset();
         s_MarkViewDirtyProgram.reset();
-        s_ReuseRequestedPagesProgram.reset();
+        s_ReuseCachedPhysicalPagesProgram.reset();
         s_BuildFreePhysicalPageListProgram.reset();
         s_AllocateNewPagesProgram.reset();
         s_MarkPhysicalPageRenderedProgram.reset();
@@ -1891,6 +1951,7 @@ namespace Renderer::VirtualShadowMap
 
         s_Views.clear();
         s_PreviousViews.clear();
+        s_PreviousToCurrentViewIds.clear();
         s_DirectionalClipmapsGpuData.clear();
         s_DirectionalAddressesGpuData.clear();
         s_ProjectionsGpuData.clear();
@@ -1923,7 +1984,9 @@ namespace Renderer::VirtualShadowMap
         clearBuffer(s_PageTablesGpu[1], kInvalidPageTableEntry);
         clearBuffer(s_PageRenderRequestsGpu);
         clearBuffer(s_PhysicalPageMetadataGpu);
-        clearBuffer(s_FreePhysicalPagesGpu);
+        clearBuffer(s_PreviousToCurrentViewIdsGpu, kInvalidViewId);
+        clearBuffer(s_EmptyPhysicalPagesGpu);
+        clearBuffer(s_CachedAvailablePagesGpu);
         clearBuffer(s_PhysicalPageUsedMaskGpu);
         clearBuffer(s_PageManagementCountersGpu);
         clearBuffer(s_RenderRequestPredicateGpu);
@@ -1961,6 +2024,7 @@ namespace Renderer::VirtualShadowMap
         UpdatePageStatisticsReadback();
         s_PreviousViews.swap(s_Views);
         s_Views.clear();
+        s_PreviousToCurrentViewIds.clear();
         s_DirectionalClipmapsGpuData.clear();
         s_DirectionalAddressesGpuData.clear();
         s_ProjectionsGpuData.clear();
@@ -2238,7 +2302,6 @@ namespace Renderer::VirtualShadowMap
 
         ComputeContext& context = gfxContext.GetComputeContext();
         StructuredBuffer& currentPageTable = GetCurrentPageTable();
-        StructuredBuffer& previousPageTable = GetPreviousPageTable();
         const size_t pageTableBytes = s_Views.size() * kPagesPerView * sizeof(uint32_t);
         const size_t physicalPageUsedMaskBytes = kPhysicalPageCapacity / kRequestMaskWordBits * sizeof(uint32_t);
         context.ClearBufferUAV(currentPageTable, pageTableBytes, kInvalidPageTableEntry);
@@ -2256,7 +2319,7 @@ namespace Renderer::VirtualShadowMap
         context.TransitionResource(s_ShadowViewsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_DirectionalAddressesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_PageRequestMaskGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        context.TransitionResource(previousPageTable, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_PreviousToCurrentViewIdsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_PhysicalPageMetadataGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         context.TransitionResource(currentPageTable, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         context.TransitionResource(s_PageRenderRequestsGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -2266,14 +2329,12 @@ namespace Renderer::VirtualShadowMap
 
         MarkPendingViewsDirty(context);
 
-        DispatchReuseRequestedPages(
-            context,
-            currentPageTable,
-            previousPageTable);
+        DispatchReuseCachedPhysicalPages(context, currentPageTable);
         InsertPageMappingUAVBarriers(context, true);
 
         context.TransitionResource(s_PhysicalPageUsedMaskGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        context.TransitionResource(s_FreePhysicalPagesGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        context.TransitionResource(s_EmptyPhysicalPagesGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        context.TransitionResource(s_CachedAvailablePagesGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         context.FlushResourceBarriers();
 
         {
@@ -2282,17 +2343,20 @@ namespace Renderer::VirtualShadowMap
             context.SetPipelineState(s_BuildFreePhysicalPageListPSO);
 
             binder.SetRootBufferSRV("g_VsmPhysicalPageUsedMaskSRV", s_PhysicalPageUsedMaskGpu);
-            binder.SetRootBufferUAV("g_VsmFreePhysicalPagesUAV", s_FreePhysicalPagesGpu);
+            binder.SetRootBufferUAV("g_VsmPhysicalPageMetadataUAV", s_PhysicalPageMetadataGpu);
+            binder.SetRootBufferUAV("g_VsmEmptyPhysicalPagesUAV", s_EmptyPhysicalPagesGpu);
+            binder.SetRootBufferUAV("g_VsmCachedAvailablePagesUAV", s_CachedAvailablePagesGpu);
             binder.SetRootBufferUAV("g_VsmPageManagementCounters", s_PageManagementCountersGpu);
             binder.Apply();
 
             context.Dispatch(kPhysicalPageGroupCount, 1, 1);
         }
 
-        context.InsertUAVBarrier(s_FreePhysicalPagesGpu);
+        context.InsertUAVBarrier(s_EmptyPhysicalPagesGpu);
+        context.InsertUAVBarrier(s_CachedAvailablePagesGpu);
         context.InsertUAVBarrier(s_PageManagementCountersGpu);
-        context.TransitionResource(s_FreePhysicalPagesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        context.TransitionResource(s_PhysicalPageMetadataGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        context.TransitionResource(s_EmptyPhysicalPagesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_CachedAvailablePagesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.FlushResourceBarriers();
 
         DispatchAllocateNewPages(context, currentPageTable, VSM_PAGE_ALLOCATION_CLASS_COARSE);

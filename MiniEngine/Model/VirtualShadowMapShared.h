@@ -66,18 +66,20 @@
 #define VSM_REQUESTED_PAGE_COUNT_OFFSET 0u
 #define VSM_INVALID_ADDRESS_PIXEL_COUNT_OFFSET 4u
 
-#define VSM_PAGE_MANAGEMENT_COUNTERS_SIZE 44u
+#define VSM_PAGE_MANAGEMENT_COUNTERS_SIZE 52u
 #define VSM_RENDER_REQUEST_COUNT_OFFSET 0u
 #define VSM_REUSED_PAGE_COUNT_OFFSET 4u
 #define VSM_NEW_PAGE_COUNT_OFFSET 8u
 #define VSM_OVERFLOW_PAGE_COUNT_OFFSET 12u
-#define VSM_FREE_PAGE_COUNT_OFFSET 16u
-#define VSM_FREE_PAGE_READ_OFFSET 20u
+#define VSM_EMPTY_PAGE_COUNT_OFFSET 16u
+#define VSM_EMPTY_PAGE_READ_OFFSET 20u
 #define VSM_CACHE_HIT_PAGE_COUNT_OFFSET 24u
 #define VSM_HISTORY_VALID_REQUEST_COUNT_OFFSET 28u
 #define VSM_MARKED_DIRTY_PAGE_COUNT_OFFSET 32u
 #define VSM_COARSE_MAPPED_PAGE_COUNT_OFFSET 36u
 #define VSM_COARSE_OVERFLOW_PAGE_COUNT_OFFSET 40u
+#define VSM_CACHED_AVAILABLE_PAGE_COUNT_OFFSET 44u
+#define VSM_CACHED_AVAILABLE_PAGE_READ_OFFSET 48u
 
 #define VSM_RENDER_REQUEST_PREDICATE_STRIDE 8u
 
@@ -278,7 +280,7 @@ namespace Renderer::VirtualShadowMap
 
     // Reverse mapping used to prove that a cached physical page still contains
     // the same virtual page requested by the current frame.
-    struct VSM_ALIGN_16 VsmPhysicalPageMetadata
+    struct VsmPhysicalPageMetadata
     {
         VSM_UINT StableShadowMapId;
         VSM_UINT AddressGeneration;
@@ -288,6 +290,9 @@ namespace Renderer::VirtualShadowMap
         VSM_INT2 VirtualPage;
         VSM_UINT Flags;
         VSM_UINT LastRequestedFrame;
+
+        // Frame-local owner remapped through g_VsmPreviousToCurrentViewIds.
+        VSM_UINT OwnerViewId;
     };
 
     // Render and cull data indexed directly by PhysicalPageIndex.
@@ -325,7 +330,7 @@ namespace Renderer::VirtualShadowMap
     static_assert(sizeof(DirectionalVsmAddressGpu) == 80);
     static_assert(sizeof(VsmProjectionGpu) == 80);
     static_assert(sizeof(VsmPageRenderRequest) == 16);
-    static_assert(sizeof(VsmPhysicalPageMetadata) == 32);
+    static_assert(sizeof(VsmPhysicalPageMetadata) == 36);
     static_assert(sizeof(VsmPhysicalPageView) == 192);
 }
 #endif
