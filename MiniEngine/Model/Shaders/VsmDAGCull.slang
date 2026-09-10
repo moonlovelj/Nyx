@@ -22,12 +22,7 @@
 #include "CommonResources.slang"
 #include "CullCommon.slang"
 #include "WaveUtil.h.slang"
-#ifdef VSM_MULTI_VIEW_CULL
 #include "VsmCull.h.slang"
-#endif
-#ifdef VSM_PHYSICAL_PAGE_PASS
-#include "VsmPhysicalPagePass.h.slang"
-#endif
 
 struct DAGCullConstants
 {
@@ -54,32 +49,12 @@ SamplerState g_HZBSampler;
 #endif
 
 globallycoherent RWStructuredBuffer<QueueState> g_TaskQueueStateUAV;
-#ifdef VSM_MULTI_VIEW_CULL
 globallycoherent RWStructuredBuffer<VsmNodeTask> g_VsmNodeTasksUAV;
 globallycoherent RWStructuredBuffer<VsmCandidateMeshlet> g_VsmCandidateMeshletsUAV;
 RWStructuredBuffer<VsmRasterItem> g_VsmRasterItemsUAV;
 RWByteAddressBuffer g_VsmCullCounters;
-#else
-globallycoherent RWByteAddressBuffer g_TaskQueueUAV;
-globallycoherent RWByteAddressBuffer g_CandidateMeshletUAV;
-#endif
 globallycoherent RWByteAddressBuffer g_MeshletBatchUAV;
-#ifdef VSM_PHYSICAL_PAGE_PASS
-RWStructuredBuffer<VisibleMeshletPayload> g_VsmVisibleMeshletUAV;
-#endif
 
-#ifndef VSM_MULTI_VIEW_CULL
-RWStructuredBuffer<VisibleMeshletPayload> GetCullVisibleMeshletUAV()
-{
-#ifdef VSM_PHYSICAL_PAGE_PASS
-    return g_VsmVisibleMeshletUAV;
-#else
-    return GetVisibleMeshletBufferUAV();
-#endif
-}
-#endif
-
-#ifdef VSM_MULTI_VIEW_CULL
 void CountVsmCullOverflow(uint count)
 {
     if (count == 0u)
@@ -107,7 +82,6 @@ uint AllocateVsmRasterItem(uint passIndex)
 
     return rasterItemIndex;
 }
-#endif
 
 groupshared uint GroupNumCandidateNodes;
 groupshared uint GroupCandidateNodesOffset;
@@ -139,16 +113,13 @@ struct DAGCullViewData
     uint HZBSourceWidth;
     uint HZBSourceHeight;
     float4 HZBUvScaleBias;
-#ifdef VSM_MULTI_VIEW_CULL
     uint ViewId;
     VsmShadowView ShadowView;
-#endif
 };
 
 DAGCullViewData GetDAGCullViewData(uint viewId)
 {
     DAGCullViewData view;
-#ifdef VSM_MULTI_VIEW_CULL
     view.ViewId = viewId;
     view.ShadowView = g_VsmCullShadowViews[viewId];
     VsmProjectionGpu projection = g_VsmCullProjections[view.ShadowView.ProjectionDataIndex];
@@ -165,33 +136,6 @@ DAGCullViewData GetDAGCullViewData(uint viewId)
     view.HZBSourceWidth = VSM_PHYSICAL_POOL_RESOLUTION;
     view.HZBSourceHeight = VSM_PHYSICAL_POOL_RESOLUTION;
     view.HZBUvScaleBias = float4(1.0f, 1.0f, 0.0f, 0.0f);
-#elif defined(VSM_PHYSICAL_PAGE_PASS)
-    VsmPhysicalPageView pageView;
-    TryGetVsmPhysicalPageView(pageView);
-    view.ViewProjMatrix = GetVsmPhysicalPageViewProj(pageView);
-    view.PrevViewProjMatrix = GetVsmPhysicalPagePrevViewProj(pageView);
-    view.ViewerPosition = pageView.ViewerPositionAndProjectionType.xyz;
-    view.LodScale = pageView.LodScale;
-    view.IsPerspective = uint(pageView.ViewerPositionAndProjectionType.w) == VSM_PROJECTION_TYPE_PERSPECTIVE;
-    view.HasHistory = HasVsmPhysicalPageHistory(pageView);
-    view.HZBSourceWidth = VSM_PHYSICAL_POOL_RESOLUTION;
-    view.HZBSourceHeight = VSM_PHYSICAL_POOL_RESOLUTION;
-    view.HZBUvScaleBias = pageView.PhysicalAtlasUvScaleBias;
-#else
-    view.ViewProjMatrix = g_DAGCull.ViewProjMatrix;
-#ifndef DISABLE_HZB_CULL
-    view.PrevViewProjMatrix = g_DAGCull.PrevViewProjMatrix;
-#else
-    view.PrevViewProjMatrix = view.ViewProjMatrix;
-#endif
-    view.ViewerPosition = g_DAGCull.ViewerPos;
-    view.LodScale = g_DAGCull.LodScale;
-    view.IsPerspective = g_DAGCull.ProjectionType == 0;
-    view.HasHistory = true;
-    view.HZBSourceWidth = g_DAGCull.ViewportWidth;
-    view.HZBSourceHeight = g_DAGCull.ViewportHeight;
-    view.HZBUvScaleBias = float4(1.0f, 1.0f, 0.0f, 0.0f);
-#endif
     return view;
 }
 
@@ -656,11 +600,6 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
 [numthreads(DAG_CULL_GROUP_SIZE, 1, 1)]
 void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 {
-#ifdef VSM_PHYSICAL_PAGE_PASS
-    VsmPhysicalPageView pageView;
-    if (!TryGetVsmPhysicalPageView(pageView))
-        return;
-#endif
 #ifndef DISABLE_HZB_CULL
 #ifdef DAG_CULL_PASS1
     const uint passIndex = 1;

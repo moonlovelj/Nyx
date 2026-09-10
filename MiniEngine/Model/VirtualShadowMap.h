@@ -108,17 +108,6 @@ namespace Renderer::VirtualShadowMap
         GraphicsContext& gfxContext,
         const Renderer::FrameConstants& frame);
 
-    // Per-page renderer retained as a correctness baseline for the directional multi-view path.
-    void ClearRequestedPhysicalPages(GraphicsContext& gfxContext);
-    void ClearRequestedPhysicalPage(GraphicsContext& gfxContext, uint32_t renderRequestIndex);
-    void RenderRequestedPhysicalPagesDepth(
-        GraphicsContext& gfxContext,
-        const Renderer::FrameConstants& frame);
-    void RenderRequestedPhysicalPageDepth(
-        GraphicsContext& gfxContext,
-        const Renderer::FrameConstants& frame,
-        uint32_t renderRequestIndex);
-
     void BindSamplingResources(ComputeContext& context, ProgramBinder& binder);
 
     bool IsInitialized();

@@ -20,9 +20,6 @@
 #include "CommonResources.slang"
 #include "CullCommon.slang"
 #include "WaveUtil.h.slang"
-#ifdef VSM_PHYSICAL_PAGE_PASS
-#include "VsmPhysicalPagePass.h.slang"
-#endif
 
 struct DAGCullConstants
 {
@@ -52,17 +49,10 @@ globallycoherent RWStructuredBuffer<QueueState> g_TaskQueueStateUAV;
 globallycoherent RWByteAddressBuffer g_TaskQueueUAV;
 globallycoherent RWByteAddressBuffer g_MeshletBatchUAV;
 globallycoherent RWByteAddressBuffer g_CandidateMeshletUAV;
-#ifdef VSM_PHYSICAL_PAGE_PASS
-RWStructuredBuffer<VisibleMeshletPayload> g_VsmVisibleMeshletUAV;
-#endif
 
 RWStructuredBuffer<VisibleMeshletPayload> GetCullVisibleMeshletUAV()
 {
-#ifdef VSM_PHYSICAL_PAGE_PASS
-    return g_VsmVisibleMeshletUAV;
-#else
     return GetVisibleMeshletBufferUAV();
-#endif
 }
 
 groupshared uint GroupNumCandidateNodes;
@@ -100,19 +90,6 @@ struct DAGCullViewData
 DAGCullViewData GetDAGCullViewData()
 {
     DAGCullViewData view;
-#ifdef VSM_PHYSICAL_PAGE_PASS
-    VsmPhysicalPageView pageView;
-    TryGetVsmPhysicalPageView(pageView);
-    view.ViewProjMatrix = GetVsmPhysicalPageViewProj(pageView);
-    view.PrevViewProjMatrix = GetVsmPhysicalPagePrevViewProj(pageView);
-    view.ViewerPosition = pageView.ViewerPositionAndProjectionType.xyz;
-    view.LodScale = pageView.LodScale;
-    view.IsPerspective = uint(pageView.ViewerPositionAndProjectionType.w) == VSM_PROJECTION_TYPE_PERSPECTIVE;
-    view.HasHistory = HasVsmPhysicalPageHistory(pageView);
-    view.HZBSourceWidth = VSM_PHYSICAL_POOL_RESOLUTION;
-    view.HZBSourceHeight = VSM_PHYSICAL_POOL_RESOLUTION;
-    view.HZBUvScaleBias = pageView.PhysicalAtlasUvScaleBias;
-#else
     view.ViewProjMatrix = g_DAGCull.ViewProjMatrix;
 #ifndef DISABLE_HZB_CULL
     view.PrevViewProjMatrix = g_DAGCull.PrevViewProjMatrix;
@@ -126,7 +103,6 @@ DAGCullViewData GetDAGCullViewData()
     view.HZBSourceWidth = g_DAGCull.ViewportWidth;
     view.HZBSourceHeight = g_DAGCull.ViewportHeight;
     view.HZBUvScaleBias = float4(1.0f, 1.0f, 0.0f, 0.0f);
-#endif
     return view;
 }
 
@@ -493,11 +469,6 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
 [numthreads(DAG_CULL_GROUP_SIZE, 1, 1)]
 void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 {
-#ifdef VSM_PHYSICAL_PAGE_PASS
-    VsmPhysicalPageView pageView;
-    if (!TryGetVsmPhysicalPageView(pageView))
-        return;
-#endif
 #ifndef DISABLE_HZB_CULL
 #ifdef DAG_CULL_PASS1
     const uint passIndex = 1;

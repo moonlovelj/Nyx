@@ -81,8 +81,6 @@
 #define VSM_CACHED_AVAILABLE_PAGE_COUNT_OFFSET 44u
 #define VSM_CACHED_AVAILABLE_PAGE_READ_OFFSET 48u
 
-#define VSM_RENDER_REQUEST_PREDICATE_STRIDE 8u
-
 #ifdef __cplusplus
 
 #include "../Core/VectorMath.h"
@@ -140,7 +138,6 @@ namespace Renderer::VirtualShadowMap
     static_assert(kPhysicalPageCapacity <= VSM_PAGE_TABLE_PHYSICAL_PAGE_INDEX_MASK + 1u);
     static_assert(kPhysicalPageCapacity == 1024);
     static_assert(kPhysicalPoolResolution == 4096);
-    static_assert(VSM_RENDER_REQUEST_PREDICATE_STRIDE == sizeof(uint64_t));
 
 #else
 

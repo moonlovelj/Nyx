@@ -20,7 +20,6 @@ RWStructuredBuffer<uint> g_VsmCachedAvailablePagesUAV;
 RWStructuredBuffer<VsmPageRenderRequest> g_VsmPageRenderRequests;
 RWByteAddressBuffer g_VsmPhysicalPageUsedMaskUAV;
 RWByteAddressBuffer g_VsmPageManagementCounters;
-RWByteAddressBuffer g_VsmRenderRequestPredicate;
 
 struct VsmPageManagementConstants
 {
@@ -119,10 +118,6 @@ void AppendRenderRequest(uint viewId, uint pageTableIndex, uint physicalPageInde
     renderRequest.PhysicalPageIndex = physicalPageIndex;
     renderRequest.Flags = flags;
     g_VsmPageRenderRequests[renderRequestIndex] = renderRequest;
-
-    g_VsmRenderRequestPredicate.Store2(
-        renderRequestIndex * VSM_RENDER_REQUEST_PREDICATE_STRIDE,
-        uint2(1u, 0u));
 }
 
 bool TryGetCachedPageTableIndex(VsmShadowView shadowView, int2 virtualPage, out uint pageTableIndex)

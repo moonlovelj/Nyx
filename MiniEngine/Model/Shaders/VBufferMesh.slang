@@ -16,9 +16,6 @@
 #include "GeometryCommon.slang"
 #include "WaveUtil.h.slang"
 #include "CullCommon.slang"
-#ifdef VSM_PHYSICAL_PAGE_PASS
-#include "VsmPhysicalPagePass.h.slang"
-#endif
 
 #define MAX_VERTS 128
 #define MAX_PRIMS 128
@@ -34,12 +31,6 @@ struct VBufferMeshConstants
 struct MeshVertexOutput
 {
     float4 Position : SV_POSITION;
-#ifdef VSM_PHYSICAL_PAGE_PASS
-    float PageClipDistance0 : SV_ClipDistance0;
-    float PageClipDistance1 : SV_ClipDistance1;
-    float PageClipDistance2 : SV_ClipDistance2;
-    float PageClipDistance3 : SV_ClipDistance3;
-#endif
     float2 UV0 : TEXCOORD0;
     nointerpolation uint CommandIndex : TEXCOORD1;
     nointerpolation uint PackedMaterialInfo : TEXCOORD2;
@@ -51,11 +42,6 @@ struct PrimitiveAttributes
 };
 
 ConstantBuffer<VBufferMeshConstants> g_VBufferMesh;
-
-#ifdef VSM_PHYSICAL_PAGE_PASS
-StructuredBuffer<QueueState> g_VsmTaskQueueStateSRV;
-StructuredBuffer<VisibleMeshletPayload> g_VsmVisibleMeshlets;
-#endif
 
 groupshared uint s_PrimCount;
 groupshared uint s_PrimOutIndex[MAX_PRIMS];
@@ -168,21 +154,11 @@ void meshMain(
     OutputIndices<uint3, MAX_PRIMS> outIndices,
     OutputPrimitives<PrimitiveAttributes, MAX_PRIMS> sharedPrimitives)
 {
-#ifdef VSM_PHYSICAL_PAGE_PASS
-    VsmPhysicalPageView pageView;
-    TryGetVsmPhysicalPageView(pageView);
-    float4x4 viewProjMatrix = GetVsmPhysicalPageViewProj(pageView);
-#else
     float4x4 viewProjMatrix = g_VBufferMesh.ViewProjMatrix;
-#endif
 
 #ifndef DISABLE_HZB_CULL
 #if VBUFFER_MESH_PASS_INDEX == 1
-#ifdef VSM_PHYSICAL_PAGE_PASS
-    StructuredBuffer<QueueState> taskStateSRV = g_VsmTaskQueueStateSRV;
-#else
     StructuredBuffer<QueueState> taskStateSRV = GetTaskQueueStateBufferSRV();
-#endif
     const uint commandStart = taskStateSRV[0].PassState[0].VisibleMeshletCount;
 #else
     const uint commandStart = 0;
@@ -192,11 +168,7 @@ void meshMain(
 #endif
 
     uint commandIndex = gid + commandStart;
-#ifdef VSM_PHYSICAL_PAGE_PASS
-    VisibleMeshletPayload payload = g_VsmVisibleMeshlets[commandIndex];
-#else
     VisibleMeshletPayload payload = GetVisibleMeshletPayload(commandIndex);
-#endif
     InstanceConstant inst = LoadInstanceConstant(payload.InstanceIndex);
     MeshConstant meshInstance = LoadMeshConstant(inst.MeshBufferIdx);
 
@@ -302,14 +274,6 @@ void meshMain(
                 vertexID,
                 commandIndex,
                 viewProjMatrix);
-#ifdef VSM_PHYSICAL_PAGE_PASS
-            float4 pageClipDistances = GetVsmPageClipDistances(vertexOutput.Position);
-            vertexOutput.PageClipDistance0 = pageClipDistances.x;
-            vertexOutput.PageClipDistance1 = pageClipDistances.y;
-            vertexOutput.PageClipDistance2 = pageClipDistances.z;
-            vertexOutput.PageClipDistance3 = pageClipDistances.w;
-            vertexOutput.Position = TransformVsmPageClipToPhysicalAtlas(pageView, vertexOutput.Position);
-#endif
             verts[vertexID] = vertexOutput;
         }
     }

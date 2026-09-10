@@ -199,7 +199,6 @@
     <None Include="Shaders\VsmCull.h.slang" />
     <None Include="Shaders\VsmDAGCull.slang" />
     <None Include="Shaders\VsmInstanceCull.slang" />
-    <None Include="Shaders\VsmPhysicalPagePass.h.slang" />
     <None Include="Shaders\VsmRaster.slang" />
     <None Include="Shaders\VsmResidency.slang" />
     <None Include="Shaders\VsmSampling.h.slang" />
