@@ -296,6 +296,9 @@
     <None Include="Shaders\VsmDAGCull.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
+    <None Include="Shaders\VsmEvictionSort.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
     <None Include="Shaders\VsmInstanceCull.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>

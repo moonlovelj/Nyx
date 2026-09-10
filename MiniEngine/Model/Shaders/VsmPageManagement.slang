@@ -6,7 +6,7 @@ StructuredBuffer<DirectionalVsmAddressGpu> g_DirectionalVsmAddresses;
 ByteAddressBuffer g_VsmPageRequestMask;
 StructuredBuffer<uint> g_VsmPreviousToCurrentViewIds;
 StructuredBuffer<uint> g_VsmEmptyPhysicalPagesSRV;
-StructuredBuffer<uint> g_VsmCachedAvailablePagesSRV;
+StructuredBuffer<VsmEvictionCandidate> g_VsmEvictionCandidatesSRV;
 ByteAddressBuffer g_VsmPhysicalPageUsedMaskSRV;
 StructuredBuffer<VsmPageRenderRequest> g_VsmPageRenderRequestsSRV;
 ByteAddressBuffer g_VsmPageManagementCountersSRV;
@@ -16,7 +16,7 @@ RWStructuredBuffer<uint> g_VsmCurrentPageTable;
 RWStructuredBuffer<VsmPhysicalPageMetadata> g_VsmPhysicalPageMetadataUAV;
 RWStructuredBuffer<VsmPhysicalPageView> g_VsmPhysicalPageViewsUAV;
 RWStructuredBuffer<uint> g_VsmEmptyPhysicalPagesUAV;
-RWStructuredBuffer<uint> g_VsmCachedAvailablePagesUAV;
+RWStructuredBuffer<VsmEvictionCandidate> g_VsmEvictionCandidatesUAV;
 RWStructuredBuffer<VsmPageRenderRequest> g_VsmPageRenderRequests;
 RWByteAddressBuffer g_VsmPhysicalPageUsedMaskUAV;
 RWByteAddressBuffer g_VsmPageManagementCounters;
@@ -230,9 +230,15 @@ void reuseCachedPhysicalPages(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 }
 
+uint BuildVsmEvictionAgeKey(uint lastRequestedFrame)
+{
+    uint age = min(g_VsmPageManagement.FrameNumber - lastRequestedFrame, VSM_EVICTION_AGE_MASK);
+    return VSM_EVICTION_AGE_VALID_BIT | age;
+}
+
 [shader("compute")]
 [numthreads(64, 1, 1)]
-void buildFreePhysicalPageList(uint3 dispatchThreadId : SV_DispatchThreadID)
+void buildPhysicalPageAllocationLists(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint physicalPageIndex = dispatchThreadId.x;
     if (physicalPageIndex >= VSM_PHYSICAL_PAGE_CAPACITY)
@@ -252,21 +258,30 @@ void buildFreePhysicalPageList(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
     else
     {
-        g_VsmPageManagementCounters.InterlockedAdd(VSM_CACHED_AVAILABLE_PAGE_COUNT_OFFSET, 1u, pageIndex);
-        g_VsmCachedAvailablePagesUAV[pageIndex] = physicalPageIndex;
+        g_VsmPageManagementCounters.InterlockedAdd(VSM_EVICTION_CANDIDATE_COUNT_OFFSET, 1u, pageIndex);
+
+        VsmEvictionCandidate candidate;
+        candidate.PhysicalPageIndex = physicalPageIndex;
+        candidate.EvictionAgeKey = BuildVsmEvictionAgeKey(metadata.LastRequestedFrame);
+        g_VsmEvictionCandidatesUAV[pageIndex] = candidate;
     }
 }
 
-uint AllocatePhysicalPage()
+uint AllocatePhysicalPage(out bool evicted)
 {
+    evicted = false;
+
     uint pageIndex;
     g_VsmPageManagementCounters.InterlockedAdd(VSM_EMPTY_PAGE_READ_OFFSET, 1u, pageIndex);
     if (pageIndex < g_VsmPageManagementCounters.Load(VSM_EMPTY_PAGE_COUNT_OFFSET))
         return g_VsmEmptyPhysicalPagesSRV[pageIndex];
 
-    g_VsmPageManagementCounters.InterlockedAdd(VSM_CACHED_AVAILABLE_PAGE_READ_OFFSET, 1u, pageIndex);
-    if (pageIndex < g_VsmPageManagementCounters.Load(VSM_CACHED_AVAILABLE_PAGE_COUNT_OFFSET))
-        return g_VsmCachedAvailablePagesSRV[pageIndex];
+    g_VsmPageManagementCounters.InterlockedAdd(VSM_EVICTION_CANDIDATE_READ_OFFSET, 1u, pageIndex);
+    if (pageIndex < g_VsmPageManagementCounters.Load(VSM_EVICTION_CANDIDATE_COUNT_OFFSET))
+    {
+        evicted = true;
+        return g_VsmEvictionCandidatesSRV[pageIndex].PhysicalPageIndex;
+    }
 
     return VSM_INVALID_PHYSICAL_PAGE;
 }
@@ -299,7 +314,8 @@ void allocateNewPages(uint3 dispatchThreadId : SV_DispatchThreadID)
         if (!TryGetRequestedVirtualPage(shadowView, pageTableIndex, virtualPage))
             continue;
 
-        uint physicalPageIndex = AllocatePhysicalPage();
+        bool evicted;
+        uint physicalPageIndex = AllocatePhysicalPage(evicted);
         if (physicalPageIndex == VSM_INVALID_PHYSICAL_PAGE)
         {
             uint originalValue;
@@ -320,6 +336,11 @@ void allocateNewPages(uint3 dispatchThreadId : SV_DispatchThreadID)
 
         uint originalValue;
         g_VsmPageManagementCounters.InterlockedAdd(VSM_NEW_PAGE_COUNT_OFFSET, 1u, originalValue);
+        if (evicted)
+        {
+            g_VsmPageManagementCounters.InterlockedAdd(VSM_EVICTED_PAGE_COUNT_OFFSET, 1u, originalValue);
+        }
+
         if (IsCoarseFallbackView(shadowView))
         {
             g_VsmPageManagementCounters.InterlockedAdd(

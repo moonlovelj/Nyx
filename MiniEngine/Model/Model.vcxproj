@@ -198,6 +198,7 @@
     <None Include="Shaders\VirtualShadowMap.h.slang" />
     <None Include="Shaders\VsmCull.h.slang" />
     <None Include="Shaders\VsmDAGCull.slang" />
+    <None Include="Shaders\VsmEvictionSort.slang" />
     <None Include="Shaders\VsmInstanceCull.slang" />
     <None Include="Shaders\VsmRaster.slang" />
     <None Include="Shaders\VsmResidency.slang" />

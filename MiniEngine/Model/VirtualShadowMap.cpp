@@ -42,6 +42,7 @@ namespace Renderer::VirtualShadowMap
         IntVar s_RequestedPageCount("Renderer/VSM/Page Statistics/Requested", 0);
         IntVar s_ReusedPageCount("Renderer/VSM/Page Statistics/Reused", 0);
         IntVar s_NewPageCount("Renderer/VSM/Page Statistics/New", 0);
+        IntVar s_EvictedPageCount("Renderer/VSM/Page Statistics/Evicted", 0);
         IntVar s_OverflowPageCount("Renderer/VSM/Page Statistics/Overflow", 0);
         IntVar s_CoarseMappedPageCount("Renderer/VSM/Page Statistics/Coarse Mapped", 0);
         IntVar s_CoarseOverflowPageCount("Renderer/VSM/Page Statistics/Coarse Overflow", 0);
@@ -69,7 +70,8 @@ namespace Renderer::VirtualShadowMap
         std::shared_ptr<Program> s_UpdateResidencyStatesProgram;
         ComputePSO s_MarkViewDirtyPSO(L"VSM: Mark View Dirty");
         ComputePSO s_ReuseCachedPhysicalPagesPSO(L"VSM: Reuse Cached Physical Pages");
-        ComputePSO s_BuildFreePhysicalPageListPSO(L"VSM: Build Free Physical Page List");
+        ComputePSO s_BuildPhysicalPageAllocationListsPSO(L"VSM: Build Physical Page Allocation Lists");
+        ComputePSO s_SortEvictionCandidatesPSO(L"VSM: Sort Eviction Candidates");
         ComputePSO s_AllocateNewPagesPSO(L"VSM: Allocate New Pages");
         ComputePSO s_MarkPhysicalPageRenderedPSO(L"VSM: Mark Physical Page Rendered");
         ComputePSO s_BuildPhysicalPageRenderDataPSO(L"VSM: Build Physical Page Render Data");
@@ -90,7 +92,8 @@ namespace Renderer::VirtualShadowMap
         GraphicsPSO s_ClearRequestedPhysicalPagePSO(L"VSM: Clear Requested Physical Page");
         std::shared_ptr<Program> s_MarkViewDirtyProgram;
         std::shared_ptr<Program> s_ReuseCachedPhysicalPagesProgram;
-        std::shared_ptr<Program> s_BuildFreePhysicalPageListProgram;
+        std::shared_ptr<Program> s_BuildPhysicalPageAllocationListsProgram;
+        std::shared_ptr<Program> s_SortEvictionCandidatesProgram;
         std::shared_ptr<Program> s_AllocateNewPagesProgram;
         std::shared_ptr<Program> s_MarkPhysicalPageRenderedProgram;
         std::shared_ptr<Program> s_BuildPhysicalPageRenderDataProgram;
@@ -116,7 +119,7 @@ namespace Renderer::VirtualShadowMap
         StructuredBuffer s_PhysicalPageMetadataGpu;
         StructuredBuffer s_PreviousToCurrentViewIdsGpu;
         StructuredBuffer s_EmptyPhysicalPagesGpu;
-        StructuredBuffer s_CachedAvailablePagesGpu;
+        StructuredBuffer s_EvictionCandidatesGpu;
         ByteAddressBuffer s_PhysicalPageUsedMaskGpu;
         ByteAddressBuffer s_PageManagementCountersGpu;
         StructuredBuffer s_PhysicalPageViewsGpu;
@@ -224,6 +227,8 @@ namespace Renderer::VirtualShadowMap
             (kRequestMaskWordCountPerView + kPageManagementThreadCount - 1u) / kPageManagementThreadCount;
         constexpr uint32_t kPhysicalPageGroupCount =
             (kPhysicalPageCapacity + kPageManagementThreadCount - 1u) / kPageManagementThreadCount;
+        static_assert((kPhysicalPageCapacity & (kPhysicalPageCapacity - 1u)) == 0u);
+        static_assert(kPhysicalPageCapacity <= 4096u);
         constexpr float kResidencyTargetPoolLoad = 0.85f;
         constexpr float kResidencyResolutionDownLerpFactor = 0.5f;
         constexpr float kResidencyResolutionUpLerpFactor = 0.1f;
@@ -324,6 +329,7 @@ namespace Renderer::VirtualShadowMap
             s_RequestedPageCount = static_cast<int32_t>(statistics.RequestedPages);
             s_ReusedPageCount = static_cast<int32_t>(statistics.ReusedPages);
             s_NewPageCount = static_cast<int32_t>(statistics.NewPages);
+            s_EvictedPageCount = static_cast<int32_t>(statistics.EvictedPages);
             s_OverflowPageCount = static_cast<int32_t>(statistics.OverflowPages);
             s_CoarseMappedPageCount = static_cast<int32_t>(statistics.CoarseMappedPages);
             s_CoarseOverflowPageCount = static_cast<int32_t>(statistics.CoarseOverflowPages);
@@ -355,6 +361,8 @@ namespace Renderer::VirtualShadowMap
                 kManagementStatisticsReadbackOffset + VSM_REUSED_PAGE_COUNT_OFFSET);
             statistics.NewPages = readValue(
                 kManagementStatisticsReadbackOffset + VSM_NEW_PAGE_COUNT_OFFSET);
+            statistics.EvictedPages = readValue(
+                kManagementStatisticsReadbackOffset + VSM_EVICTED_PAGE_COUNT_OFFSET);
             statistics.OverflowPages = readValue(
                 kManagementStatisticsReadbackOffset + VSM_OVERFLOW_PAGE_COUNT_OFFSET);
             statistics.CoarseMappedPages = readValue(
@@ -363,9 +371,11 @@ namespace Renderer::VirtualShadowMap
                 kManagementStatisticsReadbackOffset + VSM_COARSE_OVERFLOW_PAGE_COUNT_OFFSET);
             statistics.RenderRequests = readValue(
                 kManagementStatisticsReadbackOffset + VSM_RENDER_REQUEST_COUNT_OFFSET);
-            statistics.FreePagesBeforeAllocation =
-                readValue(kManagementStatisticsReadbackOffset + VSM_EMPTY_PAGE_COUNT_OFFSET) +
-                readValue(kManagementStatisticsReadbackOffset + VSM_CACHED_AVAILABLE_PAGE_COUNT_OFFSET);
+            const uint32_t emptyPageCount =
+                readValue(kManagementStatisticsReadbackOffset + VSM_EMPTY_PAGE_COUNT_OFFSET);
+            const uint32_t evictionCandidateCount =
+                readValue(kManagementStatisticsReadbackOffset + VSM_EVICTION_CANDIDATE_COUNT_OFFSET);
+            statistics.FreePagesBeforeAllocation = emptyPageCount + evictionCandidateCount;
             statistics.RenderDataPages = readValue(
                 kPhysicalPageRenderStatisticsReadbackOffset + VSM_RENDER_PAGE_COUNT_OFFSET);
             statistics.ActiveRenderViews = readValue(
@@ -404,6 +414,9 @@ namespace Renderer::VirtualShadowMap
                 statistics.RequestedPages == mappedPages + statistics.OverflowPages &&
                 statistics.ReusedPages + statistics.FreePagesBeforeAllocation == kPhysicalPageCapacity &&
                 statistics.NewPages <= statistics.FreePagesBeforeAllocation &&
+                statistics.EvictedPages <= evictionCandidateCount &&
+                statistics.EvictedPages <= statistics.NewPages &&
+                statistics.NewPages - statistics.EvictedPages <= emptyPageCount &&
                 (!statistics.PhysicalPoolExhausted ||
                     statistics.NewPages == statistics.FreePagesBeforeAllocation) &&
                 statistics.CoarseMappedPages <= mappedPages &&
@@ -603,6 +616,35 @@ namespace Renderer::VirtualShadowMap
             context.Dispatch(kPhysicalPageGroupCount, 1, 1);
         }
 
+        void BuildPhysicalPageAllocationLists(ComputeContext& context)
+        {
+            ProgramBinder binder(*s_BuildPhysicalPageAllocationListsProgram, context);
+            binder.SetRootSignature();
+            context.SetPipelineState(s_BuildPhysicalPageAllocationListsPSO);
+
+            binder.SetRootBufferSRV("g_VsmPhysicalPageUsedMaskSRV", s_PhysicalPageUsedMaskGpu);
+            binder.SetRootBufferUAV("g_VsmPhysicalPageMetadataUAV", s_PhysicalPageMetadataGpu);
+            binder.SetRootBufferUAV("g_VsmEmptyPhysicalPagesUAV", s_EmptyPhysicalPagesGpu);
+            binder.SetRootBufferUAV("g_VsmEvictionCandidatesUAV", s_EvictionCandidatesGpu);
+            binder.SetRootBufferUAV("g_VsmPageManagementCounters", s_PageManagementCountersGpu);
+            BindPageManagementConstants(binder);
+            binder.Apply();
+
+            context.Dispatch(kPhysicalPageGroupCount, 1, 1);
+        }
+
+        void SortEvictionCandidates(ComputeContext& context)
+        {
+            ProgramBinder binder(*s_SortEvictionCandidatesProgram, context);
+            binder.SetRootSignature();
+            context.SetPipelineState(s_SortEvictionCandidatesPSO);
+            binder.SetRootBufferUAV("g_VsmEvictionCandidates", s_EvictionCandidatesGpu);
+            binder.SetRootBufferUAV("g_VsmPageManagementCounters", s_PageManagementCountersGpu);
+            binder.Apply();
+
+            context.Dispatch(1, 1, 1);
+        }
+
         void DispatchAllocateNewPages(
             ComputeContext& context,
             StructuredBuffer& currentPageTable,
@@ -616,7 +658,7 @@ namespace Renderer::VirtualShadowMap
             binder.SetRootBufferSRV("g_DirectionalVsmAddresses", s_DirectionalAddressesGpu);
             binder.SetRootBufferSRV("g_VsmPageRequestMask", s_PageRequestMaskGpu);
             binder.SetRootBufferSRV("g_VsmEmptyPhysicalPagesSRV", s_EmptyPhysicalPagesGpu);
-            binder.SetRootBufferSRV("g_VsmCachedAvailablePagesSRV", s_CachedAvailablePagesGpu);
+            binder.SetRootBufferSRV("g_VsmEvictionCandidatesSRV", s_EvictionCandidatesGpu);
             binder.SetRootBufferUAV("g_VsmCurrentPageTable", currentPageTable);
             binder.SetRootBufferUAV("g_VsmPhysicalPageMetadataUAV", s_PhysicalPageMetadataGpu);
             binder.SetRootBufferUAV("g_VsmPageRenderRequests", s_PageRenderRequestsGpu);
@@ -1149,27 +1191,43 @@ namespace Renderer::VirtualShadowMap
         ProgramUtils::SetProgram(s_ReuseCachedPhysicalPagesPSO, *s_ReuseCachedPhysicalPagesProgram);
         s_ReuseCachedPhysicalPagesPSO.Finalize();
 
-        ProgramDesc buildFreePhysicalPageListDesc =
-            ProgramUtils::MakeComputeDesc(pageManagementShaderPath, "buildFreePhysicalPageList");
-        buildFreePhysicalPageListDesc.AddRootBufferSRV("g_VsmPhysicalPageUsedMaskSRV");
-        buildFreePhysicalPageListDesc.AddRootBufferUAV("g_VsmPhysicalPageMetadataUAV");
-        buildFreePhysicalPageListDesc.AddRootBufferUAV("g_VsmEmptyPhysicalPagesUAV");
-        buildFreePhysicalPageListDesc.AddRootBufferUAV("g_VsmCachedAvailablePagesUAV");
-        buildFreePhysicalPageListDesc.AddRootBufferUAV("g_VsmPageManagementCounters");
-        s_BuildFreePhysicalPageListProgram =
-            ProgramUtils::GetProgram(buildFreePhysicalPageListDesc, "VSM: Build Free Physical Page List");
-        if (!s_BuildFreePhysicalPageListProgram)
+        ProgramDesc buildPhysicalPageAllocationListsDesc =
+            ProgramUtils::MakeComputeDesc(pageManagementShaderPath, "buildPhysicalPageAllocationLists");
+        buildPhysicalPageAllocationListsDesc.AddRootBufferSRV("g_VsmPhysicalPageUsedMaskSRV");
+        buildPhysicalPageAllocationListsDesc.AddRootBufferUAV("g_VsmPhysicalPageMetadataUAV");
+        buildPhysicalPageAllocationListsDesc.AddRootBufferUAV("g_VsmEmptyPhysicalPagesUAV");
+        buildPhysicalPageAllocationListsDesc.AddRootBufferUAV("g_VsmEvictionCandidatesUAV");
+        buildPhysicalPageAllocationListsDesc.AddRootBufferUAV("g_VsmPageManagementCounters");
+        s_BuildPhysicalPageAllocationListsProgram = ProgramUtils::GetProgram(
+            buildPhysicalPageAllocationListsDesc,
+            "VSM: Build Physical Page Allocation Lists");
+        if (!s_BuildPhysicalPageAllocationListsProgram)
             return false;
 
-        ProgramUtils::SetProgram(s_BuildFreePhysicalPageListPSO, *s_BuildFreePhysicalPageListProgram);
-        s_BuildFreePhysicalPageListPSO.Finalize();
+        ProgramUtils::SetProgram(
+            s_BuildPhysicalPageAllocationListsPSO,
+            *s_BuildPhysicalPageAllocationListsProgram);
+        s_BuildPhysicalPageAllocationListsPSO.Finalize();
+
+        ProgramDesc sortEvictionCandidatesDesc = ProgramUtils::MakeComputeDesc(
+            Renderer::GetModelShaderPath("VsmEvictionSort.slang"),
+            "sortEvictionCandidates");
+        sortEvictionCandidatesDesc.AddRootBufferUAV("g_VsmEvictionCandidates");
+        sortEvictionCandidatesDesc.AddRootBufferUAV("g_VsmPageManagementCounters");
+        s_SortEvictionCandidatesProgram =
+            ProgramUtils::GetProgram(sortEvictionCandidatesDesc, "VSM: Sort Eviction Candidates");
+        if (!s_SortEvictionCandidatesProgram)
+            return false;
+
+        ProgramUtils::SetProgram(s_SortEvictionCandidatesPSO, *s_SortEvictionCandidatesProgram);
+        s_SortEvictionCandidatesPSO.Finalize();
 
         ProgramDesc allocateNewPagesDesc = ProgramUtils::MakeComputeDesc(pageManagementShaderPath, "allocateNewPages");
         allocateNewPagesDesc.AddRootBufferSRV("g_VsmShadowViews");
         allocateNewPagesDesc.AddRootBufferSRV("g_DirectionalVsmAddresses");
         allocateNewPagesDesc.AddRootBufferSRV("g_VsmPageRequestMask");
         allocateNewPagesDesc.AddRootBufferSRV("g_VsmEmptyPhysicalPagesSRV");
-        allocateNewPagesDesc.AddRootBufferSRV("g_VsmCachedAvailablePagesSRV");
+        allocateNewPagesDesc.AddRootBufferSRV("g_VsmEvictionCandidatesSRV");
         allocateNewPagesDesc.AddRootBufferUAV("g_VsmCurrentPageTable");
         allocateNewPagesDesc.AddRootBufferUAV("g_VsmPhysicalPageMetadataUAV");
         allocateNewPagesDesc.AddRootBufferUAV("g_VsmPageRenderRequests");
@@ -1434,10 +1492,10 @@ namespace Renderer::VirtualShadowMap
             kMaxShadowViews,
             sizeof(uint32_t));
         s_EmptyPhysicalPagesGpu.Create(L"VSM Empty Physical Pages", kPhysicalPageCapacity, sizeof(uint32_t));
-        s_CachedAvailablePagesGpu.Create(
-            L"VSM Cached Available Physical Pages",
+        s_EvictionCandidatesGpu.Create(
+            L"VSM Physical Page Eviction Candidates",
             kPhysicalPageCapacity,
-            sizeof(uint32_t));
+            sizeof(VsmEvictionCandidate));
         s_PhysicalPageUsedMaskGpu.Create(
             L"VSM Physical Page Used Mask",
             kPhysicalPageCapacity / kRequestMaskWordBits,
@@ -1536,7 +1594,7 @@ namespace Renderer::VirtualShadowMap
         s_PhysicalPageMetadataGpu.Destroy();
         s_PreviousToCurrentViewIdsGpu.Destroy();
         s_EmptyPhysicalPagesGpu.Destroy();
-        s_CachedAvailablePagesGpu.Destroy();
+        s_EvictionCandidatesGpu.Destroy();
         s_PhysicalPageUsedMaskGpu.Destroy();
         s_PageManagementCountersGpu.Destroy();
         s_PhysicalPageViewsGpu.Destroy();
@@ -1559,7 +1617,8 @@ namespace Renderer::VirtualShadowMap
         s_UpdateResidencyStatesProgram.reset();
         s_MarkViewDirtyProgram.reset();
         s_ReuseCachedPhysicalPagesProgram.reset();
-        s_BuildFreePhysicalPageListProgram.reset();
+        s_BuildPhysicalPageAllocationListsProgram.reset();
+        s_SortEvictionCandidatesProgram.reset();
         s_AllocateNewPagesProgram.reset();
         s_MarkPhysicalPageRenderedProgram.reset();
         s_BuildPhysicalPageRenderDataProgram.reset();
@@ -1626,7 +1685,7 @@ namespace Renderer::VirtualShadowMap
         clearBuffer(s_PhysicalPageMetadataGpu);
         clearBuffer(s_PreviousToCurrentViewIdsGpu, kInvalidViewId);
         clearBuffer(s_EmptyPhysicalPagesGpu);
-        clearBuffer(s_CachedAvailablePagesGpu);
+        clearBuffer(s_EvictionCandidatesGpu);
         clearBuffer(s_PhysicalPageUsedMaskGpu);
         clearBuffer(s_PageManagementCountersGpu);
         clearBuffer(s_PhysicalPageViewsGpu);
@@ -1965,29 +2024,20 @@ namespace Renderer::VirtualShadowMap
 
         context.TransitionResource(s_PhysicalPageUsedMaskGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.TransitionResource(s_EmptyPhysicalPagesGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        context.TransitionResource(s_CachedAvailablePagesGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        context.TransitionResource(s_EvictionCandidatesGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         context.FlushResourceBarriers();
 
-        {
-            ProgramBinder binder(*s_BuildFreePhysicalPageListProgram, context);
-            binder.SetRootSignature();
-            context.SetPipelineState(s_BuildFreePhysicalPageListPSO);
-
-            binder.SetRootBufferSRV("g_VsmPhysicalPageUsedMaskSRV", s_PhysicalPageUsedMaskGpu);
-            binder.SetRootBufferUAV("g_VsmPhysicalPageMetadataUAV", s_PhysicalPageMetadataGpu);
-            binder.SetRootBufferUAV("g_VsmEmptyPhysicalPagesUAV", s_EmptyPhysicalPagesGpu);
-            binder.SetRootBufferUAV("g_VsmCachedAvailablePagesUAV", s_CachedAvailablePagesGpu);
-            binder.SetRootBufferUAV("g_VsmPageManagementCounters", s_PageManagementCountersGpu);
-            binder.Apply();
-
-            context.Dispatch(kPhysicalPageGroupCount, 1, 1);
-        }
+        BuildPhysicalPageAllocationLists(context);
 
         context.InsertUAVBarrier(s_EmptyPhysicalPagesGpu);
-        context.InsertUAVBarrier(s_CachedAvailablePagesGpu);
+        context.InsertUAVBarrier(s_EvictionCandidatesGpu);
         context.InsertUAVBarrier(s_PageManagementCountersGpu);
+
+        SortEvictionCandidates(context);
+
+        context.InsertUAVBarrier(s_EvictionCandidatesGpu);
         context.TransitionResource(s_EmptyPhysicalPagesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        context.TransitionResource(s_CachedAvailablePagesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_EvictionCandidatesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         context.FlushResourceBarriers();
 
         DispatchAllocateNewPages(context, currentPageTable, VSM_PAGE_ALLOCATION_CLASS_COARSE);

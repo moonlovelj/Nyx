@@ -66,7 +66,7 @@
 #define VSM_REQUESTED_PAGE_COUNT_OFFSET 0u
 #define VSM_INVALID_ADDRESS_PIXEL_COUNT_OFFSET 4u
 
-#define VSM_PAGE_MANAGEMENT_COUNTERS_SIZE 52u
+#define VSM_PAGE_MANAGEMENT_COUNTERS_SIZE 56u
 #define VSM_RENDER_REQUEST_COUNT_OFFSET 0u
 #define VSM_REUSED_PAGE_COUNT_OFFSET 4u
 #define VSM_NEW_PAGE_COUNT_OFFSET 8u
@@ -78,8 +78,12 @@
 #define VSM_MARKED_DIRTY_PAGE_COUNT_OFFSET 32u
 #define VSM_COARSE_MAPPED_PAGE_COUNT_OFFSET 36u
 #define VSM_COARSE_OVERFLOW_PAGE_COUNT_OFFSET 40u
-#define VSM_CACHED_AVAILABLE_PAGE_COUNT_OFFSET 44u
-#define VSM_CACHED_AVAILABLE_PAGE_READ_OFFSET 48u
+#define VSM_EVICTION_CANDIDATE_COUNT_OFFSET 44u
+#define VSM_EVICTION_CANDIDATE_READ_OFFSET 48u
+#define VSM_EVICTED_PAGE_COUNT_OFFSET 52u
+
+#define VSM_EVICTION_AGE_VALID_BIT 0x80000000u
+#define VSM_EVICTION_AGE_MASK 0x7fffffffu
 
 #ifdef __cplusplus
 
@@ -292,6 +296,12 @@ namespace Renderer::VirtualShadowMap
         VSM_UINT OwnerViewId;
     };
 
+    struct VsmEvictionCandidate
+    {
+        VSM_UINT PhysicalPageIndex;
+        VSM_UINT EvictionAgeKey;
+    };
+
     // Render and cull data indexed directly by PhysicalPageIndex.
     struct VSM_ALIGN_16 VsmPhysicalPageView
     {
@@ -328,6 +338,7 @@ namespace Renderer::VirtualShadowMap
     static_assert(sizeof(VsmProjectionGpu) == 80);
     static_assert(sizeof(VsmPageRenderRequest) == 16);
     static_assert(sizeof(VsmPhysicalPageMetadata) == 36);
+    static_assert(sizeof(VsmEvictionCandidate) == 8);
     static_assert(sizeof(VsmPhysicalPageView) == 192);
 }
 #endif

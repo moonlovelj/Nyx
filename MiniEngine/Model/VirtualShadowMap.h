@@ -24,6 +24,7 @@ namespace Renderer::VirtualShadowMap
         uint32_t RequestedPages = 0;
         uint32_t ReusedPages = 0;
         uint32_t NewPages = 0;
+        uint32_t EvictedPages = 0;
         uint32_t OverflowPages = 0;
         uint32_t CoarseMappedPages = 0;
         uint32_t CoarseOverflowPages = 0;
