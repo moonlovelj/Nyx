@@ -71,7 +71,7 @@ bool TryReconstructVsmReceiverWorldPosition(uint2 pixelPosition, out float3 worl
     return true;
 }
 
-float3 VisualizeDirectionalVsmPageState(uint2 pixelPosition)
+float3 VisualizeDirectionalVsmPageState(uint2 pixelPosition, bool showDynamicInvalidation)
 {
     if (g_DeferredLighting.VsmClipmapId == VSM_INVALID_VIEW_ID)
         return float3(1.0f, 0.0f, 1.0f);
@@ -108,11 +108,17 @@ float3 VisualizeDirectionalVsmPageState(uint2 pixelPosition)
             {
                 VsmPhysicalPageMetadata metadata = g_VsmPhysicalPageMetadata[physicalPageIndex];
                 bool metadataMatches = IsVsmPhysicalPageMetadataMatch(metadata, shadowView, address.VirtualPage);
+                float3 pageColor = GetVsmPhysicalPageStateColor(metadata);
+                if (showDynamicInvalidation)
+                {
+                    pageColor = (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_DYNAMIC_INVALIDATED_THIS_FRAME) != 0u
+                        ? float3(1.0f, 0.25f, 0.0f) : float3(0.08f);
+                }
 
                 // White indicates that the page table and reverse mapping disagree.
                 addressColor = !metadataMatches
                     ? float3(1.0f)
-                    : pageBorder ? float3(0.0f) : GetVsmPhysicalPageStateColor(metadata);
+                    : pageBorder ? float3(0.0f) : pageColor;
             }
         }
     }
@@ -164,9 +170,10 @@ void computeMain(
         RWTexture2D<float4> sceneColor = GetSceneColorUAV();
         Texture2D<float4> gBufferD = GetGBufferDSRV();
         uint viewMode = (uint)gBufferD[DTid].a;
-        if (viewMode == VIEW_MODE_SHOW_VSM_PAGE_STATE)
+        if (viewMode == VIEW_MODE_SHOW_VSM_PAGE_STATE || viewMode == VIEW_MODE_SHOW_VSM_DYNAMIC_INVALIDATION)
         {
-            sceneColor[DTid] = float4(VisualizeDirectionalVsmPageState(DTid), 1.0f);
+            sceneColor[DTid] = float4(
+                VisualizeDirectionalVsmPageState(DTid, viewMode == VIEW_MODE_SHOW_VSM_DYNAMIC_INVALIDATION), 1.0f);
         }
         else if (viewMode == VIEW_MODE_SHOW_VSM_CLIPMAP_LEVEL)
         {

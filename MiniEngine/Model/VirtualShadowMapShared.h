@@ -42,6 +42,8 @@
 #define VSM_PHYSICAL_PAGE_METADATA_VALID 0x1u
 #define VSM_PHYSICAL_PAGE_METADATA_RENDERED 0x2u
 #define VSM_PHYSICAL_PAGE_METADATA_DIRTY 0x4u
+// Debug history for this frame; survives rendering and is reset during cache reuse.
+#define VSM_PHYSICAL_PAGE_METADATA_DYNAMIC_INVALIDATED_THIS_FRAME 0x8u
 #define VSM_PAGE_RENDER_REQUEST_HISTORY_VALID 0x1u
 
 #define VSM_REQUEST_MASK_WORD_LOG2 5u
@@ -302,6 +304,18 @@ namespace Renderer::VirtualShadowMap
         VSM_UINT EvictionAgeKey;
     };
 
+    struct VsmInvalidationBoundsGpu
+    {
+        VSM_FLOAT4 MinWS;
+        VSM_FLOAT4 MaxWS;
+    };
+
+    struct VsmInvalidationPageRange
+    {
+        VSM_INT2 MinVirtualPage;
+        VSM_INT2 MaxVirtualPage;
+    };
+
     // Render and cull data indexed directly by PhysicalPageIndex.
     struct VSM_ALIGN_16 VsmPhysicalPageView
     {
@@ -339,6 +353,8 @@ namespace Renderer::VirtualShadowMap
     static_assert(sizeof(VsmPageRenderRequest) == 16);
     static_assert(sizeof(VsmPhysicalPageMetadata) == 36);
     static_assert(sizeof(VsmEvictionCandidate) == 8);
+    static_assert(sizeof(VsmInvalidationBoundsGpu) == 32);
+    static_assert(sizeof(VsmInvalidationPageRange) == 16);
     static_assert(sizeof(VsmPhysicalPageView) == 192);
 }
 #endif

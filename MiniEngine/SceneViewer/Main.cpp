@@ -572,6 +572,15 @@ void SceneViewer::RenderScene( void )
         }
         vsmClipmapDesc.AddressGeneration = m_SunVsmAddressGeneration;
         frameConstants.SunVsmClipmapId = Renderer::VirtualShadowMap::AddDirectionalClipmap(vsmClipmapDesc);
+        for (const SceneObjectUpdate& update : ModelInstanceManager::GetSceneObjectUpdates())
+        {
+            Renderer::VirtualShadowMap::QueueInvalidationBounds(update.PreviousBoundsWS);
+            if (!DirectX::XMVector3Equal(update.PreviousBoundsWS.GetMin(), update.CurrentBoundsWS.GetMin()) ||
+                !DirectX::XMVector3Equal(update.PreviousBoundsWS.GetMax(), update.CurrentBoundsWS.GetMax()))
+            {
+                Renderer::VirtualShadowMap::QueueInvalidationBounds(update.CurrentBoundsWS);
+            }
+        }
         if (g_InvalidateSunVsmCache &&
             frameConstants.SunVsmClipmapId != Renderer::VirtualShadowMap::kInvalidViewId)
         {

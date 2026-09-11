@@ -120,6 +120,7 @@
     <ClInclude Include="MeshletStructs.h" />
     <ClInclude Include="Model.h" />
     <ClInclude Include="ModelInstanceManager.h" />
+    <ClInclude Include="SceneObjectUpdate.h" />
     <ClInclude Include="ModelLoader.h" />
     <ClInclude Include="ModelH3D.h" />
     <ClInclude Include="ParticleEffects.h" />
@@ -199,6 +200,7 @@
     <None Include="Shaders\VsmCull.h.slang" />
     <None Include="Shaders\VsmDAGCull.slang" />
     <None Include="Shaders\VsmEvictionSort.slang" />
+    <None Include="Shaders\VsmCacheInvalidation.slang" />
     <None Include="Shaders\VsmInstanceCull.slang" />
     <None Include="Shaders\VsmRaster.slang" />
     <None Include="Shaders\VsmResidency.slang" />

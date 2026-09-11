@@ -152,7 +152,7 @@ namespace Renderer
     
     const char* ViewModeLabels[] = {
         "Lit", "MeshletLOD", "MeshletID", "MeshletTriangle", "MeshID", "InstanceID", "MaterialID", "VSMPageState",
-        "VSMClipmapLevel"
+        "VSMClipmapLevel", "VSMDynamicInvalidation"
     };
     EnumVar ViewMode("Visualize/View Mode", 0, _countof(ViewModeLabels), ViewModeLabels);
 

@@ -32,6 +32,16 @@ namespace Renderer::VirtualShadowMap
 {
     namespace
     {
+        // Bound invalidation work and memory; overflow conservatively dirties all views.
+        constexpr uint32_t kMaxInvalidationBounds = 4096;
+        static_assert((kMaxInvalidationBounds + 63u) / 64u <= 65535u);
+        ComputePSO s_BuildInvalidationPageRangesPSO(L"VSM: Build Invalidation Page Ranges");
+        std::shared_ptr<Program> s_BuildInvalidationPageRangesProgram;
+        StructuredBuffer s_InvalidationBoundsGpu;
+        StructuredBuffer s_InvalidationPageRangesGpu;
+        std::vector<VsmInvalidationBoundsGpu> s_InvalidationBounds;
+        bool s_InvalidationOverflow = false;
+
         IntVar s_PhysicalPageRenderBudget(
             "Renderer/VSM/Physical Page Render Budget",
             64,
@@ -605,15 +615,50 @@ namespace Renderer::VirtualShadowMap
             binder.SetRootBufferSRV("g_DirectionalVsmAddresses", s_DirectionalAddressesGpu);
             binder.SetRootBufferSRV("g_VsmPageRequestMask", s_PageRequestMaskGpu);
             binder.SetRootBufferSRV("g_VsmPreviousToCurrentViewIds", s_PreviousToCurrentViewIdsGpu);
+            binder.SetRootBufferSRV("g_VsmInvalidationPageRanges", s_InvalidationPageRangesGpu);
             binder.SetRootBufferUAV("g_VsmPhysicalPageMetadataUAV", s_PhysicalPageMetadataGpu);
             binder.SetRootBufferUAV("g_VsmCurrentPageTable", currentPageTable);
             binder.SetRootBufferUAV("g_VsmPhysicalPageUsedMaskUAV", s_PhysicalPageUsedMaskGpu);
             binder.SetRootBufferUAV("g_VsmPageRenderRequests", s_PageRenderRequestsGpu);
             binder.SetRootBufferUAV("g_VsmPageManagementCounters", s_PageManagementCountersGpu);
             BindPageManagementConstants(binder);
+            binder["g_VsmPageManagement"]["InvalidationCount"].Set(static_cast<uint32_t>(s_InvalidationBounds.size()));
+            binder["g_VsmPageManagement"]["InvalidateAllViews"].Set(s_InvalidationOverflow ? 1u : 0u);
             binder.Apply();
 
             context.Dispatch(kPhysicalPageGroupCount, 1, 1);
+        }
+
+        void BuildInvalidationPageRanges(ComputeContext& context)
+        {
+            if (s_InvalidationOverflow)
+            {
+                for (uint32_t viewId = 0; viewId < s_Views.size(); ++viewId)
+                    MarkViewDirty(viewId);
+                s_InvalidationBounds.clear();
+            }
+
+            const uint32_t count = static_cast<uint32_t>(s_InvalidationBounds.size());
+            if (count != 0u)
+            {
+                context.WriteBuffer(s_InvalidationBoundsGpu, 0, s_InvalidationBounds.data(),
+                    count * sizeof(VsmInvalidationBoundsGpu));
+                context.TransitionResource(s_InvalidationBoundsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                context.TransitionResource(s_InvalidationPageRangesGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                context.FlushResourceBarriers();
+
+                ProgramBinder binder(*s_BuildInvalidationPageRangesProgram, context);
+                binder.SetRootSignature();
+                context.SetPipelineState(s_BuildInvalidationPageRangesPSO);
+                binder.SetRootBufferSRV("g_VsmShadowViews", s_ShadowViewsGpu);
+                binder.SetRootBufferSRV("g_DirectionalVsmAddresses", s_DirectionalAddressesGpu);
+                binder.SetRootBufferSRV("g_VsmInvalidationBounds", s_InvalidationBoundsGpu);
+                binder.SetRootBufferUAV("g_VsmInvalidationPageRangesUAV", s_InvalidationPageRangesGpu);
+                binder["g_VsmInvalidation"]["BoundsCount"].Set(count);
+                binder.Apply();
+                context.Dispatch((count + 63u) / 64u, static_cast<uint32_t>(s_Views.size()), 1u);
+            }
+            context.TransitionResource(s_InvalidationPageRangesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, true);
         }
 
         void BuildPhysicalPageAllocationLists(ComputeContext& context)
@@ -1161,6 +1206,18 @@ namespace Renderer::VirtualShadowMap
 
         const std::string pageManagementShaderPath = Renderer::GetModelShaderPath("VsmPageManagement.slang");
 
+        ProgramDesc invalidationDesc = ProgramUtils::MakeComputeDesc(
+            Renderer::GetModelShaderPath("VsmCacheInvalidation.slang"), "buildInvalidationPageRanges");
+        invalidationDesc.AddRootBufferSRV("g_VsmShadowViews");
+        invalidationDesc.AddRootBufferSRV("g_DirectionalVsmAddresses");
+        invalidationDesc.AddRootBufferSRV("g_VsmInvalidationBounds");
+        invalidationDesc.AddRootBufferUAV("g_VsmInvalidationPageRangesUAV");
+        s_BuildInvalidationPageRangesProgram = ProgramUtils::GetProgram(invalidationDesc, "VSM: Build Invalidation Page Ranges");
+        if (!s_BuildInvalidationPageRangesProgram)
+            return false;
+        ProgramUtils::SetProgram(s_BuildInvalidationPageRangesPSO, *s_BuildInvalidationPageRangesProgram);
+        s_BuildInvalidationPageRangesPSO.Finalize();
+
         ProgramDesc markViewDirtyDesc = ProgramUtils::MakeComputeDesc(pageManagementShaderPath, "markViewDirty");
         markViewDirtyDesc.AddRootBufferSRV("g_VsmShadowViews");
         markViewDirtyDesc.AddRootBufferUAV("g_VsmPhysicalPageMetadataUAV");
@@ -1178,6 +1235,7 @@ namespace Renderer::VirtualShadowMap
         reuseCachedPhysicalPagesDesc.AddRootBufferSRV("g_DirectionalVsmAddresses");
         reuseCachedPhysicalPagesDesc.AddRootBufferSRV("g_VsmPageRequestMask");
         reuseCachedPhysicalPagesDesc.AddRootBufferSRV("g_VsmPreviousToCurrentViewIds");
+        reuseCachedPhysicalPagesDesc.AddRootBufferSRV("g_VsmInvalidationPageRanges");
         reuseCachedPhysicalPagesDesc.AddRootBufferUAV("g_VsmPhysicalPageMetadataUAV");
         reuseCachedPhysicalPagesDesc.AddRootBufferUAV("g_VsmCurrentPageTable");
         reuseCachedPhysicalPagesDesc.AddRootBufferUAV("g_VsmPhysicalPageUsedMaskUAV");
@@ -1491,6 +1549,9 @@ namespace Renderer::VirtualShadowMap
             L"VSM Previous To Current View IDs",
             kMaxShadowViews,
             sizeof(uint32_t));
+        s_InvalidationBoundsGpu.Create(L"VSM Invalidation Bounds", kMaxInvalidationBounds, sizeof(VsmInvalidationBoundsGpu));
+        s_InvalidationPageRangesGpu.Create(L"VSM Invalidation Page Ranges",
+            kMaxInvalidationBounds * kMaxShadowViews, sizeof(VsmInvalidationPageRange));
         s_EmptyPhysicalPagesGpu.Create(L"VSM Empty Physical Pages", kPhysicalPageCapacity, sizeof(uint32_t));
         s_EvictionCandidatesGpu.Create(
             L"VSM Physical Page Eviction Candidates",
@@ -1593,6 +1654,10 @@ namespace Renderer::VirtualShadowMap
         s_PageRenderRequestsGpu.Destroy();
         s_PhysicalPageMetadataGpu.Destroy();
         s_PreviousToCurrentViewIdsGpu.Destroy();
+        s_InvalidationBoundsGpu.Destroy();
+        s_InvalidationPageRangesGpu.Destroy();
+        s_InvalidationBounds.clear();
+        s_InvalidationOverflow = false;
         s_EmptyPhysicalPagesGpu.Destroy();
         s_EvictionCandidatesGpu.Destroy();
         s_PhysicalPageUsedMaskGpu.Destroy();
@@ -1616,6 +1681,7 @@ namespace Renderer::VirtualShadowMap
         s_CommitResidencyStatesProgram.reset();
         s_UpdateResidencyStatesProgram.reset();
         s_MarkViewDirtyProgram.reset();
+        s_BuildInvalidationPageRangesProgram.reset();
         s_ReuseCachedPhysicalPagesProgram.reset();
         s_BuildPhysicalPageAllocationListsProgram.reset();
         s_SortEvictionCandidatesProgram.reset();
@@ -1646,6 +1712,8 @@ namespace Renderer::VirtualShadowMap
 
     void Reset(GraphicsContext& gfxContext)
     {
+        s_InvalidationBounds.clear();
+        s_InvalidationOverflow = false;
         ASSERT(s_Initialized, "VirtualShadowMap must be initialized before Reset.");
 
         s_Views.clear();
@@ -1714,6 +1782,8 @@ namespace Renderer::VirtualShadowMap
 
     void BeginFrame()
     {
+        s_InvalidationBounds.clear();
+        s_InvalidationOverflow = false;
         ASSERT(s_Initialized, "VirtualShadowMap must be initialized before BeginFrame.");
 
         UpdatePageStatisticsReadback();
@@ -1867,6 +1937,16 @@ namespace Renderer::VirtualShadowMap
             s_DirtyViewIds.push_back(viewId);
     }
 
+    void QueueInvalidationBounds(const Math::AxisAlignedBox& boundsWS)
+    {
+        if (s_InvalidationBounds.size() == kMaxInvalidationBounds)
+        {
+            s_InvalidationOverflow = true;
+            return;
+        }
+        s_InvalidationBounds.push_back({PackFloat4(boundsWS.GetMin(), 0.0f), PackFloat4(boundsWS.GetMax(), 0.0f)});
+    }
+
     void MarkClipmapDirty(uint32_t clipmapId)
     {
         ASSERT(clipmapId < s_DirectionalClipmapsGpuData.size(), "Invalid directional VSM clipmap index.");
@@ -2017,6 +2097,7 @@ namespace Renderer::VirtualShadowMap
         context.TransitionResource(s_PageManagementCountersGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         context.FlushResourceBarriers();
 
+        BuildInvalidationPageRanges(context);
         MarkPendingViewsDirty(context);
 
         DispatchReuseCachedPhysicalPages(context, currentPageTable);

@@ -18,12 +18,50 @@ namespace ModelInstanceManager
     Math::Vector3 s_InstanceDistributionHalfExtents(Math::kZero);
     float s_InstanceDistributionRadius = 0.0f;
 
+    // Local bounds are shared by model instances; transforms are per Mesh instance.
+    std::vector<Math::AxisAlignedBox> s_MeshLocalBounds;
+    std::vector<Math::AffineTransform> s_PublishedMeshTransforms;
+    std::vector<SceneObjectUpdate> s_SceneObjectUpdates;
+    bool s_HasPublishedMeshTransforms = false;
+
+    bool AreTransformsEqual(const Math::AffineTransform& a, const Math::AffineTransform& b)
+    {
+        return DirectX::XMVector3Equal(a.GetX(), b.GetX()) &&
+            DirectX::XMVector3Equal(a.GetY(), b.GetY()) &&
+            DirectX::XMVector3Equal(a.GetZ(), b.GetZ()) &&
+            DirectX::XMVector3Equal(a.GetTranslation(), b.GetTranslation());
+    }
+
+    Math::AxisAlignedBox TransformBounds(const Math::AxisAlignedBox& bounds, const Math::AffineTransform& transform)
+    {
+        const Math::Vector3 center = transform * bounds.GetCenter();
+        const Math::Vector3 extent = bounds.GetDimensions() * 0.5f;
+        const Math::Vector3 worldExtent = Math::Abs(transform.GetX()) * extent.GetX() +
+            Math::Abs(transform.GetY()) * extent.GetY() + Math::Abs(transform.GetZ()) * extent.GetZ();
+        return Math::AxisAlignedBox(center - worldExtent, center + worldExtent);
+    }
+
 	void Initialize(std::shared_ptr<Model> sourceModel, uint32_t instanceCount)
 	{
 		ASSERT(sourceModel != nullptr, "Source model is null");
 		ASSERT(instanceCount > 0, "Instance count must be greater than zero");
 
 		s_SourceModel = sourceModel;
+        s_MeshLocalBounds.clear();
+        for (const Mesh* mesh : sourceModel->m_Meshes)
+        {
+            Math::AxisAlignedBox bounds;
+            for (uint32_t drawIndex = 0; drawIndex < mesh->numDraws; ++drawIndex)
+            {
+                const Mesh::Draw& draw = mesh->draw[drawIndex];
+                bounds.AddPoint(Math::Vector3(draw.boundingBoxMin[0], draw.boundingBoxMin[1], draw.boundingBoxMin[2]));
+                bounds.AddPoint(Math::Vector3(draw.boundingBoxMax[0], draw.boundingBoxMax[1], draw.boundingBoxMax[2]));
+            }
+            s_MeshLocalBounds.push_back(bounds);
+        }
+        s_PublishedMeshTransforms.resize(static_cast<size_t>(instanceCount) * s_MeshLocalBounds.size());
+        s_SceneObjectUpdates.clear();
+        s_HasPublishedMeshTransforms = false;
 
 		InstanceResourceManager::Initialize(
 			std::max(sourceModel->m_NumNodes * instanceCount, 1u),
@@ -128,6 +166,7 @@ namespace ModelInstanceManager
 
 	void Update(GraphicsContext& gfxContext, float deltaTime)
 	{
+        s_SceneObjectUpdates.clear();
 		MeshConstants* meshConstantsCPU = (MeshConstants*)InstanceResourceManager::GetMeshConstantsCPU().Map();
 		Joint* jointCPU = (Joint*)InstanceResourceManager::GetJointsCPU().Map();
 
@@ -144,10 +183,36 @@ namespace ModelInstanceManager
 		InstanceResourceManager::GetJointsCPU().Unmap();
 
 		InstanceResourceManager::FlushBufferUpdate(gfxContext);
+
+        uint32_t objectId = 0;
+        for (const ModelInstance& instance : s_ModelInstances)
+        {
+            for (uint32_t meshIndex = 0; meshIndex < s_MeshLocalBounds.size(); ++meshIndex, ++objectId)
+            {
+                const Math::AffineTransform& current = instance.GetMeshWorldTransform(meshIndex);
+                Math::AffineTransform& previous = s_PublishedMeshTransforms[objectId];
+                if (s_HasPublishedMeshTransforms && !AreTransformsEqual(current, previous))
+                {
+                    const Math::AxisAlignedBox& bounds = s_MeshLocalBounds[meshIndex];
+                    s_SceneObjectUpdates.push_back({objectId, TransformBounds(bounds, previous), TransformBounds(bounds, current)});
+                }
+                previous = current;
+            }
+        }
+        s_HasPublishedMeshTransforms = true;
 	}
+
+    const std::vector<SceneObjectUpdate>& GetSceneObjectUpdates()
+    {
+        return s_SceneObjectUpdates;
+    }
 
 	void Cleanup()
 	{
+        s_MeshLocalBounds.clear();
+        s_PublishedMeshTransforms.clear();
+        s_SceneObjectUpdates.clear();
+        s_HasPublishedMeshTransforms = false;
 		GeometryStreaming::Shutdown();
 		s_ModelInstances.clear();
 		s_SourceModel.reset();

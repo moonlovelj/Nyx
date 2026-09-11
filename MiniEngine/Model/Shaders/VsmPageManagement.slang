@@ -5,6 +5,7 @@ StructuredBuffer<VsmShadowView> g_VsmShadowViews;
 StructuredBuffer<DirectionalVsmAddressGpu> g_DirectionalVsmAddresses;
 ByteAddressBuffer g_VsmPageRequestMask;
 StructuredBuffer<uint> g_VsmPreviousToCurrentViewIds;
+StructuredBuffer<VsmInvalidationPageRange> g_VsmInvalidationPageRanges;
 StructuredBuffer<uint> g_VsmEmptyPhysicalPagesSRV;
 StructuredBuffer<VsmEvictionCandidate> g_VsmEvictionCandidatesSRV;
 ByteAddressBuffer g_VsmPhysicalPageUsedMaskSRV;
@@ -27,6 +28,8 @@ struct VsmPageManagementConstants
     uint ViewCount;
     uint PreviousViewCount;
     uint AllocationClass;
+    uint InvalidationCount;
+    uint InvalidateAllViews;
 };
 
 struct MarkPhysicalPageRenderedConstants
@@ -184,6 +187,30 @@ void reuseCachedPhysicalPages(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     metadata.OwnerViewId = viewId;
+    metadata.Flags &= ~VSM_PHYSICAL_PAGE_METADATA_DYNAMIC_INVALIDATED_THIS_FRAME;
+    // Apply before the request/window test, so dormant LRU pages cannot retain stale depth.
+    bool isRendered = (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_RENDERED) != 0u;
+    bool dirty = (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_DIRTY) != 0u;
+    if (isRendered && !dirty)
+    {
+        bool invalidated = g_VsmPageManagement.InvalidateAllViews != 0u;
+        for (uint i = 0u; i < g_VsmPageManagement.InvalidationCount; ++i)
+        {
+            VsmInvalidationPageRange range =
+                g_VsmInvalidationPageRanges[viewId * g_VsmPageManagement.InvalidationCount + i];
+            if (all(metadata.VirtualPage >= range.MinVirtualPage) && all(metadata.VirtualPage <= range.MaxVirtualPage))
+            {
+                invalidated = true;
+                break;
+            }
+        }
+        if (invalidated)
+        {
+            uint unused;
+            g_VsmPageManagementCounters.InterlockedAdd(VSM_MARKED_DIRTY_PAGE_COUNT_OFFSET, 1u, unused);
+            metadata.Flags |= VSM_PHYSICAL_PAGE_METADATA_DIRTY | VSM_PHYSICAL_PAGE_METADATA_DYNAMIC_INVALIDATED_THIS_FRAME;
+        }
+    }
     g_VsmPhysicalPageMetadataUAV[physicalPageIndex] = metadata;
 
     uint pageTableIndex;
@@ -193,7 +220,6 @@ void reuseCachedPhysicalPages(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    bool isRendered = (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_RENDERED) != 0u;
     bool needsRender = !isRendered || (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_DIRTY) != 0u;
 
     metadata.LastRequestedFrame = g_VsmPageManagement.FrameNumber;

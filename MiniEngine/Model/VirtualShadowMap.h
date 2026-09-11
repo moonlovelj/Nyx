@@ -1,6 +1,7 @@
 #pragma once
 
 #include "VirtualShadowMapShared.h"
+#include "../Core/Math/BoundingBox.h"
 
 class GraphicsContext;
 class ComputeContext;
@@ -102,6 +103,8 @@ namespace Renderer::VirtualShadowMap
     // Call after adding the view and before AllocateRequestedPages().
     void MarkViewDirty(uint32_t viewId);
     void MarkClipmapDirty(uint32_t clipmapId);
+    // Queue after BeginFrame(), before MarkRequestedPages(). Includes off-window cached pages.
+    void QueueInvalidationBounds(const Math::AxisAlignedBox& boundsWS);
 
     void AllocateRequestedPages(GraphicsContext& gfxContext);
     void BuildPhysicalPageRenderData(GraphicsContext& gfxContext);

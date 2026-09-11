@@ -2,6 +2,7 @@
 #include "../Core/CommandContext.h"
 #include "Model.h"
 #include "Renderer.h"
+#include "SceneObjectUpdate.h"
 
 #include <vector>
 
@@ -10,6 +11,7 @@ namespace ModelInstanceManager
 	void Initialize(std::shared_ptr<Model> sourceModel, uint32_t instanceCount = 1);
 
 	void Update(GraphicsContext& gfxContext, float deltaTime);
+    const std::vector<SceneObjectUpdate>& GetSceneObjectUpdates();
 
 	void Cleanup();
 

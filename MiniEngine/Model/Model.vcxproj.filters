@@ -185,6 +185,9 @@
     <ClInclude Include="MeshletStructs.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="SceneObjectUpdate.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
     <ClInclude Include="ModelInstanceManager.h">
       <Filter>Source Files</Filter>
     </ClInclude>
@@ -294,6 +297,9 @@
       <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\VsmDAGCull.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
+    <None Include="Shaders\VsmCacheInvalidation.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\VsmEvictionSort.slang">
