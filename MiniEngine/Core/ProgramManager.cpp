@@ -14,6 +14,8 @@
 #include "slang-com-ptr.h"
 #include "slang.h"
 
+#include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <unordered_map>
 
@@ -59,6 +61,45 @@ namespace
         entry.value.kind = slang::CompilerOptionValueKind::Int;
         entry.value.intValue0 = value;
         return entry;
+    }
+
+    void DumpShaderBytecodeIfRequested(const ProgramDesc& desc, size_t entryPointIndex, slang::IBlob* code)
+    {
+        char shaderDumpDirectory[MAX_PATH];
+        const DWORD shaderDumpDirectoryLength = GetEnvironmentVariableA(
+            "NYX_SHADER_DUMP_DIR",
+            shaderDumpDirectory,
+            static_cast<DWORD>(std::size(shaderDumpDirectory)));
+        if (shaderDumpDirectoryLength >= std::size(shaderDumpDirectory))
+            return;
+
+        std::filesystem::path directory;
+        if (shaderDumpDirectoryLength > 0u)
+        {
+            directory = shaderDumpDirectory;
+        }
+#if defined(_DEBUG)
+        else
+        {
+            directory = "../Build/ShaderDumps";
+        }
+#else
+        else
+        {
+            return;
+        }
+#endif
+
+        std::error_code error;
+        std::filesystem::create_directories(directory, error);
+        if (error)
+            return;
+
+        const std::filesystem::path path = directory /
+            (std::to_string(std::hash<std::string>{}(desc.GetCacheKey())) + "-" +
+             std::to_string(static_cast<uint32_t>(desc.GetEntryPoints()[entryPointIndex].Stage)) + ".dxil");
+        std::ofstream stream(path, std::ios::binary);
+        stream.write(static_cast<const char*>(code->getBufferPointer()), code->getBufferSize());
     }
 
     const char* ParameterKindToString(ProgramParameterKind kind)
@@ -758,6 +799,7 @@ std::shared_ptr<Program> ProgramManager::BuildProgram(const ProgramDesc& desc, s
             return nullptr;
         }
 
+        DumpShaderBytecodeIfRequested(desc, entryPointIndex, code);
         program->SetBytecode(
             desc.GetEntryPoints()[entryPointIndex].Stage,
             code->getBufferPointer(),
