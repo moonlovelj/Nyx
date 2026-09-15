@@ -650,20 +650,31 @@ std::shared_ptr<Program> ProgramManager::BuildProgram(const ProgramDesc& desc, s
     }
 
     std::vector<slang::CompilerOptionEntry> compilerOptions;
+#if defined(_DEBUG)
+    constexpr int32_t kOptimizationLevel = SLANG_OPTIMIZATION_LEVEL_NONE;
+#else
+    constexpr int32_t kOptimizationLevel = SLANG_OPTIMIZATION_LEVEL_HIGH;
+#endif
+    compilerOptions.push_back(MakeIntOption(
+        slang::CompilerOptionName::Optimization,
+        kOptimizationLevel));
+
     if (desc.GetGenerateDebugInfo())
     {
+#if defined(PROFILE)
+        constexpr int32_t kDebugInfoLevel = SLANG_DEBUG_INFO_LEVEL_STANDARD;
+#else
+        constexpr int32_t kDebugInfoLevel = SLANG_DEBUG_INFO_LEVEL_MAXIMAL;
+#endif
         compilerOptions.push_back(MakeIntOption(
             slang::CompilerOptionName::DebugInformation,
-            SLANG_DEBUG_INFO_LEVEL_MAXIMAL));
+            kDebugInfoLevel));
         compilerOptions.push_back(MakeIntOption(
             slang::CompilerOptionName::DebugInformationFormat,
             SLANG_DEBUG_INFO_FORMAT_C7));
-        compilerOptions.push_back(MakeIntOption(
-            slang::CompilerOptionName::Optimization,
-            SLANG_OPTIMIZATION_LEVEL_NONE));
-        targetDesc.compilerOptionEntries = compilerOptions.data();
-        targetDesc.compilerOptionEntryCount = static_cast<uint32_t>(compilerOptions.size());
     }
+    targetDesc.compilerOptionEntries = compilerOptions.data();
+    targetDesc.compilerOptionEntryCount = static_cast<uint32_t>(compilerOptions.size());
 
     std::vector<std::string> searchPaths;
     const std::string basePath = Utility::GetBasePath(desc.GetSourceFile());

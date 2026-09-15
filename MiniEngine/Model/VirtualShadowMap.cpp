@@ -607,6 +607,7 @@ namespace Renderer::VirtualShadowMap
 
         void DispatchReuseCachedPhysicalPages(ComputeContext& context, StructuredBuffer& currentPageTable)
         {
+            ScopedTimer timer(L"VSM: Reuse Cached Physical Pages", context);
             ProgramBinder binder(*s_ReuseCachedPhysicalPagesProgram, context);
             binder.SetRootSignature();
             context.SetPipelineState(s_ReuseCachedPhysicalPagesPSO);
@@ -641,6 +642,7 @@ namespace Renderer::VirtualShadowMap
             const uint32_t count = static_cast<uint32_t>(s_InvalidationBounds.size());
             if (count != 0u)
             {
+                ScopedTimer timer(L"VSM: Build Invalidation Page Ranges", context);
                 context.WriteBuffer(s_InvalidationBoundsGpu, 0, s_InvalidationBounds.data(),
                     count * sizeof(VsmInvalidationBoundsGpu));
                 context.TransitionResource(s_InvalidationBoundsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -663,6 +665,7 @@ namespace Renderer::VirtualShadowMap
 
         void BuildPhysicalPageAllocationLists(ComputeContext& context)
         {
+            ScopedTimer timer(L"VSM: Build Physical Page Allocation Lists", context);
             ProgramBinder binder(*s_BuildPhysicalPageAllocationListsProgram, context);
             binder.SetRootSignature();
             context.SetPipelineState(s_BuildPhysicalPageAllocationListsPSO);
@@ -680,6 +683,7 @@ namespace Renderer::VirtualShadowMap
 
         void SortEvictionCandidates(ComputeContext& context)
         {
+            ScopedTimer timer(L"VSM: Sort Eviction Candidates", context);
             ProgramBinder binder(*s_SortEvictionCandidatesProgram, context);
             binder.SetRootSignature();
             context.SetPipelineState(s_SortEvictionCandidatesPSO);
@@ -695,6 +699,11 @@ namespace Renderer::VirtualShadowMap
             StructuredBuffer& currentPageTable,
             uint32_t allocationClass)
         {
+            ScopedTimer timer(
+                allocationClass == VSM_PAGE_ALLOCATION_CLASS_COARSE
+                    ? L"VSM: Allocate Coarse Physical Pages"
+                    : L"VSM: Allocate Detail Physical Pages",
+                context);
             ProgramBinder binder(*s_AllocateNewPagesProgram, context);
             binder.SetRootSignature();
             context.SetPipelineState(s_AllocateNewPagesPSO);
@@ -728,6 +737,7 @@ namespace Renderer::VirtualShadowMap
 
             for (uint32_t viewId : s_DirtyViewIds)
             {
+                ScopedTimer timer(L"VSM: Mark View Dirty " + std::to_wstring(viewId), context);
                 binder["g_MarkVsmViewDirty"]["ViewId"].Set(viewId);
                 binder.Apply();
                 context.Dispatch1D(kPhysicalPageCapacity);
@@ -737,9 +747,9 @@ namespace Renderer::VirtualShadowMap
             s_DirtyViewIds.clear();
         }
 
-        void GeneratePendingPhysicalHZB(GraphicsContext& gfxContext)
+        void GeneratePendingPhysicalHZB(GraphicsContext& gfxContext, const wchar_t* markerName)
         {
-            ScopedTimer timer(L"VSM: Generate Physical HZB", gfxContext);
+            ScopedTimer timer(markerName, gfxContext);
             gfxContext.TransitionResource(s_PhysicalPagePool, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             GetPendingPhysicalHZB().GenerateHZB(gfxContext, s_PhysicalPagePool);
         }
@@ -763,6 +773,7 @@ namespace Renderer::VirtualShadowMap
             if (requestCount == 0u)
                 return;
 
+            ScopedTimer timer(L"VSM: Mark Physical Pages Rendered", gfxContext);
             ComputeContext& context = gfxContext.GetComputeContext();
             context.TransitionResource(s_ShadowViewsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_PageRenderRequestsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -1051,6 +1062,7 @@ namespace Renderer::VirtualShadowMap
             if (clipmapCount == 0u)
                 return;
 
+            ScopedTimer timer(L"VSM: Commit Residency States", context);
             context.TransitionResource(s_DirectionalClipmapsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_ResidencyStatesGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.FlushResourceBarriers();
@@ -1074,6 +1086,7 @@ namespace Renderer::VirtualShadowMap
             if (clipmapCount == 0u)
                 return;
 
+            ScopedTimer timer(L"VSM: Update Residency States", context);
             context.TransitionResource(s_DirectionalClipmapsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_PageManagementCountersGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_ResidencyStatesGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -1775,8 +1788,14 @@ namespace Renderer::VirtualShadowMap
         gfxContext.TransitionResource(s_PhysicalPagePool, D3D12_RESOURCE_STATE_DEPTH_WRITE);
         gfxContext.ClearDepth(s_PhysicalPagePool);
         gfxContext.TransitionResource(s_PhysicalPagePool, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        s_PhysicalHZBs[0].GenerateHZB(gfxContext, s_PhysicalPagePool);
-        s_PhysicalHZBs[1].GenerateHZB(gfxContext, s_PhysicalPagePool);
+        {
+            ScopedTimer timer(L"VSM: Initialize Physical HZB 0", gfxContext);
+            s_PhysicalHZBs[0].GenerateHZB(gfxContext, s_PhysicalPagePool);
+        }
+        {
+            ScopedTimer timer(L"VSM: Initialize Physical HZB 1", gfxContext);
+            s_PhysicalHZBs[1].GenerateHZB(gfxContext, s_PhysicalPagePool);
+        }
         s_PhysicalPagePoolInitialized = true;
     }
 
@@ -2024,6 +2043,9 @@ namespace Renderer::VirtualShadowMap
 
             for (uint32_t clipmapId = 0; clipmapId < s_DirectionalClipmapsGpuData.size(); ++clipmapId)
             {
+                ScopedTimer dispatchTimer(
+                    L"VSM: Mark Directional Pages " + std::to_wstring(clipmapId),
+                    context);
                 constants["TargetId"].Set(clipmapId);
                 binder.Apply();
                 context.Dispatch2D(viewConstants.ViewportWidth, viewConstants.ViewportHeight);
@@ -2046,6 +2068,7 @@ namespace Renderer::VirtualShadowMap
 
             for (uint32_t viewId : s_LocalViewIds)
             {
+                ScopedTimer dispatchTimer(L"VSM: Mark Local Pages " + std::to_wstring(viewId), context);
                 constants["TargetId"].Set(viewId);
                 binder.Apply();
                 context.Dispatch2D(viewConstants.ViewportWidth, viewConstants.ViewportHeight);
@@ -2229,6 +2252,7 @@ namespace Renderer::VirtualShadowMap
             context.FlushResourceBarriers();
 
             {
+                ScopedTimer timer(L"VSM: Build Page Flags Mip 0", context);
                 ProgramBinder binder(*s_BuildPageFlagsMip0Program, context);
                 binder.SetRootSignature();
                 context.SetPipelineState(s_BuildPageFlagsMip0PSO);
@@ -2255,6 +2279,7 @@ namespace Renderer::VirtualShadowMap
 
                 for (uint32_t mipLevel = 1u; mipLevel < kPageFlagsMipCount; ++mipLevel)
                 {
+                    ScopedTimer timer(L"VSM: Build Page Flags Mip " + std::to_wstring(mipLevel), context);
                     binder["g_BuildVsmPageFlags"]["MipLevel"].Set(mipLevel);
                     binder.Apply();
                     const uint32_t mipDimension = kPageTableDim >> mipLevel;
@@ -2264,6 +2289,7 @@ namespace Renderer::VirtualShadowMap
             }
 
             {
+                ScopedTimer timer(L"VSM: Build Raster Window Masks", context);
                 ProgramBinder binder(*s_BuildRasterWindowMasksProgram, context);
                 binder.SetRootSignature();
                 context.SetPipelineState(s_BuildRasterWindowMasksPSO);
@@ -2287,6 +2313,7 @@ namespace Renderer::VirtualShadowMap
 
         void BuildCullDispatchArgs(ComputeContext& context)
         {
+            ScopedTimer timer(L"VSM: Build Cull Dispatch Arguments", context);
             context.TransitionResource(s_PhysicalPageRenderCountersGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_CullResources.CullDispatchArgsGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.FlushResourceBarriers();
@@ -2309,6 +2336,11 @@ namespace Renderer::VirtualShadowMap
 
         void BuildRasterDispatchArgs(ComputeContext& context, uint32_t passIndex)
         {
+            ScopedTimer timer(
+                passIndex == 0u
+                    ? L"VSM: Build Raster Dispatch Arguments Pass 0"
+                    : L"VSM: Build Raster Dispatch Arguments Pass 1",
+                context);
             context.TransitionResource(s_CullResources.QueueStateGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_CullResources.RasterDispatchArgsGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.FlushResourceBarriers();
@@ -2377,6 +2409,9 @@ namespace Renderer::VirtualShadowMap
                 Renderer::s_TextureHeap.GetHeapPointer());
 
             {
+                ScopedTimer timer(
+                    passIndex == 0u ? L"VSM: Instance Cull Pass 0" : L"VSM: Instance Cull Pass 1",
+                    context);
                 ProgramBinder binder(instanceCullProgram, context);
                 binder.SetRootSignature();
                 context.SetPipelineState(instanceCullPSO);
@@ -2404,6 +2439,9 @@ namespace Renderer::VirtualShadowMap
             context.FlushResourceBarriers();
 
             {
+                ScopedTimer timer(
+                    passIndex == 0u ? L"VSM: DAG Cull Pass 0" : L"VSM: DAG Cull Pass 1",
+                    context);
                 ProgramBinder binder(dagCullProgram, context);
                 binder.SetRootSignature();
                 context.SetPipelineState(dagCullPSO);
@@ -2472,6 +2510,9 @@ namespace Renderer::VirtualShadowMap
             const Renderer::FrameConstants& frame,
             uint32_t passIndex)
         {
+            ScopedTimer timer(
+                passIndex == 0u ? L"VSM: Raster Directional Pages Pass 0" : L"VSM: Raster Directional Pages Pass 1",
+                gfxContext);
             constexpr D3D12_RESOURCE_STATES kGraphicsShaderResourceState =
                 D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 
@@ -2484,6 +2525,7 @@ namespace Renderer::VirtualShadowMap
             gfxContext.TransitionResource(s_DirectionalAddressesGpu, kGraphicsShaderResourceState);
             gfxContext.TransitionResource(GetCurrentPageTable(), kGraphicsShaderResourceState);
             gfxContext.TransitionResource(s_PhysicalPageViewsGpu, kGraphicsShaderResourceState);
+            gfxContext.TransitionResource(s_CullResources.CountersGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             gfxContext.TransitionResource(s_PhysicalPagePool, D3D12_RESOURCE_STATE_DEPTH_WRITE);
             gfxContext.FlushResourceBarriers();
 
@@ -2548,7 +2590,7 @@ namespace Renderer::VirtualShadowMap
             DrawDirectionalPhysicalPagesDepth(gfxContext, frame, 0u);
         }
 
-        GeneratePendingPhysicalHZB(gfxContext);
+        GeneratePendingPhysicalHZB(gfxContext, L"VSM: Generate Physical HZB After Pass 0");
 
         if (DrawCommandManager::GetNumPotentialDrawItems() != 0u)
         {
@@ -2557,7 +2599,7 @@ namespace Renderer::VirtualShadowMap
             DrawDirectionalPhysicalPagesDepth(gfxContext, frame, 1u);
         }
 
-        GeneratePendingPhysicalHZB(gfxContext);
+        GeneratePendingPhysicalHZB(gfxContext, L"VSM: Generate Final Physical HZB");
         MarkPhysicalPagesRendered(
             gfxContext,
             0u,
