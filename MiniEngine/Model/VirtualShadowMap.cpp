@@ -2525,7 +2525,6 @@ namespace Renderer::VirtualShadowMap
             gfxContext.TransitionResource(s_DirectionalAddressesGpu, kGraphicsShaderResourceState);
             gfxContext.TransitionResource(GetCurrentPageTable(), kGraphicsShaderResourceState);
             gfxContext.TransitionResource(s_PhysicalPageViewsGpu, kGraphicsShaderResourceState);
-            gfxContext.TransitionResource(s_CullResources.CountersGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             gfxContext.TransitionResource(s_PhysicalPagePool, D3D12_RESOURCE_STATE_DEPTH_WRITE);
             gfxContext.FlushResourceBarriers();
 

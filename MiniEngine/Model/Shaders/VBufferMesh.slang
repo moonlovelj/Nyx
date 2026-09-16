@@ -17,8 +17,8 @@
 #include "WaveUtil.h.slang"
 #include "CullCommon.slang"
 
-#define MAX_VERTS 128
-#define MAX_PRIMS 128
+#define MAX_VERTS MESHLET_MAX_VERTICES
+#define MAX_PRIMS MESHLET_MAX_TRIANGLES
 #define MS_GROUP_SIZE 32
 
 struct VBufferMeshConstants

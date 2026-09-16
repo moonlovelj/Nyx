@@ -348,7 +348,7 @@ void MeshletBuilder::BuildMeshletsFromIndices(
 	const float* pos = reinterpret_cast<const float*>(buildArgs.VBData);
 	const size_t stride = buildArgs.vertexStride;
 
-	size_t maxMeshlets = meshopt_buildMeshletsBound(indexCount, buildArgs.settings.MaxMeshletVertices, buildArgs.settings.MinMeshletTriangles);
+	size_t maxMeshlets = meshopt_buildMeshletsBound(indexCount, MESHLET_MAX_VERTICES, buildArgs.settings.MinMeshletTriangles);
 	std::vector<meshopt_Meshlet> mlets(maxMeshlets);
 	std::vector<uint32_t> mlVertices(indexCount); 
 	std::vector<unsigned char> mlTriangles(indexCount);
@@ -357,7 +357,8 @@ void MeshletBuilder::BuildMeshletsFromIndices(
 		mlets.data(), mlVertices.data(), mlTriangles.data(),
 		indices, indexCount,
 		pos, buildArgs.vertexCount, stride,
-		buildArgs.settings.MaxMeshletVertices, buildArgs.settings.MinMeshletTriangles, buildArgs.settings.MaxMeshletTriangles, 0.0f, buildArgs.settings.ClusterSplitFactor);
+		MESHLET_MAX_VERTICES, buildArgs.settings.MinMeshletTriangles, MESHLET_MAX_TRIANGLES, 0.0f,
+		buildArgs.settings.ClusterSplitFactor);
 
 	// Convert to TempMeshlet
 	out.reserve(out.size() + mlCount);
@@ -623,7 +624,7 @@ bool MeshletBuilder::SimplifyGroup(
 	// Estimated max vertex count = meshlet count * MaxVerts
 	// Using vector + sort + unique is faster and more memory-efficient than unordered_map
 	std::vector<uint32_t> usedGlobalIndices;
-	usedGlobalIndices.reserve(g.MeshletIDs.size() * buildArgs.settings.MaxMeshletVertices);
+	usedGlobalIndices.reserve(g.MeshletIDs.size() * MESHLET_MAX_VERTICES);
 
 	for (uint32_t mid : g.MeshletIDs)
 	{
@@ -640,7 +641,7 @@ bool MeshletBuilder::SimplifyGroup(
 	// Build local vertex/index data
 	// Concatenate group triangles (using local indices)
 	std::vector<uint32_t> localIndices;
-	localIndices.reserve(g.MeshletIDs.size() * buildArgs.settings.MaxMeshletTriangles * 3);
+	localIndices.reserve(g.MeshletIDs.size() * MESHLET_MAX_TRIANGLES * 3);
 
 	LocalIndexCache fastCache;
 

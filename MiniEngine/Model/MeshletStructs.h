@@ -9,6 +9,15 @@ namespace Renderer
 #define INVALID_GROUP_INDEX 0xFFFFFFFF
 #define INVALID_NODE_INDEX 0xFFFFFFFF
 #define INVALID_CHUNK_INDEX 0xFFFFFFFF
+
+#define MESHLET_MAX_VERTICES 64u
+#define MESHLET_MAX_TRIANGLES 84u
+
+#ifdef __cplusplus
+	static_assert(MESHLET_MAX_VERTICES <= 256u);
+	static_assert(MESHLET_MAX_TRIANGLES <= 256u);
+#endif
+
 	// -------------------------------------------------------
 	// BVH nodes (for GPU culling and traversal), resident in VRAM
 	// -------------------------------------------------------
