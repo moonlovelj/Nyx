@@ -276,12 +276,18 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
     if (groupIndex == 0)
     {
         InterlockedAdd(g_TaskQueueStateUAV[0].PassState[passIndex].NodeWriteOffset, GroupNumCandidateNodes, GroupCandidateNodesOffset);
-        InterlockedAdd(g_TaskQueueStateUAV[0].PassState[passIndex].NodeCount, GroupNumCandidateNodes);
+
+        GroupNumCandidateNodes = GroupCandidateNodesOffset < MAX_NODES ? min(GroupNumCandidateNodes, MAX_NODES - GroupCandidateNodesOffset): 0u;
+
+        if (GroupNumCandidateNodes > 0)
+        {
+            InterlockedAdd(g_TaskQueueStateUAV[0].PassState[passIndex].NodeCount, GroupNumCandidateNodes);
+        }
     }
     AllMemoryBarrierWithGroupSync();
 
     // Write new tasks to the queue
-    if (bPushNode)
+    if (bPushNode && nodeWriteOffsetInGroup < GroupNumCandidateNodes)
     {
         uint globalIdx = (GroupCandidateNodesOffset + nodeWriteOffsetInGroup);
         g_TaskQueueUAV.Store2(globalIdx * NODE_BYTE_STRIDE, uint2(instanceIndex, childNodeIndex));
@@ -340,9 +346,9 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
         uint candidateWriteOffset = 0;
         InterlockedAdd(g_TaskQueueStateUAV[0].PassState[passIndex].CandidateMeshletWriteOffset, totalMeshletsInGroup, candidateWriteOffset);
 
-        const uint candidateEnd = min(candidateWriteOffset + totalMeshletsInGroup, MAX_CANDIDATE_MESHLETS);
         GroupCandidateMeshletBase = candidateWriteOffset;
-        GroupCandidateMeshletCount = (uint)max((int)candidateEnd - (int)candidateWriteOffset, 0);
+        GroupCandidateMeshletCount = candidateWriteOffset < MAX_CANDIDATE_MESHLETS ?
+            min(totalMeshletsInGroup, MAX_CANDIDATE_MESHLETS - candidateWriteOffset) : 0u;
     }
 
     GroupMemoryBarrierWithGroupSync();
@@ -563,23 +569,32 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID, uint groupIndex :
             meshletBatchStartIndex = GroupMeshletBatchStartIndex;
         }
 
-        if (!processNodeQueue && GroupMeshletBatchStartIndex >= MAX_CANDIDATE_MESHLETS_BATCH)
-            break;
-
         if (groupIndex == 0)
         {
             GroupNodeCount = g_TaskQueueStateUAV[0].PassState[passIndex].NodeCount;
+        }
+        GroupMemoryBarrierWithGroupSync();
+
+        const bool nodeProductionFinished = (GroupNodeCount == 0);
+        if (meshletBatchStartIndex >= MAX_CANDIDATE_MESHLETS_BATCH)
+        {
+            if (nodeProductionFinished)
+                break;
+            continue;
+        }
+        if (groupIndex == 0)
+        {
             GroupMeshletBatchReadySize = g_MeshletBatchUAV.Load(meshletBatchStartIndex * 4);
         }
         GroupMemoryBarrierWithGroupSync();
 
         uint meshletBatchReadySize = GroupMeshletBatchReadySize;
-        if (!processNodeQueue && meshletBatchReadySize == 0)
+        if (nodeProductionFinished && meshletBatchReadySize == 0)
             break;
 
         bool canRunMeshletPass =
-            (processNodeQueue && meshletBatchReadySize == DAG_CULL_GROUP_SIZE) ||
-            (!processNodeQueue && meshletBatchReadySize > 0);
+             (meshletBatchReadySize == DAG_CULL_GROUP_SIZE) ||
+            (nodeProductionFinished && meshletBatchReadySize > 0);
 
         if (canRunMeshletPass)
         {
@@ -587,7 +602,7 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID, uint groupIndex :
             meshletBatchStartIndex = INVALID_ID;
         }
 
-        if (processNodeQueue && GroupNodeCount == 0)
+        if (processNodeQueue && nodeProductionFinished)
         {
             processNodeQueue = false;
         }

@@ -92,20 +92,24 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
 
     uint waveVisibleCount = WaveActiveCountBits(visible);
     uint waveBaseIndex = 0;
+    uint waveValidCount = 0;
     if (WaveIsFirstLane() && waveVisibleCount > 0)
     {
         RWStructuredBuffer<QueueState> taskState = GetTaskQueueStateBufferUAV();
         // Allocate space for the whole wave at once
         InterlockedAdd(taskState[0].PassState[passIndex].NodeWriteOffset, waveVisibleCount, waveBaseIndex);
-        InterlockedAdd(taskState[0].PassState[passIndex].NodeCount, waveVisibleCount);
+        waveValidCount = waveBaseIndex < MAX_NODES ? min(waveVisibleCount, MAX_NODES - waveBaseIndex) : 0u;
+        if (waveValidCount > 0)
+            InterlockedAdd(taskState[0].PassState[passIndex].NodeCount, waveValidCount);
     }
 
     // Broadcast base index and compute lane offset
     waveBaseIndex = WaveReadLaneFirst(waveBaseIndex);
+    waveValidCount = WaveReadLaneFirst(waveValidCount);
     uint laneOffset = WavePrefixCountBits(visible);
 
     // Only visible lanes perform the store
-    if (visible)
+    if (visible && laneOffset < waveValidCount)
     {
         uint finalIndex = waveBaseIndex + laneOffset;
 

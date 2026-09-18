@@ -406,11 +406,11 @@ void markPhysicalPageRendered(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (dispatchThreadId.x >= g_MarkPhysicalPageRendered.RenderRequestCount)
         return;
 
-    if (g_MarkPhysicalPageRendered.RequireCullSuccess != 0u &&
-        g_VsmCullCounters.Load(VSM_CULL_OVERFLOW_COUNT_OFFSET) != 0u)
-    {
-        return;
-    }
+    //if (g_MarkPhysicalPageRendered.RequireCullSuccess != 0u &&
+    //    g_VsmCullCounters.Load(VSM_CULL_OVERFLOW_COUNT_OFFSET) != 0u)
+    //{
+    //    return;
+    //}
 
     uint renderRequestIndex = g_MarkPhysicalPageRendered.FirstRenderRequestIndex + dispatchThreadId.x;
     uint renderRequestCount = g_VsmPageManagementCountersSRV.Load(VSM_RENDER_REQUEST_COUNT_OFFSET);

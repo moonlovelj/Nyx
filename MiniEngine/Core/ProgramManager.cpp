@@ -651,7 +651,7 @@ std::shared_ptr<Program> ProgramManager::BuildProgram(const ProgramDesc& desc, s
 
     std::vector<slang::CompilerOptionEntry> compilerOptions;
 #if defined(_DEBUG)
-    constexpr int32_t kOptimizationLevel = SLANG_OPTIMIZATION_LEVEL_NONE;
+    constexpr int32_t kOptimizationLevel = SLANG_OPTIMIZATION_LEVEL_DEFAULT;
 #else
     constexpr int32_t kOptimizationLevel = SLANG_OPTIMIZATION_LEVEL_HIGH;
 #endif

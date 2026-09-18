@@ -1477,7 +1477,7 @@ namespace Renderer::VirtualShadowMap
             "pixelMain",
             "meshMain",
             ProgramUtils::BindlessMode::ResourceAndSamplerHeap);
-        directionalRasterDepthDesc.SetGenerateDebugInfo(false);
+
         directionalRasterDepthDesc.AddEntryPoint(ShaderStage::Amplification, "amplificationMain");
         directionalRasterDepthDesc.AddRootBufferSRV("g_VsmCullQueueState");
         directionalRasterDepthDesc.AddRootBufferSRV("g_VsmRasterItems");
@@ -2604,7 +2604,7 @@ namespace Renderer::VirtualShadowMap
             0u,
             kPhysicalPageCapacity,
             VSM_ADDRESS_TYPE_DIRECTIONAL_CLIPMAP,
-            true);
+            false);
         CommitPendingPhysicalHZB();
     }
 
