@@ -242,7 +242,7 @@ namespace Renderer::VirtualShadowMap
         constexpr float kResidencyTargetPoolLoad = 0.85f;
         constexpr float kResidencyResolutionDownLerpFactor = 0.5f;
         constexpr float kResidencyResolutionUpLerpFactor = 0.1f;
-        constexpr float kDirectionalClipmapZRangeScale = 1000.0f;
+        constexpr float kDirectionalClipmapZRangeScale = 500.0f;
         constexpr float kDirectionalClipmapZGuardBand = 0.9f;
         constexpr uint32_t kResidencyRecoveryFrameCount = 10;
         constexpr size_t kManagementStatisticsReadbackOffset = 0;

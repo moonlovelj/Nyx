@@ -114,7 +114,7 @@ protected:
 	D3D12_CPU_DESCRIPTOR_HANDLE m_SRVHandle;
 	D3D12_CPU_DESCRIPTOR_HANDLE m_ArraySRVHandle;
     D3D12_CPU_DESCRIPTOR_HANDLE m_RTVHandle;
-    D3D12_CPU_DESCRIPTOR_HANDLE m_UAVHandle[12];
+    D3D12_CPU_DESCRIPTOR_HANDLE m_UAVHandle[13];
     uint32_t m_NumMipMaps; // number of texture sublevels
     uint32_t m_FragmentCount;
     uint32_t m_SampleCount;

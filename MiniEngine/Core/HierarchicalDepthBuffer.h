@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "PixelBuffer.h"
 #include "Color.h"
@@ -53,6 +53,6 @@ protected:
 
 	Color m_ClearColor;
 	D3D12_CPU_DESCRIPTOR_HANDLE m_SRVHandle;
-	D3D12_CPU_DESCRIPTOR_HANDLE m_UAVHandle[12];
+	D3D12_CPU_DESCRIPTOR_HANDLE m_UAVHandle[13];
 	uint32_t m_NumMipMaps; // number of texture sublevels
 };

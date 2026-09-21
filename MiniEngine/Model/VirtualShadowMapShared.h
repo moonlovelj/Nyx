@@ -20,7 +20,7 @@
 #define VSM_PAGE_FLAGS_MIP_COUNT (VSM_PAGE_TABLE_DIM_LOG2 + 1u)
 #define VSM_PAGE_FLAGS_NODES_PER_VIEW ((4u * VSM_PAGES_PER_VIEW - 1u) / 3u)
 
-#define VSM_PHYSICAL_POOL_DIM_PAGES_LOG2 5u
+#define VSM_PHYSICAL_POOL_DIM_PAGES_LOG2 6u
 #define VSM_PHYSICAL_POOL_DIM_PAGES (1u << VSM_PHYSICAL_POOL_DIM_PAGES_LOG2)
 #define VSM_PHYSICAL_POOL_DIM_PAGES_MASK (VSM_PHYSICAL_POOL_DIM_PAGES - 1u)
 #define VSM_PHYSICAL_PAGE_CAPACITY (VSM_PHYSICAL_POOL_DIM_PAGES * VSM_PHYSICAL_POOL_DIM_PAGES)
@@ -142,8 +142,8 @@ namespace Renderer::VirtualShadowMap
     static_assert(kPagesPerView % kRequestMaskWordBits == 0);
     static_assert(kPageFlagsNodesPerView == 21845);
     static_assert(kPhysicalPageCapacity <= VSM_PAGE_TABLE_PHYSICAL_PAGE_INDEX_MASK + 1u);
-    static_assert(kPhysicalPageCapacity == 1024);
-    static_assert(kPhysicalPoolResolution == 4096);
+    static_assert(kPhysicalPageCapacity == 4096);
+    static_assert(kPhysicalPoolResolution == 8192);
 
 #else
 

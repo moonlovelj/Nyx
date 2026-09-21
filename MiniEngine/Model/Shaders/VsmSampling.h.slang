@@ -61,7 +61,7 @@ bool TrySampleDirectionalVsmView(float3 worldPosition, uint viewId, out float sh
     float shadowDepth = GetVsmPhysicalPagePoolSRV().Load(int3(atlasTexel, 0));
 
     // The VSM uses reverse Z: larger depth values are closer to the light.
-    shadow = receiverDepth + 1e-6 >= shadowDepth ? 1.0f : 0.0f;
+    shadow = receiverDepth >= shadowDepth ? 1.0f : 0.0f;
     return true;
 }
 
