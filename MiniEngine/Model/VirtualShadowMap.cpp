@@ -48,6 +48,18 @@ namespace Renderer::VirtualShadowMap
             1,
             static_cast<int32_t>(kPhysicalPageCapacity),
             1);
+        uint32_t s_LodSettingsGeneration = 1;
+        NumVar s_PixelErrorThreshold(
+            "Renderer/VSM/Pixel Error Threshold",
+            1.0f,
+            0.5f,
+            10.0f,
+            0.25f,
+            [](EngineVar::ActionType)
+            {
+                if (++s_LodSettingsGeneration == 0u)
+                    ++s_LodSettingsGeneration;
+            });
 
         IntVar s_RequestedPageCount("Renderer/VSM/Page Statistics/Requested", 0);
         IntVar s_ReusedPageCount("Renderer/VSM/Page Statistics/Reused", 0);
@@ -220,6 +232,7 @@ namespace Renderer::VirtualShadowMap
             uint32_t StableShadowMapId = 0;
             uint32_t AddressGeneration = 0;
             uint32_t LastUsedFrame = 0;
+            uint32_t LodSettingsGeneration = 0;
             bool Occupied = false;
             std::array<DirectionalVsmLevelDepthState, kMaxDirectionalClipmapLevels> LevelDepthStates;
         };
@@ -306,6 +319,7 @@ namespace Renderer::VirtualShadowMap
             *slotIt = {};
             slotIt->StableShadowMapId = stableShadowMapId;
             slotIt->LastUsedFrame = s_FrameNumber;
+            slotIt->LodSettingsGeneration = s_LodSettingsGeneration;
             slotIt->Occupied = true;
             s_ResidencyStatesToInitialize.push_back(slotIndex);
             return slotIndex;
@@ -1878,6 +1892,9 @@ namespace Renderer::VirtualShadowMap
             residencySlot.LevelDepthStates = {};
         }
 
+        const bool lodSettingsChanged = residencySlot.LodSettingsGeneration != s_LodSettingsGeneration;
+        residencySlot.LodSettingsGeneration = s_LodSettingsGeneration;
+
         const Math::Vector3 originLS = desc.WorldToLightRotation * desc.OriginWS;
         const float desiredCenterZ = static_cast<float>(originLS.GetZ());
         for (uint32_t level = 0; level < desc.LevelCount; ++level)
@@ -1896,7 +1913,7 @@ namespace Renderer::VirtualShadowMap
                 UpdateDirectionalLevelDepthState(depthState, desiredCenterZ, levelDesc.LevelWorldExtent * 0.5f);
             const uint32_t viewId = AddDirectionalLevelView(levelDesc, depthState);
             ASSERT(viewId == firstViewId + level, "Directional VSM clipmap views must be contiguous.");
-            if (depthRangeChanged)
+            if (depthRangeChanged || lodSettingsChanged)
                 MarkViewDirty(viewId);
         }
 
@@ -2459,7 +2476,7 @@ namespace Renderer::VirtualShadowMap
                 context.SetPipelineState(dagCullPSO);
                 SetCommonResources(binder, frame);
                 ProgramVar constants = binder["g_DAGCull"];
-                constants["PixelErrorThreshold"].Set(Renderer::GetPixelErrorThreshold());
+                constants["PixelErrorThreshold"].Set(static_cast<float>(s_PixelErrorThreshold));
                 constants["ViewportWidth"].Set(kPageSize);
                 constants["ViewportHeight"].Set(kPageSize);
                 BindPhysicalHZBConstants(constants, hzbResources);
