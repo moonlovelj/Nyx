@@ -552,6 +552,13 @@ void SceneViewer::RenderScene( void )
         uint32_t tileCountX = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), Lighting::LightGridDim);
         uint32_t tileCountY = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), Lighting::LightGridDim);
 
+        Renderer::RenderView mainView;
+        mainView.SetCamera(m_Camera);
+        mainView.SetPreviousCamera(m_PrevCamera);
+        mainView.SetViewport(viewport);
+        mainView.SetScissor(scissor);
+        mainView.SetHZBSize(Renderer::GetCurrentHZB());
+
         Renderer::FrameConstants frameConstants;
         frameConstants.EnableSunVsmSampling = g_EnableSunVsmSampling ? 1u : 0u;
         Renderer::VirtualShadowMap::BeginFrame();
@@ -571,7 +578,7 @@ void SceneViewer::RenderScene( void )
             m_HasSunVsmAddressGeneration = true;
         }
         vsmClipmapDesc.AddressGeneration = m_SunVsmAddressGeneration;
-        frameConstants.SunVsmClipmapId = Renderer::VirtualShadowMap::AddDirectionalClipmap(vsmClipmapDesc);
+        frameConstants.SunVsmClipmapId = Renderer::VirtualShadowMap::AddDirectionalClipmap(vsmClipmapDesc, mainView);
         for (const SceneObjectUpdate& update : ModelInstanceManager::GetSceneObjectUpdates())
         {
             Renderer::VirtualShadowMap::QueueInvalidationBounds(update.PreviousBoundsWS);
@@ -610,14 +617,6 @@ void SceneViewer::RenderScene( void )
         // Begin rendering depth
         gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
         gfxContext.ClearDepth(g_SceneDepthBuffer);
-
-        Renderer::RenderView mainView;
-        mainView.SetCamera(m_Camera);
-        mainView.SetPreviousCamera(m_PrevCamera);
-        mainView.SetViewport(viewport);
-        mainView.SetScissor(scissor);
-        mainView.SetHZBSize(Renderer::GetCurrentHZB());
-
 
         {
             Renderer::UpdateGlobalDescriptors();

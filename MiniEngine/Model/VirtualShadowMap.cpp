@@ -1855,7 +1855,7 @@ namespace Renderer::VirtualShadowMap
         }
     } // namespace
 
-    uint32_t AddDirectionalClipmap(const DirectionalVsmClipmapDesc& desc)
+    uint32_t AddDirectionalClipmap(const DirectionalVsmClipmapDesc& desc, const Renderer::RenderView& receiverView)
     {
         ASSERT(s_Initialized, "VirtualShadowMap must be initialized before adding clipmaps.");
         ASSERT(desc.LevelCount > 0u, "A directional VSM clipmap must contain at least one level.");
@@ -1902,10 +1902,22 @@ namespace Renderer::VirtualShadowMap
 
         s_Views[firstViewId + desc.LevelCount - 1u].Flags |= VSM_SHADOW_VIEW_FLAG_COARSE_FALLBACK;
 
+        const Renderer::ViewConstants& receiverViewConstants = receiverView.GetConstants();
+        // Converts the previous ceil(log2(distance / firstLevelRadius)) coverage rule
+        // into the floor(log2(distance) + bias) form used by the shader.
+        const float coverageLodBias =
+            1.0f - std::log2(desc.FirstLevelExtent * kDirectionalClipmapSelectionRadiusScale);
+        float selectionLodBias = coverageLodBias;
+        if (receiverViewConstants.Projection == Math::ProjectionType::Perspective &&
+            receiverViewConstants.LodScale > 0.0f)
+        {
+            const float firstLevelTexelSize = desc.FirstLevelExtent / static_cast<float>(kVirtualResolution);
+            const float resolutionLodBias = std::log2(receiverViewConstants.LodScale / firstLevelTexelSize);
+            selectionLodBias = std::max(resolutionLodBias, coverageLodBias);
+        }
+
         DirectionalVsmClipmapGpu clipmap{};
-        clipmap.OriginAndFirstLevelRadius = PackFloat4(
-            desc.OriginWS,
-            desc.FirstLevelExtent * kDirectionalClipmapSelectionRadiusScale);
+        clipmap.OriginAndSelectionLodBias = PackFloat4(desc.OriginWS, selectionLodBias);
         clipmap.FirstViewId = firstViewId;
         clipmap.LevelCount = desc.LevelCount;
         clipmap.ResidencyStateIndex = residencyStateIndex;

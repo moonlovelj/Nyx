@@ -95,7 +95,7 @@ namespace Renderer::VirtualShadowMap
     void Reset(GraphicsContext& gfxContext);
 
     void BeginFrame();
-    uint32_t AddDirectionalClipmap(const DirectionalVsmClipmapDesc& desc);
+    uint32_t AddDirectionalClipmap(const DirectionalVsmClipmapDesc& desc, const Renderer::RenderView& receiverView);
     uint32_t AddLocalView(const LocalVsmViewDesc& desc);
     void MarkRequestedPages(GraphicsContext& gfxContext, const Renderer::RenderView& receiverView);
 

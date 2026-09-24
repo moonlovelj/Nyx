@@ -181,10 +181,10 @@ namespace Renderer::VirtualShadowMap
     };
 
     // Groups the consecutive VSM views that form one directional-light clipmap.
-    // xyz = the world-space selection origin, w = the finest level selection radius.
+    // xyz = the world-space selection origin, w = the precomputed level-selection bias.
     struct VSM_ALIGN_16 DirectionalVsmClipmapGpu
     {
-        VSM_FLOAT4 OriginAndFirstLevelRadius;
+        VSM_FLOAT4 OriginAndSelectionLodBias;
 
         VSM_UINT FirstViewId;
         VSM_UINT LevelCount;
