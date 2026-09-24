@@ -256,6 +256,7 @@ namespace Renderer::VirtualShadowMap
         constexpr float kResidencyResolutionDownLerpFactor = 0.5f;
         constexpr float kResidencyResolutionUpLerpFactor = 0.1f;
         constexpr float kDirectionalClipmapZRangeScale = 500.0f;
+        constexpr float kDirectionalClipmapMaxZRange = 8192.0f;
         constexpr float kDirectionalClipmapZGuardBand = 0.9f;
         constexpr uint32_t kResidencyRecoveryFrameCount = 10;
         constexpr size_t kManagementStatisticsReadbackOffset = 0;
@@ -330,7 +331,9 @@ namespace Renderer::VirtualShadowMap
             float desiredCenterZ,
             float levelRadius)
         {
-            const float desiredRadiusZ = std::max(levelRadius * kDirectionalClipmapZRangeScale, levelRadius);
+            const float desiredRadiusZ = std::min(
+                std::max(levelRadius * kDirectionalClipmapZRangeScale, levelRadius),
+                kDirectionalClipmapMaxZRange * 0.5f);
             if (!state.Valid)
             {
                 state = { desiredCenterZ, desiredRadiusZ, true };
