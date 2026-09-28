@@ -366,6 +366,10 @@ void computeMain(uint2 DTid : SV_DispatchThreadID)
                                   worldPos[1] * barycentris.Value.y +
                                   worldPos[2] * barycentris.Value.z;
 
+            float3 geometricNormalWS = normalize(cross(
+                worldPos[1] - worldPos[0],
+                worldPos[2] - worldPos[0]));
+
             float4 normals[3] = {
                 float4(vertexAttrs[0].normal, 0),
                 float4(vertexAttrs[1].normal, 0),
@@ -409,6 +413,10 @@ void computeMain(uint2 DTid : SV_DispatchThreadID)
             bool isWorldFlipped = detWorld < 0.0;
             bool logicalFrontFacing = IsFrontFacing(clipPos[0], clipPos[1], clipPos[2]) ^ isWorldFlipped;
             MaterialProperties MatProps = GetMaterialProperties(vsOutput, meshletHeader, logicalFrontFacing);
+            if (isWorldFlipped)
+                geometricNormalWS = -geometricNormalWS;
+            if (!logicalFrontFacing && (psoFlags & PSO_TWO_SIDED) != 0u)
+                geometricNormalWS = -geometricNormalWS;
             SceneColorUAV[DTid] = float4(MatProps.Emissive, 1.0f);
             GBufferAUAV[DTid] = float4(MatProps.Normal, 1.0);
             GBufferBUAV[DTid] = MatProps.BaseColor;
@@ -443,7 +451,7 @@ void computeMain(uint2 DTid : SV_DispatchThreadID)
             }
             else
             {
-                GBufferDUAV[DTid].rgb = 0;
+                GBufferDUAV[DTid].rgb = geometricNormalWS;
             }
         }
         else

@@ -12,6 +12,51 @@ StructuredBuffer<VsmProjectionGpu> g_VsmProjections;
 StructuredBuffer<uint> g_VsmPageTable;
 StructuredBuffer<VsmPhysicalPageMetadata> g_VsmPhysicalPageMetadata;
 
+struct VsmSamplingConstants
+{
+    uint MinReceiverBiasUlp;
+    float ReceiverPlaneBiasScale;
+    float MaxReceiverBiasTexels;
+    uint Padding;
+};
+
+ConstantBuffer<VsmSamplingConstants> g_VsmSampling;
+
+float GetVsmDepthUlp(float depth)
+{
+    return asfloat(asuint(depth) + 1u) - depth;
+}
+
+float GetDirectionalVsmReceiverBias(
+    float receiverDepth,
+    float3 geometricNormalWS,
+    float2 texelPositionInPage,
+    DirectionalVsmAddressGpu addressData,
+    VsmProjectionGpu projection)
+{
+    float2 offsetTexel = floor(texelPositionInPage) + 0.5f - texelPositionInPage;
+    float worldUnitsPerTexel = rcp(
+        addressData.AddressOriginAndInvWorldUnitsPerPage.w * float(VSM_PAGE_SIZE));
+
+    float3 normalLS = float3(
+        dot(addressData.WorldToLightRow0.xyz, geometricNormalWS),
+        dot(addressData.WorldToLightRow1.xyz, geometricNormalWS),
+        dot(addressData.WorldToLightRow2.xyz, geometricNormalWS));
+    float safeNormalZ = (normalLS.z < 0.0f ? -1.0f : 1.0f) * max(abs(normalLS.z), 1e-3f);
+    float deltaLightZ = worldUnitsPerTexel *
+        (-normalLS.x * offsetTexel.x + normalLS.y * offsetTexel.y) / safeNormalZ;
+
+    float depthPerWorldUnit = length(projection.ViewProjRow2.xyz);
+    float maxSlopeBiasDepth = worldUnitsPerTexel *
+        g_VsmSampling.MaxReceiverBiasTexels * depthPerWorldUnit;
+    float slopeBiasDepth = min(
+        max(deltaLightZ, 0.0f) * g_VsmSampling.ReceiverPlaneBiasScale * depthPerWorldUnit,
+        maxSlopeBiasDepth);
+    float precisionBiasDepth = GetVsmDepthUlp(receiverDepth) *
+        float(g_VsmSampling.MinReceiverBiasUlp);
+    return max(precisionBiasDepth, slopeBiasDepth);
+}
+
 bool IsVsmPhysicalPageReady(
     VsmPhysicalPageMetadata metadata,
     VsmShadowView shadowView,
@@ -28,7 +73,11 @@ uint SelectResidentDirectionalVsmClipmapLevel(float3 worldPosition, DirectionalV
     return SelectDirectionalVsmClipmapLevel(worldPosition, clipmap, lodBias);
 }
 
-bool TrySampleDirectionalVsmView(float3 worldPosition, uint viewId, out float shadow)
+bool TrySampleDirectionalVsmView(
+    float3 worldPosition,
+    float3 geometricNormalWS,
+    uint viewId,
+    out float shadow)
 {
     shadow = 1.0f;
     VsmShadowView shadowView = g_VsmShadowViews[viewId];
@@ -36,7 +85,11 @@ bool TrySampleDirectionalVsmView(float3 worldPosition, uint viewId, out float sh
         return false;
 
     DirectionalVsmAddressGpu addressData = g_DirectionalVsmAddresses[shadowView.AddressDataIndex];
-    VsmVirtualAddress address = GetDirectionalVsmVirtualAddress(worldPosition, addressData);
+    float2 texelPositionInPage;
+    VsmVirtualAddress address = GetDirectionalVsmVirtualAddress(
+        worldPosition,
+        addressData,
+        texelPositionInPage);
     if (address.Valid == 0u)
         return false;
 
@@ -57,15 +110,25 @@ bool TrySampleDirectionalVsmView(float3 worldPosition, uint viewId, out float sh
     if (receiverDepth < 0.0f || receiverDepth > 1.0f)
         return false;
 
+    float receiverBias = GetDirectionalVsmReceiverBias(
+        receiverDepth,
+        geometricNormalWS,
+        texelPositionInPage,
+        addressData,
+        projection);
+
     uint2 atlasTexel = GetVsmPhysicalPageCoord(physicalPageIndex) * VSM_PAGE_SIZE + address.TexelInPage;
     float shadowDepth = GetVsmPhysicalPagePoolSRV().Load(int3(atlasTexel, 0));
 
     // The VSM uses reverse Z: larger depth values are closer to the light.
-    shadow = receiverDepth >= shadowDepth ? 1.0f : 0.0f;
+    shadow = receiverDepth + receiverBias >= shadowDepth ? 1.0f : 0.0f;
     return true;
 }
 
-float SampleDirectionalVsmClipmapHard(float3 worldPosition, uint clipmapId)
+float SampleDirectionalVsmClipmapHard(
+    float3 worldPosition,
+    float3 geometricNormalWS,
+    uint clipmapId)
 {
     if (clipmapId == VSM_INVALID_VIEW_ID)
         return 1.0f;
@@ -74,13 +137,21 @@ float SampleDirectionalVsmClipmapHard(float3 worldPosition, uint clipmapId)
     uint firstLevel = SelectResidentDirectionalVsmClipmapLevel(worldPosition, clipmap);
 
     float shadow;
-    if (TrySampleDirectionalVsmView(worldPosition, clipmap.FirstViewId + firstLevel, shadow))
+    if (TrySampleDirectionalVsmView(
+            worldPosition,
+            geometricNormalWS,
+            clipmap.FirstViewId + firstLevel,
+            shadow))
     {
         return shadow;
     }
 
     uint coarseLevel = clipmap.LevelCount - 1u;
-    if (firstLevel != coarseLevel && TrySampleDirectionalVsmView(worldPosition, clipmap.FirstViewId + coarseLevel, shadow))
+    if (firstLevel != coarseLevel && TrySampleDirectionalVsmView(
+            worldPosition,
+            geometricNormalWS,
+            clipmap.FirstViewId + coarseLevel,
+            shadow))
     {
         return shadow;
     }

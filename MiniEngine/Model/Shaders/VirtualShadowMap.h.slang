@@ -293,8 +293,12 @@ VsmVirtualAddress GetDirectionalVsmVirtualAddress(float3 worldPosition, Directio
     return address;
 }
 
-VsmVirtualAddress GetDirectionalVsmVirtualAddress(float3 worldPosition, DirectionalVsmAddressGpu addressData)
+VsmVirtualAddress GetDirectionalVsmVirtualAddress(
+    float3 worldPosition,
+    DirectionalVsmAddressGpu addressData,
+    out float2 texelPositionInPage)
 {
+    texelPositionInPage = float2(0.0f);
     float3 addressOriginWS = addressData.AddressOriginAndInvWorldUnitsPerPage.xyz;
     float3 relativeWorldPosition = worldPosition - addressOriginWS;
     float2 relativeLightPosition = float2(
@@ -311,6 +315,7 @@ VsmVirtualAddress GetDirectionalVsmVirtualAddress(float3 worldPosition, Directio
 
     int2 addressOriginPage = addressData.AddressAndWindowOriginPage.xy;
     int2 windowOriginPage = addressData.AddressAndWindowOriginPage.zw;
+    texelPositionInPage = fractionInPage * float(VSM_PAGE_SIZE);
 
     VsmVirtualAddress address;
     address.VirtualPage = addressOriginPage + int2(relativePageFloor);
@@ -321,6 +326,12 @@ VsmVirtualAddress GetDirectionalVsmVirtualAddress(float3 worldPosition, Directio
     address.Valid = IsVsmPageInsideWindow(address.VirtualPage, windowOriginPage) ? 1u : 0u;
 
     return address;
+}
+
+VsmVirtualAddress GetDirectionalVsmVirtualAddress(float3 worldPosition, DirectionalVsmAddressGpu addressData)
+{
+    float2 unusedTexelPositionInPage;
+    return GetDirectionalVsmVirtualAddress(worldPosition, addressData, unusedTexelPositionInPage);
 }
 
 VsmVirtualAddress GetLocalVsmVirtualAddress(float3 worldPosition, VsmProjectionGpu projectionData)

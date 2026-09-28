@@ -60,6 +60,9 @@ namespace Renderer::VirtualShadowMap
                 if (++s_LodSettingsGeneration == 0u)
                     ++s_LodSettingsGeneration;
             });
+        IntVar s_MinReceiverBiasUlp("Renderer/VSM/Sampling/Min Bias ULP", 16, 0, 32, 1);
+        NumVar s_ReceiverPlaneBiasScale("Renderer/VSM/Sampling/Receiver Plane Bias Scale", 1.5f, 0.0f, 4.0f, 0.1f);
+        NumVar s_MaxReceiverBiasTexels("Renderer/VSM/Sampling/Max Bias Texels", 4.0f, 0.0f, 8.0f, 0.25f);
 
         IntVar s_RequestedPageCount("Renderer/VSM/Page Statistics/Requested", 0);
         IntVar s_ReusedPageCount("Renderer/VSM/Page Statistics/Reused", 0);
@@ -256,7 +259,6 @@ namespace Renderer::VirtualShadowMap
         constexpr float kResidencyResolutionDownLerpFactor = 0.5f;
         constexpr float kResidencyResolutionUpLerpFactor = 0.1f;
         constexpr float kDirectionalClipmapZRangeScale = 500.0f;
-        constexpr float kDirectionalClipmapMaxZRange = 8192.0f;
         constexpr float kDirectionalClipmapZGuardBand = 0.9f;
         constexpr uint32_t kResidencyRecoveryFrameCount = 10;
         constexpr size_t kManagementStatisticsReadbackOffset = 0;
@@ -331,9 +333,7 @@ namespace Renderer::VirtualShadowMap
             float desiredCenterZ,
             float levelRadius)
         {
-            const float desiredRadiusZ = std::min(
-                std::max(levelRadius * kDirectionalClipmapZRangeScale, levelRadius),
-                kDirectionalClipmapMaxZRange * 0.5f);
+            const float desiredRadiusZ = std::max(levelRadius * kDirectionalClipmapZRangeScale, levelRadius);
             if (!state.Valid)
             {
                 state = { desiredCenterZ, desiredRadiusZ, true };
@@ -1507,7 +1507,7 @@ namespace Renderer::VirtualShadowMap
         if (!s_DirectionalRasterDepthProgram)
             return false;
 
-        s_DirectionalRasterDepthPSO.SetRasterizerState(RasterizerShadowTwoSided);
+        s_DirectionalRasterDepthPSO.SetRasterizerState(RasterizerTwoSided);
         s_DirectionalRasterDepthPSO.SetDepthStencilState(DepthStateReadWrite);
         s_DirectionalRasterDepthPSO.SetBlendState(BlendDisable);
         s_DirectionalRasterDepthPSO.SetRenderTargetFormats(0, {}, DXGI_FORMAT_D32_FLOAT);
@@ -2662,5 +2662,10 @@ namespace Renderer::VirtualShadowMap
         binder.SetRootBufferSRV("g_VsmPageRequestMask", s_PageRequestMaskGpu);
         binder.SetRootBufferSRV("g_VsmPageTable", GetCurrentPageTable());
         binder.SetRootBufferSRV("g_VsmPhysicalPageMetadata", s_PhysicalPageMetadataGpu);
+
+        ProgramVar samplingConstants = binder["g_VsmSampling"];
+        samplingConstants["MinReceiverBiasUlp"].Set(static_cast<uint32_t>(s_MinReceiverBiasUlp));
+        samplingConstants["ReceiverPlaneBiasScale"].Set(static_cast<float>(s_ReceiverPlaneBiasScale));
+        samplingConstants["MaxReceiverBiasTexels"].Set(static_cast<float>(s_MaxReceiverBiasTexels));
     }
 } // namespace Renderer::VirtualShadowMap

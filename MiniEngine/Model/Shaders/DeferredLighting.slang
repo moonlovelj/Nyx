@@ -195,6 +195,7 @@ void computeMain(
                     gSceneDepth[DTid],
                     uint2(ViewportWidth, ViewportHeight),
                     InverseViewProjMatrix);
+                float3 geometricNormal = normalize(gBufferD[DTid].xyz);
                 float3 normal = gBufferA[DTid].xyz;
                 float3 baseColor = gBufferB[DTid].xyz;
                 float3 metallicRoughnessOcclusion = gBufferC[DTid].xyz;
@@ -215,7 +216,10 @@ void computeMain(
                 if (g_DeferredLighting.EnableSunVsmSampling != 0u &&
                     g_DeferredLighting.VsmClipmapId != VSM_INVALID_VIEW_ID)
                 {
-                    sunShadow = SampleDirectionalVsmClipmapHard(posW, g_DeferredLighting.VsmClipmapId);
+                    sunShadow = SampleDirectionalVsmClipmapHard(
+                        posW,
+                        geometricNormal,
+                        g_DeferredLighting.VsmClipmapId);
                 }
 
                 // TODO: specular aliasing, especially when roughness is near 0
