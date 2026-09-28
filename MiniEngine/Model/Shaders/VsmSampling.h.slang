@@ -3,6 +3,7 @@
 
 #include "CommonResources.slang"
 #include "VirtualShadowMap.h.slang"
+#include "VsmScreenRayTrace.h.slang"
 
 StructuredBuffer<VsmShadowView> g_VsmShadowViews;
 StructuredBuffer<DirectionalVsmClipmapGpu> g_DirectionalVsmClipmaps;
@@ -17,7 +18,8 @@ struct VsmSamplingConstants
     uint MinReceiverBiasUlp;
     float ReceiverPlaneBiasScale;
     float MaxReceiverBiasTexels;
-    uint Padding;
+    uint EnableScreenRayTrace;
+    float ScreenRayLengthScale;
 };
 
 ConstantBuffer<VsmSamplingConstants> g_VsmSampling;
@@ -32,7 +34,8 @@ float GetDirectionalVsmReceiverBias(
     float3 geometricNormalWS,
     float2 texelPositionInPage,
     DirectionalVsmAddressGpu addressData,
-    VsmProjectionGpu projection)
+    VsmProjectionGpu projection,
+    float depthPerWorldUnit)
 {
     float2 offsetTexel = floor(texelPositionInPage) + 0.5f - texelPositionInPage;
     float worldUnitsPerTexel = rcp(
@@ -46,7 +49,6 @@ float GetDirectionalVsmReceiverBias(
     float deltaLightZ = worldUnitsPerTexel *
         (-normalLS.x * offsetTexel.x + normalLS.y * offsetTexel.y) / safeNormalZ;
 
-    float depthPerWorldUnit = length(projection.ViewProjRow2.xyz);
     float maxSlopeBiasDepth = worldUnitsPerTexel *
         g_VsmSampling.MaxReceiverBiasTexels * depthPerWorldUnit;
     float slopeBiasDepth = min(
@@ -77,6 +79,7 @@ bool TrySampleDirectionalVsmView(
     float3 worldPosition,
     float3 geometricNormalWS,
     uint viewId,
+    VsmScreenRayTraceContext screenRayTraceContext,
     out float shadow)
 {
     shadow = 1.0f;
@@ -110,25 +113,38 @@ bool TrySampleDirectionalVsmView(
     if (receiverDepth < 0.0f || receiverDepth > 1.0f)
         return false;
 
+    float depthPerWorldUnit = length(projection.ViewProjRow2.xyz);
     float receiverBias = GetDirectionalVsmReceiverBias(
         receiverDepth,
         geometricNormalWS,
         texelPositionInPage,
         addressData,
-        projection);
+        projection,
+        depthPerWorldUnit);
 
     uint2 atlasTexel = GetVsmPhysicalPageCoord(physicalPageIndex) * VSM_PAGE_SIZE + address.TexelInPage;
     float shadowDepth = GetVsmPhysicalPagePoolSRV().Load(int3(atlasTexel, 0));
 
     // The VSM uses reverse Z: larger depth values are closer to the light.
-    shadow = receiverDepth + receiverBias >= shadowDepth ? 1.0f : 0.0f;
+    bool isLit = receiverDepth + receiverBias >= shadowDepth;
+    if (!isLit && g_VsmSampling.EnableScreenRayTrace != 0u)
+    {
+        float safeDistance = TraceVsmScreenRay(
+            worldPosition,
+            g_VsmSampling.ScreenRayLengthScale,
+            screenRayTraceContext);
+        float traceBias = safeDistance * depthPerWorldUnit;
+        isLit = receiverDepth + max(receiverBias, traceBias) >= shadowDepth;
+    }
+    shadow = isLit ? 1.0f : 0.0f;
     return true;
 }
 
 float SampleDirectionalVsmClipmapHard(
     float3 worldPosition,
     float3 geometricNormalWS,
-    uint clipmapId)
+    uint clipmapId,
+    VsmScreenRayTraceContext screenRayTraceContext)
 {
     if (clipmapId == VSM_INVALID_VIEW_ID)
         return 1.0f;
@@ -141,6 +157,7 @@ float SampleDirectionalVsmClipmapHard(
             worldPosition,
             geometricNormalWS,
             clipmap.FirstViewId + firstLevel,
+            screenRayTraceContext,
             shadow))
     {
         return shadow;
@@ -151,6 +168,7 @@ float SampleDirectionalVsmClipmapHard(
             worldPosition,
             geometricNormalWS,
             clipmap.FirstViewId + coarseLevel,
+            screenRayTraceContext,
             shadow))
     {
         return shadow;

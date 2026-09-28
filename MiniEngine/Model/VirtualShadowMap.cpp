@@ -51,7 +51,7 @@ namespace Renderer::VirtualShadowMap
         uint32_t s_LodSettingsGeneration = 1;
         NumVar s_PixelErrorThreshold(
             "Renderer/VSM/Pixel Error Threshold",
-            1.0f,
+            2.0f,
             0.5f,
             10.0f,
             0.25f,
@@ -63,6 +63,13 @@ namespace Renderer::VirtualShadowMap
         IntVar s_MinReceiverBiasUlp("Renderer/VSM/Sampling/Min Bias ULP", 16, 0, 32, 1);
         NumVar s_ReceiverPlaneBiasScale("Renderer/VSM/Sampling/Receiver Plane Bias Scale", 1.5f, 0.0f, 4.0f, 0.1f);
         NumVar s_MaxReceiverBiasTexels("Renderer/VSM/Sampling/Max Bias Texels", 4.0f, 0.0f, 8.0f, 0.25f);
+        BoolVar s_EnableScreenRayTrace("Renderer/VSM/Sampling/Enable Screen Ray Trace", true);
+        NumVar s_ScreenRayLengthScale(
+            "Renderer/VSM/Sampling/Screen Ray Length Scale",
+            0.015f,
+            0.0f,
+            0.05f,
+            0.001f);
 
         IntVar s_RequestedPageCount("Renderer/VSM/Page Statistics/Requested", 0);
         IntVar s_ReusedPageCount("Renderer/VSM/Page Statistics/Reused", 0);
@@ -2667,5 +2674,7 @@ namespace Renderer::VirtualShadowMap
         samplingConstants["MinReceiverBiasUlp"].Set(static_cast<uint32_t>(s_MinReceiverBiasUlp));
         samplingConstants["ReceiverPlaneBiasScale"].Set(static_cast<float>(s_ReceiverPlaneBiasScale));
         samplingConstants["MaxReceiverBiasTexels"].Set(static_cast<float>(s_MaxReceiverBiasTexels));
+        samplingConstants["EnableScreenRayTrace"].Set(static_cast<uint32_t>(s_EnableScreenRayTrace));
+        samplingConstants["ScreenRayLengthScale"].Set(static_cast<float>(s_ScreenRayLengthScale));
     }
 } // namespace Renderer::VirtualShadowMap

@@ -15,6 +15,7 @@
 struct DeferredLightingConstants
 {
     float4x4 InverseViewProjMatrix;
+    float4x4 ViewProjMatrix;
     float3 ViewerPos;
     float3 SunDirection;
     float3 SunIntensity;
@@ -25,12 +26,14 @@ struct DeferredLightingConstants
     uint IBLSpecularLDMapMipCount;
     uint VsmClipmapId;
     uint EnableSunVsmSampling;
+    float ScreenRayLengthMultiplier;
 };
 
 ConstantBuffer<DeferredLightingConstants> g_DeferredLighting;
 ByteAddressBuffer g_VsmPageRequestMask;
 
 #define InverseViewProjMatrix g_DeferredLighting.InverseViewProjMatrix
+#define ViewProjMatrix g_DeferredLighting.ViewProjMatrix
 #define ViewerPos g_DeferredLighting.ViewerPos
 #define SunDirection g_DeferredLighting.SunDirection
 #define SunIntensity g_DeferredLighting.SunIntensity
@@ -195,6 +198,13 @@ void computeMain(
                     gSceneDepth[DTid],
                     uint2(ViewportWidth, ViewportHeight),
                     InverseViewProjMatrix);
+                VsmScreenRayTraceContext screenRayTraceContext;
+                screenRayTraceContext.ScreenViewProjMatrix = ViewProjMatrix;
+                screenRayTraceContext.RayDirectionWS = SunDirection;
+                screenRayTraceContext.ViewportSize = uint2(ViewportWidth, ViewportHeight);
+                screenRayTraceContext.StartSceneDepth = gSceneDepth[DTid];
+                screenRayTraceContext.ScreenRayLengthMultiplier =
+                    g_DeferredLighting.ScreenRayLengthMultiplier;
                 float3 geometricNormal = normalize(gBufferD[DTid].xyz);
                 float3 normal = gBufferA[DTid].xyz;
                 float3 baseColor = gBufferB[DTid].xyz;
@@ -219,7 +229,8 @@ void computeMain(
                     sunShadow = SampleDirectionalVsmClipmapHard(
                         posW,
                         geometricNormal,
-                        g_DeferredLighting.VsmClipmapId);
+                        g_DeferredLighting.VsmClipmapId,
+                        screenRayTraceContext);
                 }
 
                 // TODO: specular aliasing, especially when roughness is near 0

@@ -278,6 +278,9 @@
     <None Include="Shaders\VsmSampling.h.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
+    <None Include="Shaders\VsmScreenRayTrace.h.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
     <None Include="Shaders\VsmPageManagement.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>

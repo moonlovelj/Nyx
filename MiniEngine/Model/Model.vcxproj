@@ -205,6 +205,7 @@
     <None Include="Shaders\VsmRaster.slang" />
     <None Include="Shaders\VsmResidency.slang" />
     <None Include="Shaders\VsmSampling.h.slang" />
+    <None Include="Shaders\VsmScreenRayTrace.h.slang" />
     <None Include="Shaders\VsmPageManagement.slang" />
     <None Include="Shaders\WaveUtil.h.slang" />
   </ItemGroup>

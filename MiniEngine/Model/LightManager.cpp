@@ -457,8 +457,10 @@ void Lighting::RenderDeferredLighting(
 
    
     const Renderer::ViewConstants& viewConstants = view.GetConstants();
+    const float projectionScaleY = std::fabs(static_cast<float>(viewConstants.ProjMatrix.GetY().GetY()));
     ProgramVar constants = binder["g_DeferredLighting"];
     constants["InverseViewProjMatrix"].Set(viewConstants.InverseViewProjMatrix);
+    constants["ViewProjMatrix"].Set(viewConstants.ViewProjMatrix);
     constants["ViewerPos"].Set(viewConstants.ViewerPos);
     constants["SunDirection"].Set(frame.SunDirection);
     constants["SunIntensity"].Set(frame.SunIntensity);
@@ -469,6 +471,7 @@ void Lighting::RenderDeferredLighting(
     constants["IBLSpecularLDMapMipCount"].Set(frame.IBLSpecularLDMapMipCount);
     constants["VsmClipmapId"].Set(frame.SunVsmClipmapId);
     constants["EnableSunVsmSampling"].Set(frame.EnableSunVsmSampling);
+    constants["ScreenRayLengthMultiplier"].Set(projectionScaleY > 0.0f ? 1.0f / projectionScaleY : 0.0f);
     Renderer::VirtualShadowMap::BindSamplingResources(Context, binder);
     SetCommonResources(binder, frame);
     binder.Apply();
