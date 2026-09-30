@@ -10,6 +10,7 @@
 #include "CommonResources.slang"
 #include "ViewCommon.h.slang"
 #include "VsmSampling.h.slang"
+#include "VsmSmrtDirectional.h.slang"
 #include "ViewMode.h.slang"
 
 struct DeferredLightingConstants
@@ -226,9 +227,11 @@ void computeMain(
                 if (g_DeferredLighting.EnableSunVsmSampling != 0u &&
                     g_DeferredLighting.VsmClipmapId != VSM_INVALID_VIEW_ID)
                 {
-                    sunShadow = SampleDirectionalVsmClipmapHard(
+                    sunShadow = SampleDirectionalVsmShadow(
                         posW,
                         geometricNormal,
+                        ViewerPos,
+                        DTid,
                         g_DeferredLighting.VsmClipmapId,
                         screenRayTraceContext);
                 }

@@ -189,7 +189,9 @@ namespace Renderer::VirtualShadowMap
         VSM_UINT FirstViewId;
         VSM_UINT LevelCount;
         VSM_UINT ResidencyStateIndex;
-        VSM_UINT Padding;
+        // Tangent of the light's angular radius.  Kept per clipmap so local
+        // lights can provide their own source size later.
+        float LightAngularRadiusTan;
     };
 
     // Persistent GPU feedback used to control directional clipmap page pressure.

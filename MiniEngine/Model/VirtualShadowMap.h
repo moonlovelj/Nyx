@@ -56,6 +56,9 @@ namespace Renderer::VirtualShadowMap
         float FirstLevelExtent = 64.0f;
         uint32_t LevelCount = 1;
 
+        // Tangent of the directional source's angular radius.
+        float LightAngularRadiusTan = 0.0f;
+
         uint32_t LightIndex = 0;
         uint32_t StableShadowMapId = 0;
         uint32_t AddressGeneration = 0;

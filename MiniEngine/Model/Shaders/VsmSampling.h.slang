@@ -19,7 +19,16 @@ struct VsmSamplingConstants
     float ReceiverPlaneBiasScale;
     float MaxReceiverBiasTexels;
     uint EnableScreenRayTrace;
+
     float ScreenRayLengthScale;
+    uint EnableDirectionalSmrt;
+    uint SmrtRayCount;
+    uint SmrtSamplesPerRay;
+
+    float SmrtRayLengthScale;
+    uint SmrtFrameIndex;
+    uint SmrtFreezeNoise;
+    float NormalBiasTexels;
 };
 
 ConstantBuffer<VsmSamplingConstants> g_VsmSampling;
@@ -75,14 +84,30 @@ uint SelectResidentDirectionalVsmClipmapLevel(float3 worldPosition, DirectionalV
     return SelectDirectionalVsmClipmapLevel(worldPosition, clipmap, lodBias);
 }
 
-bool TrySampleDirectionalVsmView(
-    float3 worldPosition,
-    float3 geometricNormalWS,
-    uint viewId,
-    VsmScreenRayTraceContext screenRayTraceContext,
-    out float shadow)
+struct DirectionalVsmDepthQuery
 {
-    shadow = 1.0f;
+    float ReferenceDepth;
+    float ShadowDepth;
+    float DepthPerWorldUnit;
+    float ReferenceRayDistance;
+    float ShadowRayDistance;
+    float2 TexelPositionInPage;
+    uint ViewId;
+};
+
+bool TryQueryDirectionalVsmView(
+    float3 worldPosition,
+    float3 rayOriginWS,
+    uint viewId,
+    out DirectionalVsmDepthQuery query)
+{
+    query.ReferenceDepth = 0.0f;
+    query.ShadowDepth = 0.0f;
+    query.DepthPerWorldUnit = 0.0f;
+    query.ReferenceRayDistance = 0.0f;
+    query.ShadowRayDistance = 0.0f;
+    query.TexelPositionInPage = float2(0.0f);
+    query.ViewId = viewId;
     VsmShadowView shadowView = g_VsmShadowViews[viewId];
     if (shadowView.AddressType != VSM_ADDRESS_TYPE_DIRECTIONAL_CLIPMAP)
         return false;
@@ -113,20 +138,129 @@ bool TrySampleDirectionalVsmView(
     if (receiverDepth < 0.0f || receiverDepth > 1.0f)
         return false;
 
-    float depthPerWorldUnit = length(projection.ViewProjRow2.xyz);
-    float receiverBias = GetDirectionalVsmReceiverBias(
-        receiverDepth,
-        geometricNormalWS,
-        texelPositionInPage,
-        addressData,
-        projection,
-        depthPerWorldUnit);
+    query.DepthPerWorldUnit = length(projection.ViewProjRow2.xyz);
+    if (query.DepthPerWorldUnit <= 0.0f)
+        return false;
 
+    query.ReferenceDepth = receiverDepth;
+    query.TexelPositionInPage = texelPositionInPage;
     uint2 atlasTexel = GetVsmPhysicalPageCoord(physicalPageIndex) * VSM_PAGE_SIZE + address.TexelInPage;
-    float shadowDepth = GetVsmPhysicalPagePoolSRV().Load(int3(atlasTexel, 0));
+    query.ShadowDepth = GetVsmPhysicalPagePoolSRV().Load(int3(atlasTexel, 0));
+    float3 lightAxis = projection.ViewProjRow2.xyz / query.DepthPerWorldUnit;
+    query.ReferenceRayDistance = dot(lightAxis, worldPosition - rayOriginWS);
+    query.ShadowRayDistance = query.ReferenceRayDistance +
+        (query.ShadowDepth - query.ReferenceDepth) / query.DepthPerWorldUnit;
+    return true;
+}
+
+bool TryQueryDirectionalVsmReceiverView(
+    float3 worldPosition,
+    float3 geometricNormalWS,
+    uint viewId,
+    out DirectionalVsmDepthQuery query,
+    out float3 queryPositionWS)
+{
+    queryPositionWS = worldPosition;
+    if (g_VsmSampling.NormalBiasTexels > 0.0f)
+    {
+        VsmShadowView shadowView = g_VsmShadowViews[viewId];
+        DirectionalVsmAddressGpu addressData = g_DirectionalVsmAddresses[shadowView.AddressDataIndex];
+        float worldUnitsPerTexel = rcp(
+            addressData.AddressOriginAndInvWorldUnitsPerPage.w * float(VSM_PAGE_SIZE));
+        queryPositionWS += geometricNormalWS * (g_VsmSampling.NormalBiasTexels * worldUnitsPerTexel);
+
+        if (TryQueryDirectionalVsmView(queryPositionWS, queryPositionWS, viewId, query))
+            return true;
+    }
+
+    // The shifted position may cross into a page that has not been requested.
+    queryPositionWS = worldPosition;
+    return TryQueryDirectionalVsmView(worldPosition, worldPosition, viewId, query);
+}
+
+bool TryQueryDirectionalVsmClipmap(
+    float3 worldPosition,
+    float3 rayOriginWS,
+    DirectionalVsmClipmapGpu clipmap,
+    uint preferredLevel,
+    out DirectionalVsmDepthQuery query)
+{
+    if (TryQueryDirectionalVsmView(
+            worldPosition,
+            rayOriginWS,
+            clipmap.FirstViewId + preferredLevel,
+            query))
+        return true;
+
+    uint coarseLevel = clipmap.LevelCount - 1u;
+    return preferredLevel != coarseLevel &&
+        TryQueryDirectionalVsmView(
+            worldPosition,
+            rayOriginWS,
+            clipmap.FirstViewId + coarseLevel,
+            query);
+}
+
+bool TryQueryDirectionalVsmReceiverClipmap(
+    float3 worldPosition,
+    float3 geometricNormalWS,
+    DirectionalVsmClipmapGpu clipmap,
+    uint preferredLevel,
+    out DirectionalVsmDepthQuery query,
+    out float3 queryPositionWS)
+{
+    if (TryQueryDirectionalVsmReceiverView(
+            worldPosition,
+            geometricNormalWS,
+            clipmap.FirstViewId + preferredLevel,
+            query,
+            queryPositionWS))
+        return true;
+
+    uint coarseLevel = clipmap.LevelCount - 1u;
+    return preferredLevel != coarseLevel &&
+        TryQueryDirectionalVsmReceiverView(
+            worldPosition,
+            geometricNormalWS,
+            clipmap.FirstViewId + coarseLevel,
+            query,
+            queryPositionWS);
+}
+
+float GetDirectionalVsmQueryReceiverBias(
+    DirectionalVsmDepthQuery query,
+    float3 geometricNormalWS)
+{
+    VsmShadowView shadowView = g_VsmShadowViews[query.ViewId];
+    DirectionalVsmAddressGpu addressData = g_DirectionalVsmAddresses[shadowView.AddressDataIndex];
+    float receiverBias = GetDirectionalVsmReceiverBias(
+        query.ReferenceDepth,
+        geometricNormalWS,
+        query.TexelPositionInPage,
+        addressData,
+        g_VsmProjections[shadowView.ProjectionDataIndex],
+        query.DepthPerWorldUnit);
+    return receiverBias;
+}
+
+bool TrySampleDirectionalVsmView(
+    float3 worldPosition,
+    float3 geometricNormalWS,
+    uint viewId,
+    VsmScreenRayTraceContext screenRayTraceContext,
+    out float shadow)
+{
+    shadow = 1.0f;
+    DirectionalVsmDepthQuery query;
+    float3 queryPositionWS;
+    if (!TryQueryDirectionalVsmReceiverView(worldPosition, geometricNormalWS, viewId, query, queryPositionWS))
+        return false;
+
+    float depthPerWorldUnit = query.DepthPerWorldUnit;
+    float receiverBias = GetDirectionalVsmQueryReceiverBias(query, geometricNormalWS);
 
     // The VSM uses reverse Z: larger depth values are closer to the light.
-    bool isLit = receiverDepth + receiverBias >= shadowDepth;
+    bool isLit = query.ReferenceDepth + receiverBias >= query.ShadowDepth;
     if (!isLit && g_VsmSampling.EnableScreenRayTrace != 0u)
     {
         float safeDistance = TraceVsmScreenRay(
@@ -134,7 +268,7 @@ bool TrySampleDirectionalVsmView(
             g_VsmSampling.ScreenRayLengthScale,
             screenRayTraceContext);
         float traceBias = safeDistance * depthPerWorldUnit;
-        isLit = receiverDepth + max(receiverBias, traceBias) >= shadowDepth;
+        isLit = query.ReferenceDepth + max(receiverBias, traceBias) >= query.ShadowDepth;
     }
     shadow = isLit ? 1.0f : 0.0f;
     return true;

@@ -207,6 +207,8 @@
     <None Include="Shaders\VsmSampling.h.slang" />
     <None Include="Shaders\VsmScreenRayTrace.h.slang" />
     <None Include="Shaders\VsmPageManagement.slang" />
+    <None Include="Shaders\VsmSmrt.h.slang" />
+    <None Include="Shaders\VsmSmrtDirectional.h.slang" />
     <None Include="Shaders\WaveUtil.h.slang" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

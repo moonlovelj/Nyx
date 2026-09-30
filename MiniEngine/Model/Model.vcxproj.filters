@@ -314,5 +314,7 @@
     <None Include="Shaders\ClearVsmPhysicalPage.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
+    <None Include="Shaders\VsmSmrt.h.slang" />
+    <None Include="Shaders\VsmSmrtDirectional.h.slang" />
   </ItemGroup>
 </Project>

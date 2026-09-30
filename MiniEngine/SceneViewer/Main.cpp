@@ -94,6 +94,7 @@ int wmain(int /*argc*/, wchar_t** /*argv*/)
 ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 6.0f, -5.0f, 20.0f, 0.1f); // unit: lx
 NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0f, 0.1f );
 NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f);
+NumVar g_SunAngularDiameter("Viewer/Lighting/Sun Angular Diameter", 0.5357f, 0.0f, 5.0f, 0.01f);
 BoolVar g_EnableSunVsmSampling("Viewer/Lighting/Enable Sun VSM Sampling", true);
 BoolVar g_InvalidateSunVsmCache("Viewer/Lighting/Invalidate VSM Cache", false);
 //NumVar g_SunLightSize("Viewer/Lighting/Sun Light Size", 0.5f, 0.0f, 2.0f, 0.1f);
@@ -381,7 +382,7 @@ void SceneViewer::Startup( void )
     EnsureSceneViewerResourceRoot();
 
     MotionBlur::Enable = true;
-    TemporalEffects::EnableTAA = true;
+    TemporalEffects::EnableTAA = false;
 	FXAA::Enable = false;
     PostEffects::EnableHDR = true;
     XeGTAO::Enable = true;
@@ -501,6 +502,7 @@ void SceneViewer::Update( float deltaT )
     // but that means that the average sample position is +0.5, which I use when I disable
     // temporal AA.
     TemporalEffects::GetJitterOffset(m_MainViewport.TopLeftX, m_MainViewport.TopLeftY);
+    m_MainViewport.TopLeftX = m_MainViewport.TopLeftY = 0;
 
     m_MainViewport.Width = (float)g_SceneColorBuffer.GetWidth();
     m_MainViewport.Height = (float)g_SceneColorBuffer.GetHeight();
@@ -568,6 +570,8 @@ void SceneViewer::RenderScene( void )
         vsmClipmapDesc.OriginWS = m_Camera.GetPosition();
         vsmClipmapDesc.FirstLevelExtent = kSunVsmFirstLevelExtent;
         vsmClipmapDesc.LevelCount = Renderer::VirtualShadowMap::kMaxDirectionalClipmapLevels;
+        vsmClipmapDesc.LightAngularRadiusTan = std::tanf(
+            0.5f * g_SunAngularDiameter * DirectX::XM_PI / 180.0f);
         vsmClipmapDesc.StableShadowMapId = kSunStableShadowMapId;
         if (!m_HasSunVsmAddressGeneration || sunOrientation != m_PreviousSunOrientation ||
             sunInclination != m_PreviousSunInclination)

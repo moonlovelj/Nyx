@@ -63,6 +63,7 @@ namespace Renderer::VirtualShadowMap
         IntVar s_MinReceiverBiasUlp("Renderer/VSM/Sampling/Min Bias ULP", 16, 0, 32, 1);
         NumVar s_ReceiverPlaneBiasScale("Renderer/VSM/Sampling/Receiver Plane Bias Scale", 1.5f, 0.0f, 4.0f, 0.1f);
         NumVar s_MaxReceiverBiasTexels("Renderer/VSM/Sampling/Max Bias Texels", 4.0f, 0.0f, 8.0f, 0.25f);
+        NumVar s_NormalBiasTexels("Renderer/VSM/Sampling/Normal Bias Texels", 0.25f, 0.0f, 2.0f, 0.05f);
         BoolVar s_EnableScreenRayTrace("Renderer/VSM/Sampling/Enable Screen Ray Trace", true);
         NumVar s_ScreenRayLengthScale(
             "Renderer/VSM/Sampling/Screen Ray Length Scale",
@@ -70,6 +71,11 @@ namespace Renderer::VirtualShadowMap
             0.0f,
             0.05f,
             0.001f);
+        BoolVar s_EnableDirectionalSmrt("Renderer/VSM/SMRT/Enable", false);
+        IntVar s_SmrtRayCount("Renderer/VSM/SMRT/Ray Count", 4, 1, 8, 1);
+        IntVar s_SmrtSamplesPerRay("Renderer/VSM/SMRT/Samples Per Ray", 6, 2, 12, 1);
+        NumVar s_SmrtRayLengthScale("Renderer/VSM/SMRT/Ray Length Scale", 1.0f, 0.1f, 4.0f, 0.1f);
+        BoolVar s_SmrtFreezeNoise("Renderer/VSM/SMRT/Freeze Noise", false);
 
         IntVar s_RequestedPageCount("Renderer/VSM/Page Statistics/Requested", 0);
         IntVar s_ReusedPageCount("Renderer/VSM/Page Statistics/Reused", 0);
@@ -1948,6 +1954,7 @@ namespace Renderer::VirtualShadowMap
         clipmap.FirstViewId = firstViewId;
         clipmap.LevelCount = desc.LevelCount;
         clipmap.ResidencyStateIndex = residencyStateIndex;
+        clipmap.LightAngularRadiusTan = desc.LightAngularRadiusTan;
         s_DirectionalClipmapsGpuData.push_back(clipmap);
         return clipmapId;
     }
@@ -2674,7 +2681,15 @@ namespace Renderer::VirtualShadowMap
         samplingConstants["MinReceiverBiasUlp"].Set(static_cast<uint32_t>(s_MinReceiverBiasUlp));
         samplingConstants["ReceiverPlaneBiasScale"].Set(static_cast<float>(s_ReceiverPlaneBiasScale));
         samplingConstants["MaxReceiverBiasTexels"].Set(static_cast<float>(s_MaxReceiverBiasTexels));
+        samplingConstants["NormalBiasTexels"].Set(static_cast<float>(s_NormalBiasTexels));
         samplingConstants["EnableScreenRayTrace"].Set(static_cast<uint32_t>(s_EnableScreenRayTrace));
         samplingConstants["ScreenRayLengthScale"].Set(static_cast<float>(s_ScreenRayLengthScale));
+        samplingConstants["EnableDirectionalSmrt"].Set(static_cast<uint32_t>(s_EnableDirectionalSmrt));
+        samplingConstants["SmrtRayCount"].Set(static_cast<uint32_t>(s_SmrtRayCount));
+        samplingConstants["SmrtSamplesPerRay"].Set(static_cast<uint32_t>(s_SmrtSamplesPerRay));
+        samplingConstants["SmrtFrameIndex"].Set(
+            static_cast<uint32_t>(s_SmrtFreezeNoise ? 0u : TemporalEffects::GetFrameIndex()));
+        samplingConstants["SmrtRayLengthScale"].Set(static_cast<float>(s_SmrtRayLengthScale));
+        samplingConstants["SmrtFreezeNoise"].Set(static_cast<uint32_t>(s_SmrtFreezeNoise));
     }
 } // namespace Renderer::VirtualShadowMap
