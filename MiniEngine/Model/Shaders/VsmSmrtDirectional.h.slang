@@ -4,6 +4,14 @@
 #include "VsmSampling.h.slang"
 #include "VsmSmrt.h.slang"
 
+float GetDirectionalVsmSmrtDepthToleranceWorld(DirectionalVsmDepthQuery query)
+{
+    // Receiver bias has already moved the ray origin. Intersection uncertainty
+    // uses an independent budget so that receiver bias is not applied twice.
+    return GetVsmSmrtDepthUlp(query.ReferenceDepth) *
+        float(g_VsmSampling.SmrtDepthToleranceUlp) / query.DepthPerWorldUnit;
+}
+
 float SampleDirectionalVsmSmrt(
     float3 worldPosition,
     float3 geometricNormalWS,
@@ -105,8 +113,7 @@ float SampleDirectionalVsmSmrt(
                 continue;
             }
 
-            float depthToleranceWorld = GetVsmSmrtDepthUlp(sampleQuery.ReferenceDepth) *
-                float(g_VsmSampling.MinReceiverBiasUlp) / sampleQuery.DepthPerWorldUnit;
+            float depthToleranceWorld = GetDirectionalVsmSmrtDepthToleranceWorld(sampleQuery);
             hit = ConsumeVsmSmrtDepthSample(
                 state,
                 sampleQuery.ReferenceRayDistance,

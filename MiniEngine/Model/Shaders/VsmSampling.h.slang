@@ -29,6 +29,7 @@ struct VsmSamplingConstants
     uint SmrtFrameIndex;
     uint SmrtFreezeNoise;
     float NormalBiasTexels;
+    uint SmrtDepthToleranceUlp;
 };
 
 ConstantBuffer<VsmSamplingConstants> g_VsmSampling;

@@ -6,6 +6,8 @@ struct VsmSmrtIntersectionState
     float PreviousGap;
     float PreviousTolerance;
     uint ValidSampleCount;
+    bool SeenLitSide;
+    bool PendingInitialHit;
 };
 
 float GetVsmSmrtDepthUlp(float depth)
@@ -59,6 +61,8 @@ void ResetVsmSmrtIntersectionState(out VsmSmrtIntersectionState state)
     state.PreviousGap = 0.0f;
     state.PreviousTolerance = 0.0f;
     state.ValidSampleCount = 0u;
+    state.SeenLitSide = false;
+    state.PendingInitialHit = false;
 }
 
 bool ConsumeVsmSmrtDepthSample(
@@ -74,11 +78,22 @@ bool ConsumeVsmSmrtDepthSample(
         state.PreviousGap = gap;
         state.PreviousTolerance = depthToleranceWorld;
         state.ValidSampleCount = 1u;
-        // Only the actual ray endpoint may establish an initial hit without a crossing.
+        state.SeenLitSide = gap < -depthToleranceWorld;
+        // Only the actual endpoint may establish an initial occlusion candidate.
+        // If it falls in the uncertainty band, defer confirmation until a later
+        // valid sample is clearly occluded. Missing queries reset this candidate.
+        state.PendingInitialHit = allowInitialHit && abs(gap) <= depthToleranceWorld;
         return allowInitialHit && gap > depthToleranceWorld;
     }
 
-    bool hit = state.PreviousGap < -state.PreviousTolerance && gap >= -depthToleranceWorld;
+    // Retain the confirmed lit side while traversing the uncertainty band.
+    // Entering that band alone must not establish an occlusion.
+    if (gap < -depthToleranceWorld)
+    {
+        state.SeenLitSide = true;
+        state.PendingInitialHit = false;
+    }
+    bool hit = (state.SeenLitSide || state.PendingInitialHit) && gap > depthToleranceWorld;
     state.PreviousGap = gap;
     state.PreviousTolerance = depthToleranceWorld;
     ++state.ValidSampleCount;

@@ -71,9 +71,10 @@ namespace Renderer::VirtualShadowMap
             0.0f,
             0.05f,
             0.001f);
-        BoolVar s_EnableDirectionalSmrt("Renderer/VSM/SMRT/Enable", false);
+        BoolVar s_EnableDirectionalSmrt("Renderer/VSM/SMRT/Enable", true);
         IntVar s_SmrtRayCount("Renderer/VSM/SMRT/Ray Count", 4, 1, 8, 1);
         IntVar s_SmrtSamplesPerRay("Renderer/VSM/SMRT/Samples Per Ray", 6, 2, 12, 1);
+        IntVar s_SmrtDepthToleranceUlp("Renderer/VSM/SMRT/Depth Tolerance ULP", 1, 0, 32, 1);
         NumVar s_SmrtRayLengthScale("Renderer/VSM/SMRT/Ray Length Scale", 1.0f, 0.1f, 4.0f, 0.1f);
         BoolVar s_SmrtFreezeNoise("Renderer/VSM/SMRT/Freeze Noise", false);
 
@@ -2687,6 +2688,7 @@ namespace Renderer::VirtualShadowMap
         samplingConstants["EnableDirectionalSmrt"].Set(static_cast<uint32_t>(s_EnableDirectionalSmrt));
         samplingConstants["SmrtRayCount"].Set(static_cast<uint32_t>(s_SmrtRayCount));
         samplingConstants["SmrtSamplesPerRay"].Set(static_cast<uint32_t>(s_SmrtSamplesPerRay));
+        samplingConstants["SmrtDepthToleranceUlp"].Set(static_cast<uint32_t>(s_SmrtDepthToleranceUlp));
         samplingConstants["SmrtFrameIndex"].Set(
             static_cast<uint32_t>(s_SmrtFreezeNoise ? 0u : TemporalEffects::GetFrameIndex()));
         samplingConstants["SmrtRayLengthScale"].Set(static_cast<float>(s_SmrtRayLengthScale));
