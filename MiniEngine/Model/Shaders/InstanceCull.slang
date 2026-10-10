@@ -23,6 +23,7 @@ struct InstanceCullConstants
 
 #ifndef DISABLE_HZB_CULL
     float4x4 PrevViewProjMatrix;
+    uint HasHistory;
     float4 HZBSizeAndInv;
     DescriptorHandle<Texture2D<float>> PreviousHZB;
     DescriptorHandle<Texture2D<float>> CurrentHZB;
@@ -59,6 +60,8 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
     cullContext.HZBUvScaleBias = float4(1.0f, 1.0f, 0.0f, 0.0f);
 
 #if INSTANCE_CULL_PASS_INDEX == 1
+    if (!g_InstanceCull.HasHistory)
+        return;
     const uint passIndex = 1;
     const float4x4 viewProjMatrix = g_InstanceCull.ViewProjMatrix;
     Texture2D<float> hzbTexture = g_InstanceCull.CurrentHZB;
@@ -68,14 +71,16 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
     Texture2D<float> hzbTexture = g_InstanceCull.PreviousHZB;
 #endif
 
-    bool visible = EvaluateBoundsVisibility(
+    bool visible = g_InstanceCull.HasHistory ? EvaluateBoundsVisibility(
         instanceConstant.BBoxMin,
         instanceConstant.BBoxMax,
         meshConstant.WorldMatrix,
         viewProjMatrix,
         hzbTexture,
         g_HZBSampler,
-        cullContext);
+        cullContext) : EvaluateBoundsInFrustum(
+            instanceConstant.BBoxMin, instanceConstant.BBoxMax,
+            meshConstant.WorldMatrix, g_InstanceCull.ViewProjMatrix, cullContext);
 #else
     CullCommonContext cullContext;
     cullContext.ViewportWidth = g_InstanceCull.ViewportWidth;

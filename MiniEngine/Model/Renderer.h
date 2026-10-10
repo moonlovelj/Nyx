@@ -16,6 +16,7 @@
 #include "../Core/GpuBuffer.h"
 #include "../Core/VectorMath.h"
 #include "../Core/Camera.h"
+#include "../Core/TemporalJitter.h"
 #include "../Core/CommandContext.h"
 #include "../Core/UploadBuffer.h"
 #include "../Core/TextureManager.h"
@@ -54,6 +55,8 @@ namespace Renderer
             , ViewerPos(kZero)
             , PrevViewerPos(kZero)
             , HZBSizeAndInv(kZero)
+            , JitterPixels(kZero)
+            , PrevJitterPixels(kZero)
             , Projection(ProjectionType::Perspective)
             , ViewportWidth(0)
             , ViewportHeight(0)
@@ -75,6 +78,8 @@ namespace Renderer
         Vector3 ViewerPos;
         Vector3 PrevViewerPos;
         Vector4 HZBSizeAndInv;
+        Vector4 JitterPixels;
+        Vector4 PrevJitterPixels;
 
         ProjectionType Projection;
         uint32_t ViewportWidth;
@@ -138,12 +143,14 @@ namespace Renderer
             : m_Camera(nullptr)
             , m_Viewport{}
             , m_Scissor{}
+            , m_HasHistory(false)
         {
         }
 
         void SetCamera(const BaseCamera& camera)
         {
             m_Camera = &camera;
+            m_Constants.JitterPixels = Vector4(kZero);
 
             m_Constants.ViewMatrix = camera.GetViewMatrix();
             m_Constants.ProjMatrix = camera.GetProjMatrix();
@@ -156,6 +163,8 @@ namespace Renderer
             m_Constants.PrevProjMatrix = m_Constants.ProjMatrix;
             m_Constants.PrevViewProjMatrix = m_Constants.ViewProjMatrix;
             m_Constants.PrevViewerPos = m_Constants.ViewerPos;
+            m_Constants.PrevJitterPixels = m_Constants.JitterPixels;
+            m_HasHistory = false;
 
             UpdateLodScale();
         }
@@ -166,7 +175,29 @@ namespace Renderer
             m_Constants.PrevProjMatrix = camera.GetProjMatrix();
             m_Constants.PrevViewProjMatrix = camera.GetViewProjMatrix();
             m_Constants.PrevViewerPos = camera.GetPosition();
+            m_Constants.PrevJitterPixels = Vector4(kZero);
+            m_HasHistory = true;
         }
+
+        // A snapshot of the view that actually produced the previous depth/history.
+        void SetPreviousView(const ViewConstants* previous)
+        {
+            const ViewConstants& source = previous ? *previous : m_Constants;
+            m_Constants.PrevViewMatrix = source.ViewMatrix;
+            m_Constants.PrevProjMatrix = source.ProjMatrix;
+            m_Constants.PrevViewProjMatrix = source.ViewProjMatrix;
+            m_Constants.PrevViewerPos = source.ViewerPos;
+            m_Constants.PrevJitterPixels = source.JitterPixels;
+            m_HasHistory = previous != nullptr;
+        }
+
+        void SetTemporalJitter(float x, float y)
+        {
+            m_Constants.JitterPixels = Vector4(x, y, 0.0f, 0.0f);
+            UpdateProjection();
+        }
+
+        bool HasHistory() const { return m_HasHistory; }
 
         void SetViewport(const D3D12_VIEWPORT& viewport)
         {
@@ -176,6 +207,7 @@ namespace Renderer
             m_Constants.InvViewportWidth = viewport.Width > 0.0f ? 1.0f / viewport.Width : 0.0f;
             m_Constants.InvViewportHeight = viewport.Height > 0.0f ? 1.0f / viewport.Height : 0.0f;
 
+            UpdateProjection();
             UpdateLodScale();
         }
 
@@ -221,6 +253,19 @@ namespace Renderer
         }
 
     private:
+        void UpdateProjection()
+        {
+            if (m_Camera == nullptr)
+                return;
+            m_Constants.ProjMatrix = TemporalEffects::JitterProjection(m_Camera->GetProjMatrix(),
+                m_Constants.JitterPixels.GetX(), m_Constants.JitterPixels.GetY(),
+                m_Viewport.Width, m_Viewport.Height);
+            m_Constants.ViewProjMatrix = m_Constants.ProjMatrix * m_Constants.ViewMatrix;
+            m_Constants.InverseViewProjMatrix = Invert(m_Constants.ViewProjMatrix);
+            if (!m_HasHistory)
+                SetPreviousView(nullptr);
+        }
+
         void UpdateLodScale()
         {
             const float scaleX = std::fabs(static_cast<float>(m_Constants.ProjMatrix.GetX().GetX()));
@@ -243,6 +288,7 @@ namespace Renderer
         const BaseCamera* m_Camera;
         D3D12_VIEWPORT m_Viewport;
         D3D12_RECT m_Scissor;
+        bool m_HasHistory;
     };
 
     //extern RootSignature m_RootSig;

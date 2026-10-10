@@ -26,6 +26,7 @@ RWTexture2D<packed_velocity_t> VelocityBuffer : register(u0);
 cbuffer CBuffer : register(b1)
 {
     matrix CurToPrevXForm;
+    float2 JitterDelta;
 }
 
 [RootSignature(Common_RootSig)]
@@ -48,5 +49,7 @@ void main( uint3 DTid : SV_DispatchThreadID )
     PrevHPos.z = PrevHPos.w;
 #endif
 
-    VelocityBuffer[st] = PackVelocity(PrevHPos.xyz - float3(CurPixel, Depth));
+    float3 Velocity = PrevHPos.xyz - float3(CurPixel, Depth);
+    Velocity.xy -= JitterDelta;
+    VelocityBuffer[st] = PackVelocity(Velocity);
 }

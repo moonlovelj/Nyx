@@ -679,6 +679,7 @@ void Renderer::InstanceCull(
     if (!disableHZBCull)
     {
         constants["PrevViewProjMatrix"].Set(viewConstants.PrevViewProjMatrix);
+        constants["HasHistory"].Set(view.HasHistory() ? 1u : 0u);
         constants["HZBSizeAndInv"].Set(viewConstants.HZBSizeAndInv);
         constants["PreviousHZB"].Set(
             SlangDescriptorHandle{ hzbResources->PreviousSRVIndex, 0 });
@@ -774,6 +775,7 @@ void Renderer::DAGCull(
     if (!disableHZBCull)
     {
         constants["PrevViewProjMatrix"].Set(viewConstants.PrevViewProjMatrix);
+        constants["HasHistory"].Set(view.HasHistory() ? 1u : 0u);
         constants["HZBSizeAndInv"].Set(viewConstants.HZBSizeAndInv);
         constants["PreviousHZB"].Set(
             SlangDescriptorHandle{ hzbResources->PreviousSRVIndex, 0 });
@@ -892,7 +894,7 @@ void Renderer::RenderVisibility(
 
     gfxContext.TransitionResource(GeometryStreaming::m_GroupDataLocationGPU, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
 
-    if (!FreezeCull)
+    if (!FreezeCull || !view.HasHistory())
     {
         const HZBResources hzbResources = GetSceneHZBResources();
 

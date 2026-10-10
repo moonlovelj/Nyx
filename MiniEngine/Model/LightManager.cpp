@@ -122,7 +122,7 @@ namespace Lighting
 
     void InitializeResources(void);
     void CreateRandomLights(const Vector3 minBound, const Vector3 maxBound);
-    void FillLightGrid(GraphicsContext& gfxContext, const Camera& camera);
+    void FillLightGrid(GraphicsContext& gfxContext, const Camera& camera, const Renderer::RenderView& view);
     void Shutdown(void);
 }
 
@@ -353,7 +353,7 @@ void Lighting::Shutdown(void)
     m_LightShadowTempBuffer.Destroy();
 }
 
-void Lighting::FillLightGrid(GraphicsContext& gfxContext, const Camera& camera)
+void Lighting::FillLightGrid(GraphicsContext& gfxContext, const Camera& camera, const Renderer::RenderView& view)
 {
     ScopedTimer _prof(L"FillLightGrid", gfxContext);
 
@@ -405,7 +405,7 @@ void Lighting::FillLightGrid(GraphicsContext& gfxContext, const Camera& camera)
     constants["InvTileDimf32"].Set(1.0f / LightGridDim);
     constants["RcpZMagic"].Set(RcpZMagic);
     constants["TileCountX"].Set(tileCountX);
-    constants["ViewProjMatrix"].Set(camera.GetViewProjMatrix());
+    constants["ViewProjMatrix"].Set(view.GetConstants().ViewProjMatrix);
     SetCommonResources(binder, TemporalEffects::GetFrameIndexMod2());
     binder.Apply();
 

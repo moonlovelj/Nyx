@@ -142,6 +142,7 @@
     <ClInclude Include="XeGTAO.h" />
     <ClInclude Include="SystemTime.h" />
     <ClInclude Include="TemporalEffects.h" />
+    <ClInclude Include="TemporalJitter.h" />
     <ClInclude Include="TextRenderer.h" />
     <ClInclude Include="Texture.h" />
     <ClInclude Include="TextureManager.h" />

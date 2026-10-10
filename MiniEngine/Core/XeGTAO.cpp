@@ -137,8 +137,9 @@ namespace
 
         outConstants.NdcToViewMul[0] = tanHalfFovX * 2.0f;
         outConstants.NdcToViewMul[1] = tanHalfFovY * -2.0f;
-        outConstants.NdcToViewAdd[0] = tanHalfFovX * -1.0f;
-        outConstants.NdcToViewAdd[1] = tanHalfFovY * 1.0f;
+        // Perspective clip.w = -view.z; include the off-center (jitter) projection terms.
+        outConstants.NdcToViewAdd[0] = tanHalfFovX * (-1.0f + proj[2 * 4 + 0]);
+        outConstants.NdcToViewAdd[1] = tanHalfFovY * ( 1.0f + proj[2 * 4 + 1]);
 
         outConstants.NdcToViewMulTimesPixelSize[0] = outConstants.NdcToViewMul[0] * outConstants.InvViewportSize[0];
         outConstants.NdcToViewMulTimesPixelSize[1] = outConstants.NdcToViewMul[1] * outConstants.InvViewportSize[1];
@@ -191,6 +192,11 @@ void XeGTAO::Shutdown( void )
 
 void XeGTAO::Render( GraphicsContext& GfxContext, const Camera& camera )
 {
+    Render(GfxContext, camera.GetProjMatrix());
+}
+
+void XeGTAO::Render( GraphicsContext& GfxContext, const Matrix4& renderProjection )
+{
     if (!Enable)
     {
         ScopedTimer _prof(L"Generate XeGTAO", GfxContext);
@@ -205,7 +211,7 @@ void XeGTAO::Render( GraphicsContext& GfxContext, const Camera& camera )
     EnsureResources(width, height);
 
     XeGTAOConstants constants = {};
-    const float* proj = reinterpret_cast<const float*>(&camera.GetProjMatrix());
+    const float* proj = reinterpret_cast<const float*>(&renderProjection);
     UpdateConstants(constants, width, height, proj, TemporalEffects::GetFrameIndex());
 
     float sliceCount = 3.0f;

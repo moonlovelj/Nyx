@@ -69,6 +69,11 @@ public:
 private:
 	Camera m_PrevCamera;
 	Camera m_Camera;
+    Renderer::ViewConstants m_PreviousView;
+    bool m_HasPreviousFrame = false;
+    bool m_UsingglTFCamera = false;
+    uint32_t m_PreviousFrameIndex = 0;
+    float m_CameraCutDistance = 1.0f;
     unique_ptr<CameraController> m_CameraController;
 
     D3D12_VIEWPORT m_MainViewport;
@@ -336,9 +341,11 @@ void SceneViewer::ReloadModel(const std::wstring& filePath, bool useOrbit, uint3
         ModelInstanceManager::Cleanup();
 
     ModelInstanceManager::Initialize(model, instanceCount);
+    m_HasPreviousFrame = false;
     const Vector3 sceneCenter = ModelInstanceManager::GetInstanceDistributionCenter();
     const Vector3 sceneHalfExtents = ModelInstanceManager::GetInstanceDistributionHalfExtents();
     const float sceneRadius = std::max(ModelInstanceManager::GetInstanceDistributionRadius() * 0.1f, 0.01f);
+    m_CameraCutDistance = std::max(sceneRadius, 1.0f);
     //const float lightExtent = std::max(ModelInstanceManager::GetInstanceDistributionRadius() * 0.25f, 5.0f);
     //const Vector3 lightHalfExtents = Max(sceneHalfExtents, Vector3(lightExtent));
     //Lighting::CreateRandomLights(sceneCenter - lightHalfExtents, sceneCenter + lightHalfExtents);
@@ -381,8 +388,8 @@ void SceneViewer::Startup( void )
 
     EnsureSceneViewerResourceRoot();
 
-    MotionBlur::Enable = true;
-    TemporalEffects::EnableTAA = false;
+    MotionBlur::Enable = false;
+    TemporalEffects::EnableTAA = true;
 	FXAA::Enable = false;
     PostEffects::EnableHDR = true;
     XeGTAO::Enable = true;
@@ -470,8 +477,12 @@ void SceneViewer::Update( float deltaT )
         }
     }
 
-    const size_t NumCameras = ModelInstanceManager::GetModelInstance(0).GetNumCameras();
+    const size_t NumCameras = ModelInstanceManager::GetNumModelInstances() > 0
+        ? ModelInstanceManager::GetModelInstance(0).GetNumCameras() : 0;
     const bool bUseglTFCamera = NumCameras > 0 && g_UseglTFCamera;
+    if (bUseglTFCamera != m_UsingglTFCamera)
+        m_HasPreviousFrame = false;
+    m_UsingglTFCamera = bUseglTFCamera;
 
     if (!bUseglTFCamera)
         m_CameraController->Update(deltaT);
@@ -493,16 +504,8 @@ void SceneViewer::Update( float deltaT )
 		m_Camera.Update();
 	}
 
-    // We use viewport offsets to jitter sample positions from frame to frame (for TAA.)
-    // D3D has a design quirk with fractional offsets such that the implicit scissor
-    // region of a viewport is floor(TopLeftXY) and floor(TopLeftXY + WidthHeight), so
-    // having a negative fractional top left, e.g. (-0.25, -0.25) would also shift the
-    // BottomRight corner up by a whole integer.  One solution is to pad your viewport
-    // dimensions with an extra pixel.  My solution is to only use positive fractional offsets,
-    // but that means that the average sample position is +0.5, which I use when I disable
-    // temporal AA.
-    TemporalEffects::GetJitterOffset(m_MainViewport.TopLeftX, m_MainViewport.TopLeftY);
-    m_MainViewport.TopLeftX = m_MainViewport.TopLeftY = 0;
+    // Sample offsets are applied by RenderView's projection, never by the viewport.
+    m_MainViewport.TopLeftX = m_MainViewport.TopLeftY = 0.0f;
 
     m_MainViewport.Width = (float)g_SceneColorBuffer.GetWidth();
     m_MainViewport.Height = (float)g_SceneColorBuffer.GetHeight();
@@ -519,11 +522,48 @@ void SceneViewer::Update( float deltaT )
 
 void SceneViewer::RenderScene( void )
 {
+    if (m_MainViewport.Width <= 0.0f || m_MainViewport.Height <= 0.0f)
+    {
+        m_HasPreviousFrame = false;
+        return;
+    }
     GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Render");
 
     uint32_t FrameIndex = TemporalEffects::GetFrameIndexMod2();
     const D3D12_VIEWPORT& viewport = m_MainViewport;
     const D3D12_RECT& scissor = m_MainScissor;
+
+    // Camera remains unjittered; retain matrices from the last submitted render view.
+    Renderer::RenderView mainView;
+    mainView.SetCamera(m_Camera);
+    mainView.SetViewport(viewport);
+    mainView.SetScissor(scissor);
+    mainView.SetHZBSize(Renderer::GetCurrentHZB());
+    float jitterX, jitterY;
+    TemporalEffects::GetJitterOffset(jitterX, jitterY);
+    mainView.SetTemporalJitter(jitterX, jitterY);
+
+    bool historyValid = m_HasPreviousFrame &&
+        TemporalEffects::GetFrameIndex() == m_PreviousFrameIndex + 1 &&
+        m_PreviousView.ViewportWidth == mainView.GetConstants().ViewportWidth &&
+        m_PreviousView.ViewportHeight == mainView.GetConstants().ViewportHeight;
+    if (historyValid)
+    {
+        const Matrix4& projection = m_Camera.GetProjMatrix();
+        const Matrix4& previousProjection = m_PrevCamera.GetProjMatrix();
+        historyValid = DirectX::XMVector4Equal(projection.GetX(), previousProjection.GetX()) &&
+            DirectX::XMVector4Equal(projection.GetY(), previousProjection.GetY()) &&
+            DirectX::XMVector4Equal(projection.GetZ(), previousProjection.GetZ()) &&
+            DirectX::XMVector4Equal(projection.GetW(), previousProjection.GetW()) &&
+            static_cast<float>(Length(m_Camera.GetPosition() - m_PrevCamera.GetPosition())) <= m_CameraCutDistance &&
+            static_cast<float>(Dot(m_Camera.GetForwardVec(), m_PrevCamera.GetForwardVec())) >= 0.5f &&
+            static_cast<float>(Dot(m_Camera.GetUpVec(), m_PrevCamera.GetUpVec())) >= 0.5f;
+    }
+    historyValid = TemporalEffects::PrepareFrame(gfxContext, historyValid);
+    mainView.SetPreviousView(historyValid ? &m_PreviousView : nullptr);
+    const Renderer::ViewConstants& viewConstants = mainView.GetConstants();
+    const float jitterDeltaX = viewConstants.PrevJitterPixels.GetX() - viewConstants.JitterPixels.GetX();
+    const float jitterDeltaY = viewConstants.PrevJitterPixels.GetY() - viewConstants.JitterPixels.GetY();
 
     ParticleEffectManager::Update(gfxContext.GetComputeContext(), Graphics::GetFrameTime());
 
@@ -553,13 +593,6 @@ void SceneViewer::RenderScene( void )
 
         uint32_t tileCountX = Math::DivideByMultiple(g_SceneColorBuffer.GetWidth(), Lighting::LightGridDim);
         uint32_t tileCountY = Math::DivideByMultiple(g_SceneColorBuffer.GetHeight(), Lighting::LightGridDim);
-
-        Renderer::RenderView mainView;
-        mainView.SetCamera(m_Camera);
-        mainView.SetPreviousCamera(m_PrevCamera);
-        mainView.SetViewport(viewport);
-        mainView.SetScissor(scissor);
-        mainView.SetHZBSize(Renderer::GetCurrentHZB());
 
         Renderer::FrameConstants frameConstants;
         frameConstants.EnableSunVsmSampling = g_EnableSunVsmSampling ? 1u : 0u;
@@ -625,7 +658,7 @@ void SceneViewer::RenderScene( void )
         {
             Renderer::UpdateGlobalDescriptors();
 
-            Lighting::FillLightGrid(gfxContext, m_Camera);
+            Lighting::FillLightGrid(gfxContext, m_Camera, mainView);
             
             ScopedTimer _outerprof(L"Main Render", gfxContext);
 
@@ -642,7 +675,7 @@ void SceneViewer::RenderScene( void )
 
             Renderer::VirtualShadowMap::RenderDirectionalPhysicalPagesDepth(gfxContext, frameConstants);
 
-            XeGTAO::Render(gfxContext, m_Camera);
+            XeGTAO::Render(gfxContext, viewConstants.ProjMatrix);
 
             Lighting::RenderDeferredLighting(gfxContext, mainView, frameConstants);
 
@@ -656,9 +689,12 @@ void SceneViewer::RenderScene( void )
     // Some systems generate a per-pixel velocity buffer to better track dynamic and skinned meshes.  Everything
     // is static in our scene, so we generate velocity from camera motion and the depth buffer.  A velocity buffer
     // is necessary for all temporal effects (and motion blur).
-    MotionBlur::GenerateCameraVelocityBuffer(gfxContext, m_Camera, true);
+    const Matrix4 reprojection = historyValid
+        ? viewConstants.PrevViewProjMatrix * viewConstants.InverseViewProjMatrix : Matrix4(kIdentity);
+    MotionBlur::GenerateCameraVelocityBuffer(gfxContext, reprojection,
+        m_Camera.GetNearClip(), m_Camera.GetFarClip(), true, jitterDeltaX, jitterDeltaY);
 
-    TemporalEffects::ResolveImage(gfxContext);
+    TemporalEffects::ResolveImage(gfxContext, jitterDeltaX, jitterDeltaY);
 
     ParticleEffectManager::Render(gfxContext, m_Camera, g_SceneColorBuffer, g_SceneDepthBuffer,  g_LinearDepth[FrameIndex]);
 
@@ -668,8 +704,11 @@ void SceneViewer::RenderScene( void )
     else
         MotionBlur::RenderObjectBlur(gfxContext, g_VelocityBuffer);
 
-    m_PrevCamera = m_Camera;
     gfxContext.Finish();
+    m_PreviousView = viewConstants;
+    m_PrevCamera = m_Camera;
+    m_PreviousFrameIndex = TemporalEffects::GetFrameIndex();
+    m_HasPreviousFrame = ModelInstanceManager::GetNumModelInstances() > 0;
 }
 
 void SceneViewer::RenderUI( GraphicsContext& )

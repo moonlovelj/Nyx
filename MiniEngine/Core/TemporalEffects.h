@@ -36,12 +36,15 @@ namespace TemporalEffects
 
     uint32_t GetFrameIndex(void);
 
-    // Jitter values are neutral at 0.5 and vary from [0, 1).  Jittering only occurs when temporal antialiasing
-    // is enabled.  You can use these values to jitter your viewport or projection matrix.
+    // Centered pixel offsets [-0.5, 0.5), positive right/down. Disabled TAA returns zero.
     void GetJitterOffset( float& JitterX, float& JitterY );
 
     void ClearHistory(CommandContext& Context);
 
-    void ResolveImage(CommandContext& Context);
+    // Call before rendering/culling. Returns false when all temporal consumers must reset.
+    bool PrepareFrame(CommandContext& Context, bool historyValid);
+
+    // Delta is previous submitted jitter minus current jitter, in pixels.
+    void ResolveImage(CommandContext& Context, float jitterDeltaX = 0.0f, float jitterDeltaY = 0.0f);
 
 }

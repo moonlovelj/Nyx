@@ -33,6 +33,7 @@ struct DAGCullConstants
 
 #ifndef DISABLE_HZB_CULL
     float4x4 PrevViewProjMatrix;
+    uint HasHistory;
     float4 HZBSizeAndInv;
     DescriptorHandle<Texture2D<float>> PreviousHZB;
     DescriptorHandle<Texture2D<float>> CurrentHZB;
@@ -99,7 +100,11 @@ DAGCullViewData GetDAGCullViewData()
     view.ViewerPosition = g_DAGCull.ViewerPos;
     view.LodScale = g_DAGCull.LodScale;
     view.IsPerspective = g_DAGCull.ProjectionType == 0;
-    view.HasHistory = true;
+#ifndef DISABLE_HZB_CULL
+    view.HasHistory = g_DAGCull.HasHistory != 0;
+#else
+    view.HasHistory = false;
+#endif
     view.HZBSourceWidth = g_DAGCull.ViewportWidth;
     view.HZBSourceHeight = g_DAGCull.ViewportHeight;
     view.HZBUvScaleBias = float4(1.0f, 1.0f, 0.0f, 0.0f);

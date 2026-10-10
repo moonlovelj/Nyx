@@ -35,7 +35,7 @@ namespace TemporalEffects
     NumVar Sharpness("Graphics/AA/TAA/Sharpness", 0.5f, 0.0f, 1.0f, 0.25f);
     NumVar TemporalMaxLerp("Graphics/AA/TAA/Blend Factor", 0.9f, 0.0f, 1.0f, 0.01f);
     ExpVar TemporalSpeedLimit("Graphics/AA/TAA/Speed Limit", 64.0f, 1.0f, 1024.0f, 1.0f);
-    BoolVar TriggerReset("Graphics/AA/TAA/Reset", false);
+    BoolVar TriggerReset("Graphics/AA/TAA/Reset", true);
     BoolVar EnableCBR("Graphics/CBR/Enable", false);
 
     ComputePSO s_TemporalBlendCS(L"TAA: Temporal Blend CS");
@@ -45,10 +45,11 @@ namespace TemporalEffects
 
     uint32_t s_FrameIndex = 0;
     uint32_t s_FrameIndexMod2 = 0;
-    float s_JitterX = 0.5f;
-    float s_JitterY = 0.5f;
+    float s_JitterX = 0.0f;
+    float s_JitterY = 0.0f;
     float s_JitterDeltaX = 0.0f;
     float s_JitterDeltaY = 0.0f;
+    bool s_HistoryValid = false;
 
     void ApplyTemporalAA(ComputeContext& Context);
     void SharpenImage(ComputeContext& Context, ColorBuffer& TemporalColor);
@@ -101,17 +102,13 @@ void TemporalEffects::Update( uint64_t FrameIndex )
         else
             Offset = Halton23[s_FrameIndex % 8];
 
-        s_JitterDeltaX = s_JitterX - Offset[0];
-        s_JitterDeltaY = s_JitterY - Offset[1];
-        s_JitterX = Offset[0];
-        s_JitterY = Offset[1];
+        s_JitterX = Offset[0] - 0.5f;
+        s_JitterY = Offset[1] - 0.5f;
     }
     else
     {
-        s_JitterDeltaX = s_JitterX - 0.5f;
-        s_JitterDeltaY = s_JitterY - 0.5f;
-        s_JitterX = 0.5f;
-        s_JitterY = 0.5f;
+        s_JitterX = 0.0f;
+        s_JitterY = 0.0f;
     }
 
 }
@@ -128,12 +125,14 @@ uint32_t TemporalEffects::GetFrameIndex(void)
 
 void TemporalEffects::GetJitterOffset( float& JitterX, float& JitterY )
 {
-    JitterX = s_JitterX;
-    JitterY = s_JitterY;
+    JitterX = EnableTAA ? s_JitterX : 0.0f;
+    JitterY = EnableTAA ? s_JitterY : 0.0f;
 }
 
 void TemporalEffects::ClearHistory( CommandContext& Context )
 {
+    s_HistoryValid = false;
+    TriggerReset = true;
     GraphicsContext& gfxContext = Context.GetGraphicsContext();
 
     if (EnableTAA)
@@ -145,22 +144,27 @@ void TemporalEffects::ClearHistory( CommandContext& Context )
     }
 }
 
-void TemporalEffects::ResolveImage( CommandContext& BaseContext )
+bool TemporalEffects::PrepareFrame(CommandContext& Context, bool historyValid)
 {
-    ScopedTimer _prof(L"Temporal Resolve", BaseContext);
-
-    ComputeContext& Context = BaseContext.GetComputeContext();
-
     static bool s_EnableTAA = false;
     static bool s_EnableCBR = false;
-
-    if (EnableTAA != s_EnableTAA || EnableCBR && !s_EnableCBR || TriggerReset)
-    {
+    historyValid = historyValid &&
+        EnableTAA == s_EnableTAA && EnableCBR == s_EnableCBR && !TriggerReset;
+    if (!historyValid)
         ClearHistory(Context);
-        s_EnableTAA = EnableTAA;
-        s_EnableCBR = EnableCBR;
-        TriggerReset = false;
-    }
+    s_EnableTAA = EnableTAA;
+    s_EnableCBR = EnableCBR;
+    TriggerReset = false;
+    s_HistoryValid = historyValid;
+    return historyValid;
+}
+
+void TemporalEffects::ResolveImage( CommandContext& BaseContext, float jitterDeltaX, float jitterDeltaY )
+{
+    ScopedTimer _prof(L"Temporal Resolve", BaseContext);
+    ComputeContext& Context = BaseContext.GetComputeContext();
+    s_JitterDeltaX = s_HistoryValid ? jitterDeltaX : 0.0f;
+    s_JitterDeltaY = s_HistoryValid ? jitterDeltaY : 0.0f;
 
     if (!EnableTAA)
     {
@@ -192,11 +196,13 @@ void TemporalEffects::ApplyTemporalAA(ComputeContext& Context)
         float TemporalBlendFactor;
         float RcpSeedLimiter;
         float CombinedJitter[2];
+        uint32_t HistoryValid;
+        uint32_t Padding;
     };
     ConstantBuffer cbv = {
         1.0f / g_SceneColorBuffer.GetWidth(), 1.0f / g_SceneColorBuffer.GetHeight(),
         (float)TemporalMaxLerp, 1.0f / TemporalSpeedLimit,
-        s_JitterDeltaX, s_JitterDeltaY
+        s_JitterDeltaX, s_JitterDeltaY, s_HistoryValid ? 1u : 0u, 0u
     };
 
     Context.SetDynamicConstantBufferView(3, sizeof(cbv), &cbv);

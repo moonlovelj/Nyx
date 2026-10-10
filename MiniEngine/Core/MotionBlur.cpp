@@ -96,7 +96,7 @@ void MotionBlur::GenerateCameraVelocityBuffer( CommandContext& BaseContext, cons
     GenerateCameraVelocityBuffer(BaseContext, camera.GetReprojectionMatrix(), camera.GetNearClip(), camera.GetFarClip(), UseLinearZ);
 }
 
-void MotionBlur::GenerateCameraVelocityBuffer( CommandContext& BaseContext, const Matrix4& reprojectionMatrix, float nearClip, float farClip, bool UseLinearZ)
+void MotionBlur::GenerateCameraVelocityBuffer( CommandContext& BaseContext, const Matrix4& reprojectionMatrix, float nearClip, float farClip, bool UseLinearZ, float jitterDeltaX, float jitterDeltaY)
 {
     ScopedTimer _prof(L"Generate Camera Velocity", BaseContext);
 
@@ -127,7 +127,14 @@ void MotionBlur::GenerateCameraVelocityBuffer( CommandContext& BaseContext, cons
 
     Matrix4 CurToPrevXForm = postMult * reprojectionMatrix * preMult;
 
-    Context.SetDynamicConstantBufferView(3, sizeof(CurToPrevXForm), &CurToPrevXForm);
+    struct alignas(16) VelocityConstants
+    {
+        Matrix4 CurToPrevXForm;
+        float JitterDelta[2];
+        float Padding[2];
+    };
+    const VelocityConstants constants = { CurToPrevXForm, { jitterDeltaX, jitterDeltaY }, {} };
+    Context.SetDynamicConstantBufferView(3, sizeof(constants), &constants);
     Context.TransitionResource(g_VelocityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
     ColorBuffer& LinearDepth = g_LinearDepth[ TemporalEffects::GetFrameIndexMod2() ];
@@ -148,7 +155,7 @@ void MotionBlur::RenderCameraBlur( CommandContext& BaseContext, const Camera& ca
     RenderCameraBlur(BaseContext, camera.GetReprojectionMatrix(), camera.GetNearClip(), camera.GetFarClip(), UseLinearZ);
 }
 
-void MotionBlur::RenderCameraBlur( CommandContext& BaseContext, const Matrix4& reprojectionMatrix, float nearClip, float farClip, bool UseLinearZ)
+void MotionBlur::RenderCameraBlur( CommandContext& BaseContext, const Matrix4& reprojectionMatrix, float nearClip, float farClip, bool UseLinearZ, float jitterDeltaX, float jitterDeltaY)
 {
     ScopedTimer _prof(L"MotionBlur", BaseContext);
 
@@ -181,7 +188,14 @@ void MotionBlur::RenderCameraBlur( CommandContext& BaseContext, const Matrix4& r
 
     Matrix4 CurToPrevXForm = postMult * reprojectionMatrix * preMult;
 
-    Context.SetDynamicConstantBufferView(3, sizeof(CurToPrevXForm), &CurToPrevXForm);
+    struct alignas(16) VelocityConstants
+    {
+        Matrix4 CurToPrevXForm;
+        float JitterDelta[2];
+        float Padding[2];
+    };
+    const VelocityConstants constants = { CurToPrevXForm, { jitterDeltaX, jitterDeltaY }, {} };
+    Context.SetDynamicConstantBufferView(3, sizeof(constants), &constants);
 
     ColorBuffer& LinearDepth = g_LinearDepth[ TemporalEffects::GetFrameIndexMod2() ];
     if (UseLinearZ)

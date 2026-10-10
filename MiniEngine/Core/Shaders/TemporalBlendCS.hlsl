@@ -40,7 +40,9 @@ cbuffer CB1 : register(b1)
     float2 RcpBufferDim;	// 1 / width, 1 / height
     float TemporalBlendFactor;
     float RcpSpeedLimiter;
-    float2 ViewportJitter;
+    float2 JitterDelta;
+    uint HistoryValid;
+    uint Padding;
 }
 
 void StoreRGB(uint ldsIdx, float3 RGB)
@@ -115,6 +117,12 @@ void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
 {
     float3 CurrentColor = LoadRGB(ldsIdx);
 
+    if (!HistoryValid)
+    {
+        OutTemporal[ST] = float4(CurrentColor, 1.0) * 0.5;
+        return;
+    }
+
     float CompareDepth;
 
     // Get the velocity of the closest pixel in the '+' formation
@@ -123,7 +131,7 @@ void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
     CompareDepth += Velocity.z;
 
     // The temporal depth is the actual depth of the pixel found at the same reprojected location.
-    float TemporalDepth = MaxOf(PreDepth.Gather(LinearSampler, STtoUV(ST + Velocity.xy + ViewportJitter))) + 1e-3;
+    float TemporalDepth = MaxOf(PreDepth.Gather(LinearSampler, STtoUV(ST + Velocity.xy + JitterDelta))) + 1e-3;
 
     // Fast-moving pixels cause motion blur and probably don't need TAA
     float SpeedFactor = saturate(1.0 - length(Velocity.xy) * RcpSpeedLimiter);

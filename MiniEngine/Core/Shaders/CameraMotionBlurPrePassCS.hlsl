@@ -29,6 +29,7 @@ RWTexture2D<packed_velocity_t> VelocityBuffer : register(u1);
 cbuffer CB1 : register(b1)
 {
     matrix CurToPrevXForm;
+    float2 JitterDelta;
 }
 
 float4 GetSampleData( uint2 st )
@@ -49,6 +50,7 @@ float4 GetSampleData( uint2 st )
 #endif
 
     float3 Velocity = PrevHPos.xyz - float3(CurPixel, Depth);
+    Velocity.xy -= JitterDelta;
 
     VelocityBuffer[st] = PackVelocity(Velocity);
 
