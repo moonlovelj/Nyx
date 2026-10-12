@@ -120,6 +120,7 @@
     <ClInclude Include="MeshletStructs.h" />
     <ClInclude Include="Model.h" />
     <ClInclude Include="ModelInstanceManager.h" />
+    <ClInclude Include="ObjectMotion.h" />
     <ClInclude Include="SceneObjectUpdate.h" />
     <ClInclude Include="ModelLoader.h" />
     <ClInclude Include="ModelH3D.h" />
@@ -192,6 +193,8 @@
     <None Include="Shaders\MeshBufferGen.slang" />
     <None Include="Shaders\ExportDepth.slang" />
     <None Include="Shaders\ResolveVBufferToGBuffer.slang" />
+    <None Include="Shaders\ObjectVelocity.slang" />
+    <None Include="Shaders\ObjectMotionShared.h.slang" />
     <None Include="Shaders\Skybox.slang" />
     <None Include="Shaders\VBufferMesh.slang" />
     <None Include="Shaders\ViewCommon.h.slang" />

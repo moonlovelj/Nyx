@@ -11,6 +11,20 @@
 // Author:  James Stanard 
 //
 
+// YCoCg variance clipping adapted from Intel TAA.
+// Copyright (c) 2019-2020, Intel Corporation
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+// documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+// permit persons to whom the Software is furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of
+// the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+// THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+// TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #include "CommonRS.hlsli"
 #include "ShaderUtility.hlsli"
 #include "PixelPacking_Velocity.hlsli"
@@ -42,7 +56,7 @@ cbuffer CB1 : register(b1)
     float RcpSpeedLimiter;
     float2 JitterDelta;
     uint HistoryValid;
-    uint Padding;
+    uint UseIntelHistoryClipping;
 }
 
 void StoreRGB(uint ldsIdx, float3 RGB)
@@ -70,6 +84,43 @@ float3 ClipColor(float3 Color, float3 BoxMin, float3 BoxMax, float Dilation = 1.
     float3 Units = abs(Displacement / HalfDim);
     float MaxUnit = max(max(Units.x, Units.y), max(Units.z, 1.0));
     return BoxCenter + Displacement / MaxUnit;
+}
+
+float3 RGBToYCoCg(float3 rgb)
+{
+    return float3(
+        dot(rgb, float3(0.25, 0.5, 0.25)),
+        dot(rgb, float3(0.5, 0.0, -0.5)),
+        dot(rgb, float3(-0.25, 0.5, -0.25)));
+}
+
+float3 YCoCgToRGB(float3 color)
+{
+    return float3(color.x + color.y - color.z, color.x + color.z, color.x - color.y - color.z);
+}
+
+float3 ClipHistoryVariance(float3 historyRGB, uint ldsIdx, float speedFactor)
+{
+    float3 moment1 = 0.0;
+    float3 moment2 = 0.0;
+    [unroll]
+    for (int y = -1; y <= 1; ++y)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; ++x)
+        {
+            const float3 color = RGBToYCoCg(LoadRGB((int)ldsIdx + y * (int)kLdsPitch + x));
+            moment1 += color;
+            moment2 += color * color;
+        }
+    }
+
+    const float3 mean = moment1 / 9.0;
+    const float3 sigma = sqrt(max(moment2 / 9.0 - mean * mean, 0.0));
+    const float gamma = lerp(0.75, 2.0, speedFactor * speedFactor);
+    // Keep statistics and clipping in YCoCg; only convert the clipped result back to RGB.
+    const float3 clipped = ClipColor(RGBToYCoCg(historyRGB), mean - gamma * sigma, mean + gamma * sigma);
+    return max(YCoCgToRGB(clipped), 0.0);
 }
 
 void GetBBoxForPair(uint fillIdx, uint holeIdx, out float3 boxMin, out float3 boxMax)
@@ -117,7 +168,7 @@ void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
 {
     float3 CurrentColor = LoadRGB(ldsIdx);
 
-    if (!HistoryValid)
+    if (!HistoryValid || VelocityBuffer[ST] == INVALID_VELOCITY)
     {
         OutTemporal[ST] = float4(CurrentColor, 1.0) * 0.5;
         return;
@@ -126,7 +177,13 @@ void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
     float CompareDepth;
 
     // Get the velocity of the closest pixel in the '+' formation
-    float3 Velocity = UnpackVelocity(VelocityBuffer[ST + GetClosestPixel(ldsIdx, CompareDepth)]);
+    uint PackedVelocity = VelocityBuffer[ST + GetClosestPixel(ldsIdx, CompareDepth)];
+    if (PackedVelocity == INVALID_VELOCITY)
+    {
+        OutTemporal[ST] = float4(CurrentColor, 1.0) * 0.5;
+        return;
+    }
+    float3 Velocity = UnpackVelocity(PackedVelocity);
 
     CompareDepth += Velocity.z;
 
@@ -144,9 +201,10 @@ void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
     // Pixel colors are pre-multiplied by their weight to enable bilinear filtering.  Divide by weight to recover color.
     TemporalColor /= max(TemporalWeight, 1e-6);
 
-    // Clip the temporal color to the current neighborhood's bounding box.  Increase the size of the bounding box for
-    // stationary pixels to avoid rejecting noisy specular highlights.
-    TemporalColor = ClipColor(TemporalColor, BoxMin, BoxMax, lerp(1.0, 4.0, SpeedFactor * SpeedFactor));
+    if (UseIntelHistoryClipping)
+        TemporalColor = ClipHistoryVariance(TemporalColor, ldsIdx, SpeedFactor);
+    else
+        TemporalColor = ClipColor(TemporalColor, BoxMin, BoxMax, lerp(1.0, 4.0, SpeedFactor * SpeedFactor));
 
     // Update the confidence term based on speed and disocclusion
     TemporalWeight *= SpeedFactor * step(CompareDepth, TemporalDepth);
@@ -202,8 +260,9 @@ void main(uint3 DTid : SV_DispatchThreadID, uint GI : SV_GroupIndex, uint3 GTid 
     uint Idx0 = GTid.x * 2 + GTid.y * kLdsPitch + kLdsPitch + 1;
     uint Idx1 = Idx0 + 1;
 
-    float3 BoxMin, BoxMax;
-    GetBBoxForPair(Idx0, Idx1, BoxMin, BoxMax);
+    float3 BoxMin = 0.0, BoxMax = 0.0;
+    if (!UseIntelHistoryClipping)
+        GetBBoxForPair(Idx0, Idx1, BoxMin, BoxMax);
 
     uint2 ST0 = DTid.xy * uint2(2, 1);
     ApplyTemporalBlend(ST0, Idx0, BoxMin, BoxMax);

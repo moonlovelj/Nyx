@@ -361,6 +361,9 @@ namespace Renderer
         const RenderView& view,
         const FrameConstants& frame);
 
+    // Called after full-screen camera velocity; overwrites only moving rigid surfaces.
+    void GenerateObjectVelocity(GraphicsContext& context, const RenderView& view, float farClip);
+
 	HierarchicalDepthBuffer& GetPrevHZB();
 	HierarchicalDepthBuffer& GetCurrentHZB();
     HZBResources GetSceneHZBResources();

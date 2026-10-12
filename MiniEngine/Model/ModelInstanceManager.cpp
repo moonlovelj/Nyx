@@ -4,6 +4,7 @@
 #include "ConstantBuffers.h"
 #include "CommandBucketer.h"
 #include "GeometryStreaming.h"
+#include "ObjectMotion.h"
 #include "../Core/Math/Random.h"
 
 #include <algorithm>
@@ -23,6 +24,10 @@ namespace ModelInstanceManager
     std::vector<Math::AffineTransform> s_PublishedMeshTransforms;
     std::vector<SceneObjectUpdate> s_SceneObjectUpdates;
     bool s_HasPublishedMeshTransforms = false;
+    std::vector<Renderer::ObjectMotionHistory> s_RenderedMeshTransforms;
+    std::vector<Renderer::ObjectMotionData> s_ObjectMotionCPU;
+    StructuredBuffer s_ObjectMotionGPU;
+    bool s_HasObjectMotion = false;
 
     bool AreTransformsEqual(const Math::AffineTransform& a, const Math::AffineTransform& b)
     {
@@ -62,6 +67,13 @@ namespace ModelInstanceManager
         s_PublishedMeshTransforms.resize(static_cast<size_t>(instanceCount) * s_MeshLocalBounds.size());
         s_SceneObjectUpdates.clear();
         s_HasPublishedMeshTransforms = false;
+        s_RenderedMeshTransforms.clear();
+        s_RenderedMeshTransforms.resize(s_PublishedMeshTransforms.size());
+        s_ObjectMotionCPU.clear();
+        s_ObjectMotionCPU.resize(std::max(sourceModel->m_NumNodes * instanceCount, 1u));
+        s_ObjectMotionGPU.Create(L"Object Motion", static_cast<uint32_t>(s_ObjectMotionCPU.size()),
+            sizeof(Renderer::ObjectMotionData), s_ObjectMotionCPU.data());
+        s_HasObjectMotion = false;
 
 		InstanceResourceManager::Initialize(
 			std::max(sourceModel->m_NumNodes * instanceCount, 1u),
@@ -184,12 +196,19 @@ namespace ModelInstanceManager
 
 		InstanceResourceManager::FlushBufferUpdate(gfxContext);
 
+        const bool hadObjectMotion = s_HasObjectMotion;
+        s_HasObjectMotion = false;
         uint32_t objectId = 0;
         for (const ModelInstance& instance : s_ModelInstances)
         {
             for (uint32_t meshIndex = 0; meshIndex < s_MeshLocalBounds.size(); ++meshIndex, ++objectId)
             {
                 const Math::AffineTransform& current = instance.GetMeshWorldTransform(meshIndex);
+                const uint32_t matrixIndex = instance.GetInstanceAllocation().meshConstantBase +
+                    s_SourceModel->m_Meshes[meshIndex]->matrixIdx;
+                Renderer::ObjectMotionData& motion = s_ObjectMotionCPU[matrixIndex];
+                motion = s_RenderedMeshTransforms[objectId].GetMotion(Math::Matrix4(current));
+                s_HasObjectMotion |= motion.Flags != OBJECT_MOTION_STATIC;
                 Math::AffineTransform& previous = s_PublishedMeshTransforms[objectId];
                 if (s_HasPublishedMeshTransforms && !AreTransformsEqual(current, previous))
                 {
@@ -200,7 +219,25 @@ namespace ModelInstanceManager
             }
         }
         s_HasPublishedMeshTransforms = true;
+        if (s_HasObjectMotion || hadObjectMotion)
+        {
+            gfxContext.WriteBuffer(s_ObjectMotionGPU, 0, s_ObjectMotionCPU.data(),
+                s_ObjectMotionCPU.size() * sizeof(Renderer::ObjectMotionData));
+            gfxContext.TransitionResource(s_ObjectMotionGPU, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        }
 	}
+
+    void CommitRenderedTransforms()
+    {
+        uint32_t objectId = 0;
+        for (const ModelInstance& instance : s_ModelInstances)
+            for (uint32_t meshIndex = 0; meshIndex < s_MeshLocalBounds.size(); ++meshIndex, ++objectId)
+                s_RenderedMeshTransforms[objectId].CommitRenderedWorld(Math::Matrix4(instance.GetMeshWorldTransform(meshIndex)));
+    }
+
+    bool HasObjectMotion() { return s_HasObjectMotion; }
+    const StructuredBuffer& GetObjectMotionBuffer() { return s_ObjectMotionGPU; }
+    const ByteAddressBuffer& GetInstanceConstantsBuffer() { return s_InstanceConstantsGPU; }
 
     const std::vector<SceneObjectUpdate>& GetSceneObjectUpdates()
     {
@@ -209,6 +246,10 @@ namespace ModelInstanceManager
 
 	void Cleanup()
 	{
+        s_RenderedMeshTransforms.clear();
+        s_ObjectMotionCPU.clear();
+        s_ObjectMotionGPU.Destroy();
+        s_HasObjectMotion = false;
         s_MeshLocalBounds.clear();
         s_PublishedMeshTransforms.clear();
         s_SceneObjectUpdates.clear();

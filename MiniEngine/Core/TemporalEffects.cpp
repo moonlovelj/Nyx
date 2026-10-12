@@ -32,6 +32,7 @@ using namespace TemporalEffects;
 namespace TemporalEffects
 {
     BoolVar EnableTAA("Graphics/AA/TAA/Enable", false);
+    BoolVar EnableIntelHistoryClipping("Graphics/AA/TAA/Intel History Clipping", true);
     NumVar Sharpness("Graphics/AA/TAA/Sharpness", 0.5f, 0.0f, 1.0f, 0.25f);
     NumVar TemporalMaxLerp("Graphics/AA/TAA/Blend Factor", 0.9f, 0.0f, 1.0f, 0.01f);
     ExpVar TemporalSpeedLimit("Graphics/AA/TAA/Speed Limit", 64.0f, 1.0f, 1024.0f, 1.0f);
@@ -148,12 +149,15 @@ bool TemporalEffects::PrepareFrame(CommandContext& Context, bool historyValid)
 {
     static bool s_EnableTAA = false;
     static bool s_EnableCBR = false;
+    static bool s_EnableIntelHistoryClipping = EnableIntelHistoryClipping;
     historyValid = historyValid &&
-        EnableTAA == s_EnableTAA && EnableCBR == s_EnableCBR && !TriggerReset;
+        EnableTAA == s_EnableTAA && EnableCBR == s_EnableCBR &&
+        EnableIntelHistoryClipping == s_EnableIntelHistoryClipping && !TriggerReset;
     if (!historyValid)
         ClearHistory(Context);
     s_EnableTAA = EnableTAA;
     s_EnableCBR = EnableCBR;
+    s_EnableIntelHistoryClipping = EnableIntelHistoryClipping;
     TriggerReset = false;
     s_HistoryValid = historyValid;
     return historyValid;
@@ -197,12 +201,13 @@ void TemporalEffects::ApplyTemporalAA(ComputeContext& Context)
         float RcpSeedLimiter;
         float CombinedJitter[2];
         uint32_t HistoryValid;
-        uint32_t Padding;
+        uint32_t UseIntelHistoryClipping;
     };
+    static_assert(sizeof(ConstantBuffer) == 32, "TemporalBlendCS constant buffer layout must match HLSL.");
     ConstantBuffer cbv = {
         1.0f / g_SceneColorBuffer.GetWidth(), 1.0f / g_SceneColorBuffer.GetHeight(),
         (float)TemporalMaxLerp, 1.0f / TemporalSpeedLimit,
-        s_JitterDeltaX, s_JitterDeltaY, s_HistoryValid ? 1u : 0u, 0u
+        s_JitterDeltaX, s_JitterDeltaY, s_HistoryValid ? 1u : 0u, EnableIntelHistoryClipping ? 1u : 0u
     };
 
     Context.SetDynamicConstantBufferView(3, sizeof(cbv), &cbv);

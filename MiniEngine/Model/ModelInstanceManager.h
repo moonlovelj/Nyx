@@ -12,6 +12,10 @@ namespace ModelInstanceManager
 
 	void Update(GraphicsContext& gfxContext, float deltaTime);
     const std::vector<SceneObjectUpdate>& GetSceneObjectUpdates();
+    void CommitRenderedTransforms();
+    bool HasObjectMotion();
+    const StructuredBuffer& GetObjectMotionBuffer();
+    const ByteAddressBuffer& GetInstanceConstantsBuffer();
 
 	void Cleanup();
 

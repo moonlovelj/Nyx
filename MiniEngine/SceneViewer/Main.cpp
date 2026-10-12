@@ -686,13 +686,12 @@ void SceneViewer::RenderScene( void )
 
     SSAO::LinearizeZ(gfxContext.GetComputeContext(), m_Camera, FrameIndex);
 
-    // Some systems generate a per-pixel velocity buffer to better track dynamic and skinned meshes.  Everything
-    // is static in our scene, so we generate velocity from camera motion and the depth buffer.  A velocity buffer
-    // is necessary for all temporal effects (and motion blur).
+    // Camera velocity covers the whole image; rigid object motion replaces its visible pixels.
     const Matrix4 reprojection = historyValid
         ? viewConstants.PrevViewProjMatrix * viewConstants.InverseViewProjMatrix : Matrix4(kIdentity);
     MotionBlur::GenerateCameraVelocityBuffer(gfxContext, reprojection,
         m_Camera.GetNearClip(), m_Camera.GetFarClip(), true, jitterDeltaX, jitterDeltaY);
+    Renderer::GenerateObjectVelocity(gfxContext, mainView, m_Camera.GetFarClip());
 
     TemporalEffects::ResolveImage(gfxContext, jitterDeltaX, jitterDeltaY);
 
@@ -705,6 +704,7 @@ void SceneViewer::RenderScene( void )
         MotionBlur::RenderObjectBlur(gfxContext, g_VelocityBuffer);
 
     gfxContext.Finish();
+    ModelInstanceManager::CommitRenderedTransforms();
     m_PreviousView = viewConstants;
     m_PrevCamera = m_Camera;
     m_PreviousFrameIndex = TemporalEffects::GetFrameIndex();

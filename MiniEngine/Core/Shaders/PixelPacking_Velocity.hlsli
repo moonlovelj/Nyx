@@ -21,6 +21,10 @@
 // of the size of the screen.
 #define packed_velocity_t uint
 
+// Reserved for invalid surface history: zero XY avoids artificial motion blur.
+// PackVelocity excludes this encoding from valid velocities.
+#define INVALID_VELOCITY 0x7FF00000u
+
 // Designed to compress (-256.0, +256.0) with a signed 6e3 float
 uint PackXY( float x )
 {
@@ -50,7 +54,9 @@ float UnpackZ( uint x )
 // Pack the velocity to write to R10G10B10A2_UNORM
 packed_velocity_t PackVelocity( float3 Velocity )
 {
-    return PackXY(Velocity.x) | PackXY(Velocity.y) << 10 | PackZ(Velocity.z) << 20;
+    uint packed = PackXY(Velocity.x) | (PackXY(Velocity.y) << 10) | (PackZ(Velocity.z) << 20);
+    // Reserve the invalid marker by moving a collision to the adjacent Z code; XY is unchanged.
+    return packed == INVALID_VELOCITY ? packed - (1u << 20) : packed;
 }
 
 // Unpack the velocity from R10G10B10A2_UNORM

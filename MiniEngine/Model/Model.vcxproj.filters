@@ -191,6 +191,9 @@
     <ClInclude Include="ModelInstanceManager.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="ObjectMotion.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\ThirdParty\cgltf\cgltf.h">
       <Filter>Source Files</Filter>
     </ClInclude>
@@ -252,6 +255,12 @@
       <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\ResolveVBufferToGBuffer.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
+    <None Include="Shaders\ObjectVelocity.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
+    <None Include="Shaders\ObjectMotionShared.h.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="Shaders\MeshBufferGen.slang">

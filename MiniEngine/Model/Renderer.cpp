@@ -29,6 +29,7 @@
 #include "CommandBucketer.h"
 #include "GeometryStreaming.h"
 #include "VirtualShadowMap.h"
+#include "ModelInstanceManager.h"
 
 #include <filesystem>
 
@@ -189,6 +190,8 @@ namespace Renderer
 
 	ComputePSO m_ResolveVBufferToGBufferPSO(L"Renderer: Resolve VBuffer To GBuffer PSO");
     std::shared_ptr<Program> m_ResolveVBufferToGBufferProgram;
+    ComputePSO m_ObjectVelocityPSO(L"Renderer: Object Velocity");
+    std::shared_ptr<Program> m_ObjectVelocityProgram;
 
 	ComputePSO m_InstanceCullPSO[2] = {
         ComputePSO(L"Renderer: Instance Cull Pass 0 PSO"),
@@ -513,6 +516,16 @@ void Renderer::Initialize(void)
     ProgramUtils::SetProgram(m_ExportDepthPSO, *m_ExportDepthProgram);
 	m_ExportDepthPSO.Finalize();
 
+
+    ProgramDesc objectVelocityDesc = ProgramUtils::MakeComputeDesc(GetModelShaderPath("ObjectVelocity.slang"), "computeMain");
+    objectVelocityDesc.AddRootBufferSRV("g_ObjectMotion");
+    objectVelocityDesc.AddRootBufferSRV("g_Instances");
+    objectVelocityDesc.AddRootBufferSRV("g_VisibleMeshlets");
+    m_ObjectVelocityProgram = ProgramUtils::GetProgram(objectVelocityDesc, "Renderer: Object Velocity");
+    if (!m_ObjectVelocityProgram)
+        return;
+    ProgramUtils::SetProgram(m_ObjectVelocityPSO, *m_ObjectVelocityProgram);
+    m_ObjectVelocityPSO.Finalize();
 
     // Initialize bindless resource descriptor bindings
     {
@@ -1060,6 +1073,49 @@ void Renderer::RenderVisibility(
             Renderer::GetCurrentHZB().GenerateHZB(gfxContext, g_SceneDepthBuffer);
         }
     }
+}
+
+void Renderer::GenerateObjectVelocity(GraphicsContext& gfxContext, const RenderView& view, float farClip)
+{
+    if (!view.HasHistory() || !ModelInstanceManager::HasObjectMotion())
+        return;
+    ASSERT(m_ObjectVelocityProgram != nullptr && farClip > 0.0f);
+    if (!m_ObjectVelocityProgram || farClip <= 0.0f)
+        return;
+
+    ScopedTimer timer(L"Object Velocity", gfxContext);
+    ComputeContext& context = gfxContext.GetComputeContext();
+    const StructuredBuffer& motion = ModelInstanceManager::GetObjectMotionBuffer();
+    const ByteAddressBuffer& instances = ModelInstanceManager::GetInstanceConstantsBuffer();
+    context.TransitionResource(DrawCommandManager::GetVisibleMeshletBufferGPU(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    context.TransitionResource(g_VisibilityBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    ColorBuffer& depth = g_LinearDepth[TemporalEffects::GetFrameIndexMod2()];
+    context.TransitionResource(depth, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    context.TransitionResource(g_VelocityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    context.InsertUAVBarrier(g_VelocityBuffer);
+
+    ProgramBinder binder(*m_ObjectVelocityProgram, context);
+    binder.SetRootSignature();
+    context.SetPipelineState(m_ObjectVelocityPSO);
+    const ViewConstants& constants = view.GetConstants();
+    ProgramVar parameters = binder["g_ObjectVelocity"];
+    parameters["InverseViewProjMatrix"].Set(constants.InverseViewProjMatrix);
+    parameters["PrevViewProjMatrix"].Set(constants.PrevViewProjMatrix);
+    parameters["ViewportSize"].Set(DirectX::XMUINT2(constants.ViewportWidth, constants.ViewportHeight));
+    parameters["InvViewportSize"].Set(DirectX::XMFLOAT2(constants.InvViewportWidth, constants.InvViewportHeight));
+    parameters["JitterDelta"].Set(DirectX::XMFLOAT2(
+        constants.PrevJitterPixels.GetX() - constants.JitterPixels.GetX(),
+        constants.PrevJitterPixels.GetY() - constants.JitterPixels.GetY()));
+    parameters["RcpFarClip"].Set(1.0f / farClip);
+    parameters["MotionCount"].Set(motion.GetElementCount());
+    binder["g_ObjectMotion"].SetRootBufferSRV(motion);
+    binder["g_Instances"].SetRootBufferSRV(instances);
+    binder["g_VisibleMeshlets"].SetRootBufferSRV(DrawCommandManager::GetVisibleMeshletBufferGPU());
+    binder["g_VBuffer"].SetSRV(g_VisibilityBuffer.GetSRV());
+    binder["g_LinearDepth"].SetSRV(depth.GetSRV());
+    binder["g_Velocity"].SetUAV(g_VelocityBuffer.GetUAV());
+    binder.Apply();
+    context.Dispatch2D(constants.ViewportWidth, constants.ViewportHeight);
 }
 
 void Renderer::RenderSceneDepth(
