@@ -11,7 +11,7 @@
 // Author:  James Stanard 
 //
 
-// YCoCg variance clipping adapted from Intel TAA.
+// YCoCg variance clipping and 5-tap bicubic history sampling adapted from Intel TAA.
 // Copyright (c) 2019-2020, Intel Corporation
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
 // documentation files (the "Software"), to deal in the Software without restriction, including without limitation
@@ -57,6 +57,7 @@ cbuffer CB1 : register(b1)
     float2 JitterDelta;
     uint HistoryValid;
     uint UseIntelHistoryClipping;
+    uint UseBicubicHistory;
 }
 
 void StoreRGB(uint ldsIdx, float3 RGB)
@@ -74,6 +75,43 @@ float3 LoadRGB(uint ldsIdx)
 float2 STtoUV(float2 ST)
 {
     return (ST + 0.5) * RcpBufferDim;
+}
+
+float4 SampleHistory(float2 historyST)
+{
+    // A full cubic footprint spans floor(ST)-1 through floor(ST)+2.
+    // Use bilinear near the image boundary to avoid extending edge texels into the cubic filter.
+    if (!UseBicubicHistory || any(historyST < 1.0) || any(historyST >= rcp(RcpBufferDim) - 2.0))
+        return InTemporal.SampleLevel(LinearSampler, STtoUV(historyST), 0);
+
+    const float2 t = frac(historyST);
+    const float2 t2 = t * t;
+    const float2 t3 = t2 * t;
+    const float2 w0 = -0.5 * t3 + t2 - 0.5 * t;
+    const float2 w1 = 1.5 * t3 - 2.5 * t2 + 1.0;
+    const float2 w2 = -1.5 * t3 + 2.0 * t2 + 0.5 * t;
+    const float2 w3 = 0.5 * t3 - 0.5 * t2;
+    const float2 s0 = w1 + w2;
+    const float2 uv = STtoUV(floor(historyST));
+    const float2 m0 = uv + (w2 / s0) * RcpBufferDim;
+    const float2 tc0 = uv - RcpBufferDim;
+    const float2 tc3 = uv + 2.0 * RcpBufferDim;
+
+    // Filter premultiplied RGB and confidence together, using Intel's 5-fetch Catmull-Rom approximation.
+    const float4 A = InTemporal.SampleLevel(LinearSampler, float2(m0.x, tc0.y), 0);
+    const float4 B = InTemporal.SampleLevel(LinearSampler, float2(tc0.x, m0.y), 0);
+    const float4 C = InTemporal.SampleLevel(LinearSampler, m0, 0);
+    const float4 D = InTemporal.SampleLevel(LinearSampler, float2(tc3.x, m0.y), 0);
+    const float4 E = InTemporal.SampleLevel(LinearSampler, float2(m0.x, tc3.y), 0);
+    const float4 history =
+        (0.5 * (A + B) * w0.x + A * s0.x + 0.5 * (A + B) * w3.x) * w0.y +
+        (B * w0.x + C * s0.x + D * w3.x) * s0.y +
+        (0.5 * (B + E) * w0.x + E * s0.x + 0.5 * (D + E) * w3.x) * w3.y;
+
+    // Negative lobes can make confidence unusable; bilinear provides a safe correspondence in that case.
+    if (history.a <= 1e-6 || !all(isfinite(history)))
+        return InTemporal.SampleLevel(LinearSampler, STtoUV(historyST), 0);
+    return history;
 }
 
 float3 ClipColor(float3 Color, float3 BoxMin, float3 BoxMax, float Dilation = 1.0)
@@ -185,21 +223,29 @@ void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
     }
     float3 Velocity = UnpackVelocity(PackedVelocity);
 
+    const float2 HistoryUV = STtoUV(ST + Velocity.xy);
+    const float2 HistoryDepthUV = STtoUV(ST + Velocity.xy + JitterDelta);
+    // History color and raw depth use different jitter conventions; both must be in bounds.
+    if (!(all(HistoryUV >= 0.0) && all(HistoryUV < 1.0) &&
+          all(HistoryDepthUV >= 0.0) && all(HistoryDepthUV < 1.0)))
+    {
+        OutTemporal[ST] = float4(CurrentColor, 1.0) * 0.5;
+        return;
+    }
+
     CompareDepth += Velocity.z;
 
     // The temporal depth is the actual depth of the pixel found at the same reprojected location.
-    float TemporalDepth = MaxOf(PreDepth.Gather(LinearSampler, STtoUV(ST + Velocity.xy + JitterDelta))) + 1e-3;
+    float TemporalDepth = MaxOf(PreDepth.Gather(LinearSampler, HistoryDepthUV)) + 1e-3;
 
     // Fast-moving pixels cause motion blur and probably don't need TAA
     float SpeedFactor = saturate(1.0 - length(Velocity.xy) * RcpSpeedLimiter);
 
     // Fetch temporal color.  Its "confidence" weight is stored in alpha.
-    float4 Temp = InTemporal.SampleLevel(LinearSampler, STtoUV(ST + Velocity.xy), 0);
-    float3 TemporalColor = Temp.rgb;
-    float TemporalWeight = Temp.w;
-
-    // Pixel colors are pre-multiplied by their weight to enable bilinear filtering.  Divide by weight to recover color.
-    TemporalColor /= max(TemporalWeight, 1e-6);
+    float4 Temp = SampleHistory(ST + Velocity.xy);
+    // Recover color using the original filtered alpha, then bound confidence separately to handle cubic overshoot.
+    float3 TemporalColor = max(Temp.rgb / max(Temp.a, 1e-6), 0.0);
+    float TemporalWeight = saturate(Temp.a);
 
     if (UseIntelHistoryClipping)
         TemporalColor = ClipHistoryVariance(TemporalColor, ldsIdx, SpeedFactor);

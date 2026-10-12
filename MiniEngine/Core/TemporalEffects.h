@@ -23,6 +23,7 @@ namespace TemporalEffects
     // effectively supersample the image.
     extern BoolVar EnableTAA;
     extern BoolVar EnableIntelHistoryClipping;
+    extern BoolVar EnableBicubicHistory;
 
     void Initialize( void );
 
