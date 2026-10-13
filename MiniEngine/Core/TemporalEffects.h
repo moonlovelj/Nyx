@@ -22,11 +22,6 @@ namespace TemporalEffects
     // Temporal antialiasing involves jittering sample positions and accumulating color over time to 
     // effectively supersample the image.
     extern BoolVar EnableTAA;
-    extern BoolVar EnableIntelHistoryClipping;
-    extern BoolVar EnableBicubicHistory;
-    extern BoolVar EnableNoHistoryFilter;
-    extern BoolVar EnableLongestVelocity;
-    extern BoolVar EnableToneMappedVariance;
 
     void Initialize( void );
 
@@ -36,7 +31,7 @@ namespace TemporalEffects
     // jittered sample position.
     void Update( uint64_t FrameIndex );
 
-    // Returns whether the frame is odd or even, relevant to checkerboard rendering.
+    // Returns the current ping-pong buffer index (0 or 1).
     uint32_t GetFrameIndexMod2( void );
 
     uint32_t GetFrameIndex(void);

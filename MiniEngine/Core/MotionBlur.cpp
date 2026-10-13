@@ -31,7 +31,6 @@
 #include "CompiledShaders/MotionBlurFinalPassPS.h"
 #include "CompiledShaders/CameraVelocityCS.h"
 #include "CompiledShaders/TemporalBlendCS.h"
-#include "CompiledShaders/BoundNeighborhoodCS.h"
 
 using namespace Graphics;
 using namespace Math;

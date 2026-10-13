@@ -97,9 +97,6 @@
     <FxCompile Include="Shaders\BlurCS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
-    <FxCompile Include="Shaders\BoundNeighborhoodCS.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
     <FxCompile Include="Shaders\BufferCopyPS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>

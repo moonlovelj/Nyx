@@ -52,15 +52,9 @@ groupshared float ldsB[kLdsPitch * kLdsRows];
 cbuffer CB1 : register(b1)
 {
     float2 RcpBufferDim;	// 1 / width, 1 / height
-    float TemporalBlendFactor;
     float RcpSpeedLimiter;
-    float2 JitterDelta;
     uint HistoryValid;
-    uint UseIntelHistoryClipping;
-    uint UseBicubicHistory;
-    uint UseNoHistoryFilter;
-    uint UseLongestVelocity;
-    uint UseToneMappedVariance;
+    float2 JitterDelta;
 }
 
 void StoreRGB(uint ldsIdx, float3 RGB)
@@ -78,15 +72,12 @@ float3 LoadRGB(uint ldsIdx)
 void WriteNoHistory(uint2 ST, uint ldsIdx)
 {
     float3 color = LoadRGB(ldsIdx);
-    if (UseNoHistoryFilter)
-    {
-        // Intel's five-sample 'X' filter; the prefetched one-pixel border covers every tap.
-        color += LoadRGB(ldsIdx - kLdsPitch - 1);
-        color += LoadRGB(ldsIdx - kLdsPitch + 1);
-        color += LoadRGB(ldsIdx + kLdsPitch - 1);
-        color += LoadRGB(ldsIdx + kLdsPitch + 1);
-        color *= 0.2;
-    }
+    // Intel's five-sample 'X' filter; the prefetched one-pixel border covers every tap.
+    color += LoadRGB(ldsIdx - kLdsPitch - 1);
+    color += LoadRGB(ldsIdx - kLdsPitch + 1);
+    color += LoadRGB(ldsIdx + kLdsPitch - 1);
+    color += LoadRGB(ldsIdx + kLdsPitch + 1);
+    color *= 0.2;
     // History stores premultiplied color; restart accumulation at confidence 0.5.
     OutTemporal[ST] = float4(color, 1.0) * 0.5;
 }
@@ -100,7 +91,7 @@ float4 SampleHistory(float2 historyST)
 {
     // A full cubic footprint spans floor(ST)-1 through floor(ST)+2.
     // Use bilinear near the image boundary to avoid extending edge texels into the cubic filter.
-    if (!UseBicubicHistory || any(historyST < 1.0) || any(historyST >= rcp(RcpBufferDim) - 2.0))
+    if (any(historyST < 1.0) || any(historyST >= rcp(RcpBufferDim) - 2.0))
         return InTemporal.SampleLevel(LinearSampler, STtoUV(historyST), 0);
 
     const float2 t = frac(historyST);
@@ -133,10 +124,10 @@ float4 SampleHistory(float2 historyST)
     return history;
 }
 
-float3 ClipColor(float3 Color, float3 BoxMin, float3 BoxMax, float Dilation = 1.0)
+float3 ClipColor(float3 Color, float3 BoxMin, float3 BoxMax)
 {
     float3 BoxCenter = (BoxMax + BoxMin) * 0.5;
-    float3 HalfDim = (BoxMax - BoxMin) * 0.5 * Dilation + 0.001;
+    float3 HalfDim = (BoxMax - BoxMin) * 0.5 + 0.001;
     float3 Displacement = Color - BoxCenter;
     float3 Units = abs(Displacement / HalfDim);
     float MaxUnit = max(max(Units.x, Units.y), max(Units.z, 1.0));
@@ -166,9 +157,7 @@ float3 ClipHistoryVariance(float3 historyRGB, uint ldsIdx, float speedFactor)
         [unroll]
         for (int x = -1; x <= 1; ++x)
         {
-            float3 sampleRGB = LoadRGB((int)ldsIdx + y * (int)kLdsPitch + x);
-            if (UseToneMappedVariance)
-                sampleRGB = TM(sampleRGB);
+            const float3 sampleRGB = TM(LoadRGB((int)ldsIdx + y * (int)kLdsPitch + x));
             const float3 color = RGBToYCoCg(sampleRGB);
             moment1 += color;
             moment2 += color * color;
@@ -178,57 +167,15 @@ float3 ClipHistoryVariance(float3 historyRGB, uint ldsIdx, float speedFactor)
     const float3 mean = moment1 / 9.0;
     const float3 sigma = sqrt(max(moment2 / 9.0 - mean * mean, 0.0));
     const float gamma = lerp(0.75, 2.0, speedFactor * speedFactor);
-    // historyRGB and neighborhood statistics must use the same HDR or tone-mapped working space.
+    // History and neighborhood statistics both use tone-mapped YCoCg.
     const float3 clipped = ClipColor(RGBToYCoCg(historyRGB), mean - gamma * sigma, mean + gamma * sigma);
     return max(YCoCgToRGB(clipped), 0.0);
 }
 
-void GetBBoxForPair(uint fillIdx, uint holeIdx, out float3 boxMin, out float3 boxMax)
-{
-    boxMin = boxMax = LoadRGB(fillIdx);
-    float3 a = LoadRGB(fillIdx - kLdsPitch - 1);
-    float3 b = LoadRGB(fillIdx - kLdsPitch + 1);
-    boxMin = min(boxMin, min(a, b));
-    boxMax = max(boxMax, max(a, b));
-    a = LoadRGB(fillIdx + kLdsPitch - 1);
-    b = LoadRGB(fillIdx + kLdsPitch + 1);
-    boxMin = min(boxMin, min(a, b));
-    boxMax = max(boxMax, max(a, b));
-    a = LoadRGB(holeIdx);
-    b = LoadRGB(holeIdx - fillIdx + holeIdx);
-    boxMin = min(boxMin, min(a, b));
-    boxMax = max(boxMax, max(a, b));
-}
-
 float MaxOf(float4 Depths) { return max(max(Depths.x, Depths.y), max(Depths.z, Depths.w)); }
 
-int2 GetClosestPixel(uint Idx, out float ClosestDepth)
+uint SelectLongestVelocity(uint2 ST, uint ldsIdx, out float SelectedDepth)
 {
-    float DepthO = ldsDepth[Idx];
-    float DepthW = ldsDepth[Idx - 1];
-    float DepthE = ldsDepth[Idx + 1];
-    float DepthN = ldsDepth[Idx - kLdsPitch];
-    float DepthS = ldsDepth[Idx + kLdsPitch];
-
-    ClosestDepth = min(DepthO, min(min(DepthW, DepthE), min(DepthN, DepthS)));
-
-    if (DepthN == ClosestDepth)
-        return int2(0, -1);
-    else if (DepthS == ClosestDepth)
-        return int2(0, +1);
-    else if (DepthW == ClosestDepth)
-        return int2(-1, 0);
-    else if (DepthE == ClosestDepth)
-        return int2(+1, 0);
-
-    return int2(0, 0);
-}
-
-uint SelectVelocity(uint2 ST, uint ldsIdx, out float SelectedDepth)
-{
-    if (!UseLongestVelocity)
-        return VelocityBuffer[ST + GetClosestPixel(ldsIdx, SelectedDepth)];
-
     uint selected = VelocityBuffer[ST];
     SelectedDepth = ldsDepth[ldsIdx];
     const float2 centerVelocity = UnpackVelocity(selected).xy;
@@ -262,7 +209,7 @@ uint SelectVelocity(uint2 ST, uint ldsIdx, out float SelectedDepth)
     return selected;
 }
 
-void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
+void ApplyTemporalBlend(uint2 ST, uint ldsIdx)
 {
     float3 CurrentColor = LoadRGB(ldsIdx);
 
@@ -274,13 +221,8 @@ void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
 
     float CompareDepth;
 
-    // Select the 3x3 longest velocity, or retain the original closest-depth '+' selection.
-    uint PackedVelocity = SelectVelocity(ST, ldsIdx, CompareDepth);
-    if (PackedVelocity == INVALID_VELOCITY)
-    {
-        WriteNoHistory(ST, ldsIdx);
-        return;
-    }
+    // The center is valid and invalid neighbors are skipped by the selector.
+    uint PackedVelocity = SelectLongestVelocity(ST, ldsIdx, CompareDepth);
     float3 Velocity = UnpackVelocity(PackedVelocity);
 
     const float2 HistoryUV = STtoUV(ST + Velocity.xy);
@@ -314,18 +256,9 @@ void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
         return;
     }
     // Recover color using the original filtered alpha, then bound confidence separately to handle cubic overshoot.
-    float3 TemporalColor = max(Temp.rgb / max(Temp.a, 1e-6), 0.0);
+    const float3 HistoryColor = max(Temp.rgb / max(Temp.a, 1e-6), 0.0);
     float TemporalWeight = saturate(Temp.a);
-
-    const bool ToneMappedVariance = UseIntelHistoryClipping && UseToneMappedVariance;
-    if (UseIntelHistoryClipping)
-    {
-        if (ToneMappedVariance)
-            TemporalColor = TM(TemporalColor);
-        TemporalColor = ClipHistoryVariance(TemporalColor, ldsIdx, SpeedFactor);
-    }
-    else
-        TemporalColor = ClipColor(TemporalColor, BoxMin, BoxMax, lerp(1.0, 4.0, SpeedFactor * SpeedFactor));
+    const float3 ClippedHistory = ClipHistoryVariance(TM(HistoryColor), ldsIdx, SpeedFactor);
 
     // Depth rejection is handled above; retain the continuous motion confidence for valid history.
     TemporalWeight *= SpeedFactor;
@@ -333,23 +266,16 @@ void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
     // Blend previous color with new color based on confidence.  Confidence steadily grows with each iteration
     // until it is broken by movement such as through disocclusion, color changes, or moving beyond the resolution
     // of the velocity buffer.
-    // Compressed variance clipping already returns tone-mapped RGB; avoid applying TM twice.
-    const float3 HistoryForBlend = ToneMappedVariance ? TemporalColor : TM(TemporalColor);
-    const float3 BlendedColor = lerp(TM(CurrentColor), HistoryForBlend, TemporalWeight);
-    if (ToneMappedVariance)
+    const float3 BlendedColor = lerp(TM(CurrentColor), ClippedHistory, TemporalWeight);
+    // Clipping and RGB nonnegative clamping can push luminance to the inverse's singularity.
+    // Protect the inverse and keep linear HDR representable in the FP16 history texture.
+    const float denominator = 1.0 - RGBToLuminance(BlendedColor);
+    if (!(denominator > 0.0) || !all(isfinite(BlendedColor)))
     {
-        // Clipping and RGB nonnegative clamping can push luminance to the inverse's singularity.
-        // Protect the inverse and keep linear HDR representable in the FP16 history texture.
-        const float denominator = 1.0 - RGBToLuminance(BlendedColor);
-        if (!(denominator > 0.0) || !all(isfinite(BlendedColor)))
-        {
-            WriteNoHistory(ST, ldsIdx);
-            return;
-        }
-        TemporalColor = min(BlendedColor / max(denominator, 1e-6), 65504.0);
+        WriteNoHistory(ST, ldsIdx);
+        return;
     }
-    else
-        TemporalColor = ITM(BlendedColor);
+    const float3 TemporalColor = min(BlendedColor / max(denominator, 1e-6), 65504.0);
 
     // Update weight
     TemporalWeight = saturate(rcp(2.0 - TemporalWeight));
@@ -397,13 +323,9 @@ void main(uint3 DTid : SV_DispatchThreadID, uint GI : SV_GroupIndex, uint3 GTid 
     uint Idx0 = GTid.x * 2 + GTid.y * kLdsPitch + kLdsPitch + 1;
     uint Idx1 = Idx0 + 1;
 
-    float3 BoxMin = 0.0, BoxMax = 0.0;
-    if (!UseIntelHistoryClipping)
-        GetBBoxForPair(Idx0, Idx1, BoxMin, BoxMax);
-
     uint2 ST0 = DTid.xy * uint2(2, 1);
-    ApplyTemporalBlend(ST0, Idx0, BoxMin, BoxMax);
+    ApplyTemporalBlend(ST0, Idx0);
 
     uint2 ST1 = ST0 + uint2(1, 0);
-    ApplyTemporalBlend(ST1, Idx1, BoxMin, BoxMax);
+    ApplyTemporalBlend(ST1, Idx1);
 }
