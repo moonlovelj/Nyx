@@ -11,7 +11,7 @@
 // Author:  James Stanard 
 //
 
-// Variance clipping, bicubic history sampling and no-history neighborhood filtering adapted from Intel TAA.
+// TAA filtering and longest velocity selection adapted from Intel TAA.
 // Copyright (c) 2019-2020, Intel Corporation
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
 // documentation files (the "Software"), to deal in the Software without restriction, including without limitation
@@ -59,6 +59,7 @@ cbuffer CB1 : register(b1)
     uint UseIntelHistoryClipping;
     uint UseBicubicHistory;
     uint UseNoHistoryFilter;
+    uint UseLongestVelocity;
 }
 
 void StoreRGB(uint ldsIdx, float3 RGB)
@@ -219,6 +220,44 @@ int2 GetClosestPixel(uint Idx, out float ClosestDepth)
     return int2(0, 0);
 }
 
+uint SelectVelocity(uint2 ST, uint ldsIdx, out float SelectedDepth)
+{
+    if (!UseLongestVelocity)
+        return VelocityBuffer[ST + GetClosestPixel(ldsIdx, SelectedDepth)];
+
+    uint selected = VelocityBuffer[ST];
+    SelectedDepth = ldsDepth[ldsIdx];
+    const float2 centerVelocity = UnpackVelocity(selected).xy;
+    float longestLengthSq = dot(centerVelocity, centerVelocity);
+    uint width, height;
+    VelocityBuffer.GetDimensions(width, height);
+    const int2 offsets[8] = {
+        int2(-1, -1), int2(-1, 0), int2(-1, 1), int2(0, 1),
+        int2(1, 1), int2(1, 0), int2(1, -1), int2(0, -1)
+    };
+    [unroll]
+    for (uint i = 0; i < 8; ++i)
+    {
+        const int2 sampleST = int2(ST) + offsets[i];
+        if (any(sampleST < 0) || any(sampleST >= int2(width, height)))
+            continue;
+        const uint candidate = VelocityBuffer[sampleST];
+        if (candidate == INVALID_VELOCITY)
+            continue;
+        const float2 velocity = UnpackVelocity(candidate).xy;
+        const float lengthSq = dot(velocity, velocity);
+        // Strict comparison keeps the center when velocities tie.
+        if (lengthSq > longestLengthSq)
+        {
+            selected = candidate;
+            longestLengthSq = lengthSq;
+            // Keep current depth and the selected velocity's Z delta on the same surface.
+            SelectedDepth = ldsDepth[(int)ldsIdx + offsets[i].y * (int)kLdsPitch + offsets[i].x];
+        }
+    }
+    return selected;
+}
+
 void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
 {
     float3 CurrentColor = LoadRGB(ldsIdx);
@@ -231,8 +270,8 @@ void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
 
     float CompareDepth;
 
-    // Get the velocity of the closest pixel in the '+' formation
-    uint PackedVelocity = VelocityBuffer[ST + GetClosestPixel(ldsIdx, CompareDepth)];
+    // Select the 3x3 longest velocity, or retain the original closest-depth '+' selection.
+    uint PackedVelocity = SelectVelocity(ST, ldsIdx, CompareDepth);
     if (PackedVelocity == INVALID_VELOCITY)
     {
         WriteNoHistory(ST, ldsIdx);

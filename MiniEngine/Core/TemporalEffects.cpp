@@ -35,6 +35,7 @@ namespace TemporalEffects
     BoolVar EnableIntelHistoryClipping("Graphics/AA/TAA/Intel History Clipping", true);
     BoolVar EnableBicubicHistory("Graphics/AA/TAA/Bicubic History", true);
     BoolVar EnableNoHistoryFilter("Graphics/AA/TAA/No History Filter", true);
+    BoolVar EnableLongestVelocity("Graphics/AA/TAA/Longest Velocity", true);
     NumVar Sharpness("Graphics/AA/TAA/Sharpness", 0.5f, 0.0f, 1.0f, 0.25f);
     NumVar TemporalMaxLerp("Graphics/AA/TAA/Blend Factor", 0.9f, 0.0f, 1.0f, 0.01f);
     ExpVar TemporalSpeedLimit("Graphics/AA/TAA/Speed Limit", 64.0f, 1.0f, 1024.0f, 1.0f);
@@ -154,11 +155,13 @@ bool TemporalEffects::PrepareFrame(CommandContext& Context, bool historyValid)
     static bool s_EnableIntelHistoryClipping = EnableIntelHistoryClipping;
     static bool s_EnableBicubicHistory = EnableBicubicHistory;
     static bool s_EnableNoHistoryFilter = EnableNoHistoryFilter;
+    static bool s_EnableLongestVelocity = EnableLongestVelocity;
     historyValid = historyValid &&
         EnableTAA == s_EnableTAA && EnableCBR == s_EnableCBR &&
         EnableIntelHistoryClipping == s_EnableIntelHistoryClipping &&
         EnableBicubicHistory == s_EnableBicubicHistory &&
-        EnableNoHistoryFilter == s_EnableNoHistoryFilter && !TriggerReset;
+        EnableNoHistoryFilter == s_EnableNoHistoryFilter &&
+        EnableLongestVelocity == s_EnableLongestVelocity && !TriggerReset;
     if (!historyValid)
         ClearHistory(Context);
     s_EnableTAA = EnableTAA;
@@ -166,6 +169,7 @@ bool TemporalEffects::PrepareFrame(CommandContext& Context, bool historyValid)
     s_EnableIntelHistoryClipping = EnableIntelHistoryClipping;
     s_EnableBicubicHistory = EnableBicubicHistory;
     s_EnableNoHistoryFilter = EnableNoHistoryFilter;
+    s_EnableLongestVelocity = EnableLongestVelocity;
     TriggerReset = false;
     s_HistoryValid = historyValid;
     return historyValid;
@@ -212,14 +216,16 @@ void TemporalEffects::ApplyTemporalAA(ComputeContext& Context)
         uint32_t UseIntelHistoryClipping;
         uint32_t UseBicubicHistory;
         uint32_t UseNoHistoryFilter;
-        uint32_t Padding[2];
+        uint32_t UseLongestVelocity;
+        uint32_t Padding;
     };
     static_assert(sizeof(ConstantBuffer) == 48, "TemporalBlendCS constant buffer layout must match HLSL.");
     ConstantBuffer cbv = {
         1.0f / g_SceneColorBuffer.GetWidth(), 1.0f / g_SceneColorBuffer.GetHeight(),
         (float)TemporalMaxLerp, 1.0f / TemporalSpeedLimit,
         s_JitterDeltaX, s_JitterDeltaY, s_HistoryValid ? 1u : 0u, EnableIntelHistoryClipping ? 1u : 0u,
-        EnableBicubicHistory ? 1u : 0u, EnableNoHistoryFilter ? 1u : 0u, {}
+        EnableBicubicHistory ? 1u : 0u, EnableNoHistoryFilter ? 1u : 0u,
+        EnableLongestVelocity ? 1u : 0u, 0u
     };
 
     Context.SetDynamicConstantBufferView(3, sizeof(cbv), &cbv);
