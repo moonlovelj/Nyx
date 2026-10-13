@@ -8,6 +8,7 @@
 #include "lz4.h"
 
 #include <numeric>
+#include <algorithm>
 #include <condition_variable>
 #include <intrin.h>
 #include <cstring>
@@ -219,13 +220,14 @@ void GeometryStreaming::Initialize(const std::vector<Renderer::HierarchyNode>& n
 	);
 
 	uint32_t groupCount = std::max(1u, maxGroupSize);
-	m_GroupDataLocationGPU.Create(L"Group Data Location GPU", groupCount, sizeof(Renderer::GroupDataLocation), nullptr);
+	// Every model starts nonresident. resize() would preserve addresses from the
+	// previous model when switching to a model with the same or fewer groups.
+	m_GroupDataLocations.assign(groupCount, { INVALID_CHUNK_INDEX, 0 });
+	m_GroupDataLocationGPU.Create(L"Group Data Location GPU", groupCount, sizeof(Renderer::GroupDataLocation), m_GroupDataLocations.data());
 	Renderer::SetBindlessResourceDescriptor(
 		SRV_GROUP_DATA_LOCATION_BUFFER,
 		m_GroupDataLocationGPU.GetSRV()
 	);
-
-	m_GroupDataLocations.resize(groupCount, { INVALID_CHUNK_INDEX , 0});
 }
 
 void GeometryStreaming::PinRootPages(Model* model)
@@ -379,6 +381,18 @@ void GeometryStreaming::Shutdown()
 		m_IOThread.join();
 
 	m_IOQueue.clear();
+	// The worker can finish an old page while Shutdown waits for it. Discard
+	// those completions before another model reuses page and group indices.
+	{
+		std::lock_guard<std::mutex> lock(m_CompletedPagesMutex);
+		m_CompletedPagesQueue.clear();
+	}
+	m_PagesToLoad.clear();
+	m_NeedSyncAddressTable = false;
+	m_GroupDataLocations.clear();
+	m_PageTableCPU.clear();
+	m_FreePool.clear();
+	std::fill_n(m_FenceValues, kNumReadbackBuffers, 0ull);
 
 	m_HierarchyNodesGPU.Destroy();
 	for (auto& chunk : m_GeometryChunksGPU)
