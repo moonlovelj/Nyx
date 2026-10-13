@@ -60,6 +60,7 @@ cbuffer CB1 : register(b1)
     uint UseBicubicHistory;
     uint UseNoHistoryFilter;
     uint UseLongestVelocity;
+    uint UseToneMappedVariance;
 }
 
 void StoreRGB(uint ldsIdx, float3 RGB)
@@ -165,7 +166,10 @@ float3 ClipHistoryVariance(float3 historyRGB, uint ldsIdx, float speedFactor)
         [unroll]
         for (int x = -1; x <= 1; ++x)
         {
-            const float3 color = RGBToYCoCg(LoadRGB((int)ldsIdx + y * (int)kLdsPitch + x));
+            float3 sampleRGB = LoadRGB((int)ldsIdx + y * (int)kLdsPitch + x);
+            if (UseToneMappedVariance)
+                sampleRGB = TM(sampleRGB);
+            const float3 color = RGBToYCoCg(sampleRGB);
             moment1 += color;
             moment2 += color * color;
         }
@@ -174,7 +178,7 @@ float3 ClipHistoryVariance(float3 historyRGB, uint ldsIdx, float speedFactor)
     const float3 mean = moment1 / 9.0;
     const float3 sigma = sqrt(max(moment2 / 9.0 - mean * mean, 0.0));
     const float gamma = lerp(0.75, 2.0, speedFactor * speedFactor);
-    // Keep statistics and clipping in YCoCg; only convert the clipped result back to RGB.
+    // historyRGB and neighborhood statistics must use the same HDR or tone-mapped working space.
     const float3 clipped = ClipColor(RGBToYCoCg(historyRGB), mean - gamma * sigma, mean + gamma * sigma);
     return max(YCoCgToRGB(clipped), 0.0);
 }
@@ -313,8 +317,13 @@ void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
     float3 TemporalColor = max(Temp.rgb / max(Temp.a, 1e-6), 0.0);
     float TemporalWeight = saturate(Temp.a);
 
+    const bool ToneMappedVariance = UseIntelHistoryClipping && UseToneMappedVariance;
     if (UseIntelHistoryClipping)
+    {
+        if (ToneMappedVariance)
+            TemporalColor = TM(TemporalColor);
         TemporalColor = ClipHistoryVariance(TemporalColor, ldsIdx, SpeedFactor);
+    }
     else
         TemporalColor = ClipColor(TemporalColor, BoxMin, BoxMax, lerp(1.0, 4.0, SpeedFactor * SpeedFactor));
 
@@ -324,7 +333,23 @@ void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
     // Blend previous color with new color based on confidence.  Confidence steadily grows with each iteration
     // until it is broken by movement such as through disocclusion, color changes, or moving beyond the resolution
     // of the velocity buffer.
-    TemporalColor = ITM(lerp(TM(CurrentColor), TM(TemporalColor), TemporalWeight));
+    // Compressed variance clipping already returns tone-mapped RGB; avoid applying TM twice.
+    const float3 HistoryForBlend = ToneMappedVariance ? TemporalColor : TM(TemporalColor);
+    const float3 BlendedColor = lerp(TM(CurrentColor), HistoryForBlend, TemporalWeight);
+    if (ToneMappedVariance)
+    {
+        // Clipping and RGB nonnegative clamping can push luminance to the inverse's singularity.
+        // Protect the inverse and keep linear HDR representable in the FP16 history texture.
+        const float denominator = 1.0 - RGBToLuminance(BlendedColor);
+        if (!(denominator > 0.0) || !all(isfinite(BlendedColor)))
+        {
+            WriteNoHistory(ST, ldsIdx);
+            return;
+        }
+        TemporalColor = min(BlendedColor / max(denominator, 1e-6), 65504.0);
+    }
+    else
+        TemporalColor = ITM(BlendedColor);
 
     // Update weight
     TemporalWeight = saturate(rcp(2.0 - TemporalWeight));
