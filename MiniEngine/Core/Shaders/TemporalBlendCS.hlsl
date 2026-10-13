@@ -11,7 +11,7 @@
 // Author:  James Stanard 
 //
 
-// YCoCg variance clipping and 5-tap bicubic history sampling adapted from Intel TAA.
+// Variance clipping, bicubic history sampling and no-history neighborhood filtering adapted from Intel TAA.
 // Copyright (c) 2019-2020, Intel Corporation
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
 // documentation files (the "Software"), to deal in the Software without restriction, including without limitation
@@ -58,6 +58,7 @@ cbuffer CB1 : register(b1)
     uint HistoryValid;
     uint UseIntelHistoryClipping;
     uint UseBicubicHistory;
+    uint UseNoHistoryFilter;
 }
 
 void StoreRGB(uint ldsIdx, float3 RGB)
@@ -70,6 +71,22 @@ void StoreRGB(uint ldsIdx, float3 RGB)
 float3 LoadRGB(uint ldsIdx)
 {
     return float3(ldsR[ldsIdx], ldsG[ldsIdx], ldsB[ldsIdx]);
+}
+
+void WriteNoHistory(uint2 ST, uint ldsIdx)
+{
+    float3 color = LoadRGB(ldsIdx);
+    if (UseNoHistoryFilter)
+    {
+        // Intel's five-sample 'X' filter; the prefetched one-pixel border covers every tap.
+        color += LoadRGB(ldsIdx - kLdsPitch - 1);
+        color += LoadRGB(ldsIdx - kLdsPitch + 1);
+        color += LoadRGB(ldsIdx + kLdsPitch - 1);
+        color += LoadRGB(ldsIdx + kLdsPitch + 1);
+        color *= 0.2;
+    }
+    // History stores premultiplied color; restart accumulation at confidence 0.5.
+    OutTemporal[ST] = float4(color, 1.0) * 0.5;
 }
 
 float2 STtoUV(float2 ST)
@@ -208,7 +225,7 @@ void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
 
     if (!HistoryValid || VelocityBuffer[ST] == INVALID_VELOCITY)
     {
-        OutTemporal[ST] = float4(CurrentColor, 1.0) * 0.5;
+        WriteNoHistory(ST, ldsIdx);
         return;
     }
 
@@ -218,7 +235,7 @@ void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
     uint PackedVelocity = VelocityBuffer[ST + GetClosestPixel(ldsIdx, CompareDepth)];
     if (PackedVelocity == INVALID_VELOCITY)
     {
-        OutTemporal[ST] = float4(CurrentColor, 1.0) * 0.5;
+        WriteNoHistory(ST, ldsIdx);
         return;
     }
     float3 Velocity = UnpackVelocity(PackedVelocity);
@@ -229,7 +246,7 @@ void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
     if (!(all(HistoryUV >= 0.0) && all(HistoryUV < 1.0) &&
           all(HistoryDepthUV >= 0.0) && all(HistoryDepthUV < 1.0)))
     {
-        OutTemporal[ST] = float4(CurrentColor, 1.0) * 0.5;
+        WriteNoHistory(ST, ldsIdx);
         return;
     }
 
@@ -240,9 +257,19 @@ void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
 
     // Fast-moving pixels cause motion blur and probably don't need TAA
     float SpeedFactor = saturate(1.0 - length(Velocity.xy) * RcpSpeedLimiter);
+    if (!(SpeedFactor > 0.0 && CompareDepth <= TemporalDepth))
+    {
+        WriteNoHistory(ST, ldsIdx);
+        return;
+    }
 
     // Fetch temporal color.  Its "confidence" weight is stored in alpha.
     float4 Temp = SampleHistory(ST + Velocity.xy);
+    if (!(Temp.a > 1e-6) || !all(isfinite(Temp)))
+    {
+        WriteNoHistory(ST, ldsIdx);
+        return;
+    }
     // Recover color using the original filtered alpha, then bound confidence separately to handle cubic overshoot.
     float3 TemporalColor = max(Temp.rgb / max(Temp.a, 1e-6), 0.0);
     float TemporalWeight = saturate(Temp.a);
@@ -252,8 +279,8 @@ void ApplyTemporalBlend(uint2 ST, uint ldsIdx, float3 BoxMin, float3 BoxMax)
     else
         TemporalColor = ClipColor(TemporalColor, BoxMin, BoxMax, lerp(1.0, 4.0, SpeedFactor * SpeedFactor));
 
-    // Update the confidence term based on speed and disocclusion
-    TemporalWeight *= SpeedFactor * step(CompareDepth, TemporalDepth);
+    // Depth rejection is handled above; retain the continuous motion confidence for valid history.
+    TemporalWeight *= SpeedFactor;
 
     // Blend previous color with new color based on confidence.  Confidence steadily grows with each iteration
     // until it is broken by movement such as through disocclusion, color changes, or moving beyond the resolution

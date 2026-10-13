@@ -24,6 +24,7 @@ namespace TemporalEffects
     extern BoolVar EnableTAA;
     extern BoolVar EnableIntelHistoryClipping;
     extern BoolVar EnableBicubicHistory;
+    extern BoolVar EnableNoHistoryFilter;
 
     void Initialize( void );
 
