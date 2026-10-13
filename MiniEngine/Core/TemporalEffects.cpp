@@ -37,7 +37,7 @@ namespace TemporalEffects
     BoolVar EnableNoHistoryFilter("Graphics/AA/TAA/No History Filter", true);
     BoolVar EnableLongestVelocity("Graphics/AA/TAA/Longest Velocity", true);
     BoolVar EnableToneMappedVariance("Graphics/AA/TAA/Tone Mapped Variance", true);
-    NumVar Sharpness("Graphics/AA/TAA/Sharpness", 0.5f, 0.0f, 1.0f, 0.25f);
+    NumVar Sharpness("Graphics/AA/TAA/Sharpness", 0.2f, 0.0f, 1.0f, 0.05f);
     NumVar TemporalMaxLerp("Graphics/AA/TAA/Blend Factor", 0.9f, 0.0f, 1.0f, 0.01f);
     ExpVar TemporalSpeedLimit("Graphics/AA/TAA/Speed Limit", 64.0f, 1.0f, 1024.0f, 1.0f);
     BoolVar TriggerReset("Graphics/AA/TAA/Reset", true);

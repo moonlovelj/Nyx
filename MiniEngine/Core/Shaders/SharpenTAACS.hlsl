@@ -62,16 +62,17 @@ void main( uint3 Gid : SV_GroupID, uint3 GTid : SV_GroupThreadID, uint3 DTid : S
 
     uint ldsIndex = (GTid.x + BORDER_SIZE) + (GTid.y + BORDER_SIZE) * TILE_SIZE_X;
 
+    // No-history pixels were already filtered by TAA; preserve that result without another filter.
+    if (gs_W[ldsIndex] <= 0.5)
+    {
+        float4 Color = TemporalColor[DTid.xy];
+        OutColor[DTid.xy] = Color.rgb / max(Color.w, 1e-6);
+        return;
+    }
+
     float3 Center = LoadSample(ldsIndex);
     float3 Neighbors = LoadSample(ldsIndex - 1) + LoadSample(ldsIndex + 1) +
         LoadSample(ldsIndex - TILE_SIZE_X) + LoadSample(ldsIndex + TILE_SIZE_X);
 
-    // If the temporal weight is less than 0.5, it might be a brand new pixel.  Brand new pixels
-    // have not been antialiased at all and can be jarring.  Here we change the weights to actually
-    // blur rather than sharpen those pixels.
-    float TemporalWeight = gs_W[ldsIndex];
-    float CenterWeight = TemporalWeight <= 0.5 ? 0.5 : WA;
-    float LateralWeight = TemporalWeight <= 0.5 ? 0.125 : -WB;
-
-    OutColor[DTid.xy] = exp2(max(0, CenterWeight * Center + LateralWeight * Neighbors)) - 1.0;
+    OutColor[DTid.xy] = exp2(max(0, WA * Center - WB * Neighbors)) - 1.0;
 }
