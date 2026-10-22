@@ -21,10 +21,12 @@ namespace GeometryStreaming
 	constexpr uint32_t kNumReadbackBuffers = 3;
 	uint32_t m_SlotsPerChunk = 0;
 	StructuredBuffer m_HierarchyNodesGPU;
+    StructuredBuffer m_GroupNodeIndicesGPU;
 	std::vector<ByteAddressBuffer> m_GeometryChunksGPU;
 	StructuredBuffer m_GroupDataLocationGPU;
 	std::vector<Renderer::GroupDataLocation> m_GroupDataLocations;
 	uint32_t m_GroupCount = 0;
+	static uint32_t s_UploadVersion = 0;
 
 	struct PageResidency {
 		uint32_t ChunkIndex = INVALID_CHUNK_INDEX;
@@ -178,6 +180,11 @@ namespace GeometryStreaming
 	}
 }
 
+uint32_t GeometryStreaming::GetUploadVersion()
+{
+	return s_UploadVersion;
+}
+
 void GeometryStreaming::Initialize(const std::vector<Renderer::HierarchyNode>& nodes, uint32_t maxGroupSize, uint32_t numPages)
 {
 	m_GroupCount = maxGroupSize;
@@ -220,6 +227,18 @@ void GeometryStreaming::Initialize(const std::vector<Renderer::HierarchyNode>& n
 	);
 
 	uint32_t groupCount = std::max(1u, maxGroupSize);
+    // LOD decisions must remain available even while the group's blob is absent.
+    std::vector<uint32_t> groupNodeIndices(Math::AlignUp(groupCount, 4u), INVALID_NODE_INDEX);
+    for (uint32_t nodeIndex = 0; nodeIndex < numNodes; ++nodeIndex)
+    {
+        const auto& node = nodes[nodeIndex];
+        if (node.Internal.IsGroup && node.Leaf.GroupIndex < maxGroupSize)
+            groupNodeIndices[node.Leaf.GroupIndex] = nodeIndex;
+    }
+    m_GroupNodeIndicesGPU.Create(L"Group Hierarchy Node Indices", groupCount,
+        sizeof(uint32_t), groupNodeIndices.data());
+    Renderer::SetBindlessResourceDescriptor(SRV_GROUP_NODE_INDICES_BUFFER, m_GroupNodeIndicesGPU.GetSRV());
+
 	// Every model starts nonresident. resize() would preserve addresses from the
 	// previous model when switching to a model with the same or fewer groups.
 	m_GroupDataLocations.assign(groupCount, { INVALID_CHUNK_INDEX, 0 });
@@ -355,6 +374,8 @@ void GeometryStreaming::PinRootPages(Model* model)
 	gfx.TransitionResource(m_GroupDataLocationGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
 
 	gfx.Finish(true);
+	if (pinnedCount > 0)
+		++s_UploadVersion;
 
 	if (pinnedCount < rootPages.size())
 	{
@@ -395,6 +416,7 @@ void GeometryStreaming::Shutdown()
 	std::fill_n(m_FenceValues, kNumReadbackBuffers, 0ull);
 
 	m_HierarchyNodesGPU.Destroy();
+    m_GroupNodeIndicesGPU.Destroy();
 	for (auto& chunk : m_GeometryChunksGPU)
 	{
 		chunk.Destroy();
@@ -493,6 +515,7 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 
 	ImmediateEvict(frameIndex, locations);
 
+	bool uploadedPages = false;
 	auto it = readyPages.begin();
 	for (; it != readyPages.end(); ++it)
 	{
@@ -505,6 +528,7 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 
 		uint32_t byteOffset = slot.SlotIndex * Renderer::kPageSizeInBytes;
 		gfx.WriteBuffer(m_GeometryChunksGPU[slot.ChunkIndex], byteOffset, item.Data.data(), item.Data.size());
+		uploadedPages = true;
 
 		// Update mappings for all groups in the page
 		const auto& pageMeta = sourceModel->m_PageMetadatas[item.PageIndex];
@@ -545,6 +569,8 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 		gfx.TransitionResource(chunk, D3D12_RESOURCE_STATE_GENERIC_READ);
 	}
 	gfx.Finish();
+	if (uploadedPages)
+		++s_UploadVersion;
 }
 
 void GeometryStreaming::EnqueueAsyncLoad(uint32_t pageIdx)

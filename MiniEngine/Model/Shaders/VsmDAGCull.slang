@@ -23,6 +23,7 @@
 #include "CullCommon.slang"
 #include "WaveUtil.h.slang"
 #include "VsmCull.h.slang"
+#include "VsmStreaming.h.slang"
 
 struct DAGCullConstants
 {
@@ -382,6 +383,11 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
         StructuredBuffer<GroupDataLocation> groupDataLocationSRV = GetGroupDataLocationBufferSRV();
         GroupDataLocation groupDataLocation = groupDataLocationSRV[groupID];
         bool bResident = groupDataLocation.ChunkIndex != INVALID_ID;
+        if (!bResident)
+        {
+            MarkVsmStreamingIncompletePages(cullView.ViewId, GetDirectionalVsmCullPageBounds(
+                childNode.BBoxMin, childNode.BBoxMax, meshInstance.WorldMatrix, cullView.ShadowView));
+        }
 
         uint leafOffsetInGroup = 0;
         WaveInterlockedAddScalar(GroupLeafCount, bResident, 1u, leafOffsetInGroup);
@@ -506,6 +512,7 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
 #endif
         
         bMeshletVisible = bMeshletVisible && !bAlphaBlend;
+        bool streamingIncomplete = false;
 
         if (bMeshletVisible && meshletHeader.RefineGroupIndex != INVALID_ID)
         {
@@ -523,6 +530,20 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
                     g_DAGCull.PixelErrorThreshold,
                     cullView.IsPerspective);
             }
+            else
+            {
+                // The resident hierarchy carries the same parent error/sphere
+                // as GroupHeader, so absent finer data need not imply a LOD mismatch.
+                uint refineNodeIndex = GetGroupNodeIndicesBufferSRV()[meshletHeader.RefineGroupIndex];
+                streamingIncomplete = true;
+                if (refineNodeIndex != INVALID_ID)
+                {
+                    HierarchyNode refineNode = GetHierarchyNodesBufferSRV()[refineNodeIndex];
+                    streamingIncomplete = !TestForLod(meshInstance.WorldMatrix, cullView.ViewerPosition,
+                        refineNode.MaxParrentError, refineNode.BoundSphere, cullView.LodScale,
+                        g_DAGCull.PixelErrorThreshold, cullView.IsPerspective);
+                }
+            }
         }
 
         if (bMeshletVisible)
@@ -538,7 +559,17 @@ void ProcessMeshletBatch(uint meshletBatchStartIndex, uint meshletBatchReadySize
                     uint2 windowCoord = uint2(windowX, windowY);
                     uint requestedPageMask =
                         g_VsmRasterWindowPageMasks[GetVsmRasterWindowIndex(cullView.ViewId, windowCoord)];
+                    if (requestedPageMask == 0u)
+                        continue;
+
                     uint pageMask = requestedPageMask & GetVsmRasterWindowCoverageMask(pageBounds, windowCoord);
+                    if (pageMask == 0u)
+                        continue;
+
+                    // Preserve the full fallback footprint, including pages hidden by HZB.
+                    if (streamingIncomplete)
+                        MarkVsmStreamingIncompleteWindow(cullView.ViewId, windowCoord, pageMask);
+
                     Texture2D<float> previousHzb = g_DAGCull.PreviousHZB;
                     Texture2D<float> currentHzb = g_DAGCull.CurrentHZB;
                     pageMask = FilterVsmRasterPageMaskByHzb(

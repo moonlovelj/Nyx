@@ -211,6 +211,9 @@
     <None Include="Shaders\FillLightGrid.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>
+    <None Include="Shaders\VsmStreaming.h.slang">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
     <None Include="Shaders\LightGrid.h.slang">
       <Filter>Source Files\Shaders</Filter>
     </None>

@@ -39,6 +39,8 @@ namespace Renderer::VirtualShadowMap
         uint32_t FreePagesBeforeAllocation = 0;
         uint32_t RenderBudget = 0;
         uint32_t RenderBacklog = 0;
+        uint32_t StreamingPendingPages = 0;
+        uint32_t StreamingRetryPages = 0;
 
         bool Ready = false;
         bool PhysicalPoolExhausted = false;

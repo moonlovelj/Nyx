@@ -221,6 +221,7 @@ namespace ModelInstanceManager
         s_HasPublishedMeshTransforms = true;
         if (s_HasObjectMotion || hadObjectMotion)
         {
+            ScopedTimer timer(L"Model Instance Manager Write To ObjectMotionGPU", gfxContext);
             gfxContext.WriteBuffer(s_ObjectMotionGPU, 0, s_ObjectMotionCPU.data(),
                 s_ObjectMotionCPU.size() * sizeof(Renderer::ObjectMotionData));
             gfxContext.TransitionResource(s_ObjectMotionGPU, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);

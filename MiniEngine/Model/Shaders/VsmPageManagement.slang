@@ -12,6 +12,7 @@ ByteAddressBuffer g_VsmPhysicalPageUsedMaskSRV;
 StructuredBuffer<VsmPageRenderRequest> g_VsmPageRenderRequestsSRV;
 ByteAddressBuffer g_VsmPageManagementCountersSRV;
 ByteAddressBuffer g_VsmCullCounters;
+ByteAddressBuffer g_VsmStreamingIncompletePages;
 
 RWStructuredBuffer<uint> g_VsmCurrentPageTable;
 RWStructuredBuffer<VsmPhysicalPageMetadata> g_VsmPhysicalPageMetadataUAV;
@@ -30,6 +31,8 @@ struct VsmPageManagementConstants
     uint AllocationClass;
     uint InvalidationCount;
     uint InvalidateAllViews;
+    uint StreamingRetryBudget;
+    uint StreamingUploadVersion;
 };
 
 struct MarkPhysicalPageRenderedConstants
@@ -38,6 +41,7 @@ struct MarkPhysicalPageRenderedConstants
     uint RenderRequestCount;
     uint AddressType;
     uint RequireCullSuccess;
+    uint StreamingUploadVersion;
 };
 
 struct MarkVsmViewDirtyConstants
@@ -151,6 +155,28 @@ bool TryGetCachedPageTableIndex(VsmShadowView shadowView, int2 virtualPage, out 
     return IsVsmPageRequested(g_VsmPageRequestMask, shadowView, pageTableCoord);
 }
 
+bool TryAcquireStreamingRetry()
+{
+    uint budget = g_VsmPageManagement.StreamingRetryBudget;
+    if (budget == 0u)
+        return false;
+
+    uint count = WaveActiveCountBits(true);
+    uint rank = WavePrefixCountBits(true);
+    uint firstTicket = budget;
+    if (WaveIsFirstLane())
+    {
+        if (g_VsmPageManagementCounters.Load(VSM_STREAMING_RETRY_PAGE_COUNT_OFFSET) < budget)
+        {
+            g_VsmPageManagementCounters.InterlockedAdd(
+                VSM_STREAMING_RETRY_PAGE_COUNT_OFFSET, count, firstTicket);
+        }
+    }
+
+    firstTicket = WaveReadLaneFirst(firstTicket);
+    return firstTicket + rank < budget;
+}
+
 [shader("compute")]
 [numthreads(64, 1, 1)]
 void reuseCachedPhysicalPages(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -158,6 +184,10 @@ void reuseCachedPhysicalPages(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint physicalPageIndex = dispatchThreadId.x;
     if (physicalPageIndex >= VSM_PHYSICAL_PAGE_CAPACITY)
         return;
+
+    // Rotate admission order so a persistent missing region does not always win.
+    physicalPageIndex = (physicalPageIndex + g_VsmPageManagement.FrameNumber *
+        max(g_VsmPageManagement.StreamingRetryBudget, 1u)) % VSM_PHYSICAL_PAGE_CAPACITY;
 
     VsmPhysicalPageMetadata metadata = g_VsmPhysicalPageMetadataUAV[physicalPageIndex];
     if ((metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_VALID) == 0u)
@@ -213,6 +243,13 @@ void reuseCachedPhysicalPages(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
     g_VsmPhysicalPageMetadataUAV[physicalPageIndex] = metadata;
 
+    bool streamingIncomplete = (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_STREAMING_INCOMPLETE) != 0u;
+    if (streamingIncomplete)
+    {
+        uint unused;
+        g_VsmPageManagementCounters.InterlockedAdd(VSM_STREAMING_PENDING_PAGE_COUNT_OFFSET, 1u, unused);
+    }
+
     uint pageTableIndex;
     if (!TryGetCachedPageTableIndex(shadowView, metadata.VirtualPage, pageTableIndex) ||
         !TryClaimPhysicalPage(physicalPageIndex))
@@ -221,6 +258,11 @@ void reuseCachedPhysicalPages(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     bool needsRender = !isRendered || (metadata.Flags & VSM_PHYSICAL_PAGE_METADATA_DIRTY) != 0u;
+    // Incomplete depth remains usable. Only successful redraws advance the
+    // checked upload version, so budget deferral and dormant pages retain work.
+    if (!needsRender && streamingIncomplete &&
+        metadata.LastStreamingUploadVersion != g_VsmPageManagement.StreamingUploadVersion)
+        needsRender = TryAcquireStreamingRetry();
 
     metadata.LastRequestedFrame = g_VsmPageManagement.FrameNumber;
     g_VsmPhysicalPageMetadataUAV[physicalPageIndex] = metadata;
@@ -406,12 +448,6 @@ void markPhysicalPageRendered(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (dispatchThreadId.x >= g_MarkPhysicalPageRendered.RenderRequestCount)
         return;
 
-    //if (g_MarkPhysicalPageRendered.RequireCullSuccess != 0u &&
-    //    g_VsmCullCounters.Load(VSM_CULL_OVERFLOW_COUNT_OFFSET) != 0u)
-    //{
-    //    return;
-    //}
-
     uint renderRequestIndex = g_MarkPhysicalPageRendered.FirstRenderRequestIndex + dispatchThreadId.x;
     uint renderRequestCount = g_VsmPageManagementCountersSRV.Load(VSM_RENDER_REQUEST_COUNT_OFFSET);
     if (renderRequestIndex >= renderRequestCount)
@@ -433,8 +469,20 @@ void markPhysicalPageRendered(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
 
     VsmPhysicalPageMetadata metadata = g_VsmPhysicalPageMetadataUAV[request.PhysicalPageIndex];
+    if (g_MarkPhysicalPageRendered.RequireCullSuccess != 0u &&
+        g_VsmCullCounters.Load(VSM_CULL_OVERFLOW_COUNT_OFFSET) != 0u)
+    {
+        // The pool was cleared before culling; partial depth must not become a cache hit.
+        metadata.Flags |= VSM_PHYSICAL_PAGE_METADATA_DIRTY;
+        g_VsmPhysicalPageMetadataUAV[request.PhysicalPageIndex] = metadata;
+        return;
+    }
     metadata.Flags |= VSM_PHYSICAL_PAGE_METADATA_RENDERED;
-    metadata.Flags &= ~VSM_PHYSICAL_PAGE_METADATA_DIRTY;
+    metadata.LastStreamingUploadVersion = g_MarkPhysicalPageRendered.StreamingUploadVersion;
+    metadata.Flags &= ~(VSM_PHYSICAL_PAGE_METADATA_DIRTY | VSM_PHYSICAL_PAGE_METADATA_STREAMING_INCOMPLETE);
+    uint physicalPageBit = 1u << (request.PhysicalPageIndex & 31u);
+    if ((g_VsmStreamingIncompletePages.Load((request.PhysicalPageIndex >> 5u) * sizeof(uint)) & physicalPageBit) != 0u)
+        metadata.Flags |= VSM_PHYSICAL_PAGE_METADATA_STREAMING_INCOMPLETE;
     g_VsmPhysicalPageMetadataUAV[request.PhysicalPageIndex] = metadata;
 
     pageView.PrevViewProjRow0 = pageView.ViewProjRow0;

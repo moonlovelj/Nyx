@@ -42,6 +42,9 @@ namespace Renderer::VirtualShadowMap
         std::vector<VsmInvalidationBoundsGpu> s_InvalidationBounds;
         bool s_InvalidationOverflow = false;
 
+        IntVar s_StreamingRetryBudget("Renderer/VSM/Streaming Retry Budget", 64,
+            0, static_cast<int32_t>(kPhysicalPageCapacity), 1);
+
         IntVar s_PhysicalPageRenderBudget(
             "Renderer/VSM/Physical Page Render Budget",
             64,
@@ -93,6 +96,8 @@ namespace Renderer::VirtualShadowMap
         IntVar s_RasterItemCount("Renderer/VSM/Cull Statistics/Raster Items", 0);
         IntVar s_CullOverflowCount("Renderer/VSM/Cull Statistics/Overflow", 0);
         IntVar s_RenderBacklogCount("Renderer/VSM/Page Statistics/Render Backlog", 0);
+        IntVar s_StreamingPendingPageCount("Renderer/VSM/Page Statistics/Streaming Incomplete Pages", 0);
+        IntVar s_StreamingRetryPageCount("Renderer/VSM/Page Statistics/Streaming Retry Pages", 0);
         BoolVar s_PhysicalPoolExhausted("Renderer/VSM/Page Statistics/Physical Pool Exhausted", false);
         BoolVar s_RenderBudgetExceeded("Renderer/VSM/Page Statistics/Render Budget Exceeded", false);
         BoolVar s_PageCountersValid("Renderer/VSM/Page Statistics/Counters Valid", false);
@@ -156,6 +161,7 @@ namespace Renderer::VirtualShadowMap
         std::array<StructuredBuffer, 2> s_PageTablesGpu;
         StructuredBuffer s_PageRenderRequestsGpu;
         StructuredBuffer s_PhysicalPageMetadataGpu;
+        ByteAddressBuffer s_StreamingIncompletePagesGpu;
         StructuredBuffer s_PreviousToCurrentViewIdsGpu;
         StructuredBuffer s_EmptyPhysicalPagesGpu;
         StructuredBuffer s_EvictionCandidatesGpu;
@@ -259,6 +265,7 @@ namespace Renderer::VirtualShadowMap
         uint32_t s_CurrentPageTableIndex = 0;
         uint32_t s_CommittedPhysicalHZBIndex = 0;
         uint32_t s_FrameNumber = 0;
+        uint32_t s_StreamingUploadVersion = 0;
         bool s_PhysicalPagePoolInitialized = false;
 
         constexpr uint32_t kPageStatisticsReadbackCount = 3;
@@ -291,6 +298,7 @@ namespace Renderer::VirtualShadowMap
             uint64_t FenceValue = 0;
             uint32_t ViewCount = 0;
             uint32_t RenderBudget = 0;
+            uint32_t StreamingRetryBudget = 0;
             uint32_t Generation = 0;
         };
 
@@ -298,6 +306,7 @@ namespace Renderer::VirtualShadowMap
         PageStatistics s_PageStatistics;
         uint32_t s_PageStatisticsGeneration = 0;
         uint32_t s_PageStatisticsRenderBudget = 0;
+        uint32_t s_PageStatisticsStreamingRetryBudget = 0;
 
         uint32_t GetPhysicalPageRenderBudget()
         {
@@ -382,6 +391,8 @@ namespace Renderer::VirtualShadowMap
             s_RasterItemCount = static_cast<int32_t>(statistics.RasterItems);
             s_CullOverflowCount = static_cast<int32_t>(statistics.CullOverflow);
             s_RenderBacklogCount = static_cast<int32_t>(statistics.RenderBacklog);
+            s_StreamingPendingPageCount = static_cast<int32_t>(statistics.StreamingPendingPages);
+            s_StreamingRetryPageCount = static_cast<int32_t>(statistics.StreamingRetryPages);
             s_PhysicalPoolExhausted = statistics.PhysicalPoolExhausted;
             s_RenderBudgetExceeded = statistics.RenderBudgetExceeded;
             s_PageCountersValid = statistics.CountersValid;
@@ -412,6 +423,12 @@ namespace Renderer::VirtualShadowMap
                 kManagementStatisticsReadbackOffset + VSM_COARSE_OVERFLOW_PAGE_COUNT_OFFSET);
             statistics.RenderRequests = readValue(
                 kManagementStatisticsReadbackOffset + VSM_RENDER_REQUEST_COUNT_OFFSET);
+            statistics.StreamingPendingPages = readValue(
+                kManagementStatisticsReadbackOffset + VSM_STREAMING_PENDING_PAGE_COUNT_OFFSET);
+            // Wave reservations can exceed the budget; only tickets below it are admitted.
+            statistics.StreamingRetryPages = std::min(readValue(
+                kManagementStatisticsReadbackOffset + VSM_STREAMING_RETRY_PAGE_COUNT_OFFSET),
+                slot.StreamingRetryBudget);
             const uint32_t emptyPageCount =
                 readValue(kManagementStatisticsReadbackOffset + VSM_EMPTY_PAGE_COUNT_OFFSET);
             const uint32_t evictionCandidateCount =
@@ -490,6 +507,7 @@ namespace Renderer::VirtualShadowMap
 
             slot.ViewCount = static_cast<uint32_t>(s_Views.size());
             slot.RenderBudget = s_PageStatisticsRenderBudget;
+            slot.StreamingRetryBudget = s_PageStatisticsStreamingRetryBudget;
             slot.Generation = s_PageStatisticsGeneration;
 
             GraphicsContext& context = GraphicsContext::Begin(L"VSM Page Statistics Readback");
@@ -656,6 +674,9 @@ namespace Renderer::VirtualShadowMap
             BindPageManagementConstants(binder);
             binder["g_VsmPageManagement"]["InvalidationCount"].Set(static_cast<uint32_t>(s_InvalidationBounds.size()));
             binder["g_VsmPageManagement"]["InvalidateAllViews"].Set(s_InvalidationOverflow ? 1u : 0u);
+            s_PageStatisticsStreamingRetryBudget = static_cast<uint32_t>(s_StreamingRetryBudget);
+            binder["g_VsmPageManagement"]["StreamingRetryBudget"].Set(s_PageStatisticsStreamingRetryBudget);
+            binder["g_VsmPageManagement"]["StreamingUploadVersion"].Set(s_StreamingUploadVersion);
             binder.Apply();
 
             context.Dispatch(kPhysicalPageGroupCount, 1, 1);
@@ -810,6 +831,7 @@ namespace Renderer::VirtualShadowMap
             context.TransitionResource(s_PageRenderRequestsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_PageManagementCountersGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_CullResources.CountersGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.TransitionResource(s_StreamingIncompletePagesGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_PhysicalPageMetadataGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.TransitionResource(s_PhysicalPageViewsGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.FlushResourceBarriers();
@@ -821,6 +843,7 @@ namespace Renderer::VirtualShadowMap
             binder.SetRootBufferSRV("g_VsmPageRenderRequestsSRV", s_PageRenderRequestsGpu);
             binder.SetRootBufferSRV("g_VsmPageManagementCountersSRV", s_PageManagementCountersGpu);
             binder.SetRootBufferSRV("g_VsmCullCounters", s_CullResources.CountersGpu);
+            binder.SetRootBufferSRV("g_VsmStreamingIncompletePages", s_StreamingIncompletePagesGpu);
             binder.SetRootBufferUAV("g_VsmPhysicalPageMetadataUAV", s_PhysicalPageMetadataGpu);
             binder.SetRootBufferUAV("g_VsmPhysicalPageViewsUAV", s_PhysicalPageViewsGpu);
             ProgramVar constants = binder["g_MarkPhysicalPageRendered"];
@@ -828,6 +851,7 @@ namespace Renderer::VirtualShadowMap
             constants["RenderRequestCount"].Set(requestCount);
             constants["AddressType"].Set(addressType);
             constants["RequireCullSuccess"].Set(requireCullSuccess ? 1u : 0u);
+            constants["StreamingUploadVersion"].Set(s_StreamingUploadVersion);
             binder.Apply();
 
             context.Dispatch1D(requestCount, 64u);
@@ -1347,6 +1371,7 @@ namespace Renderer::VirtualShadowMap
         markPhysicalPageRenderedDesc.AddRootBufferSRV("g_VsmPageRenderRequestsSRV");
         markPhysicalPageRenderedDesc.AddRootBufferSRV("g_VsmPageManagementCountersSRV");
         markPhysicalPageRenderedDesc.AddRootBufferSRV("g_VsmCullCounters");
+        markPhysicalPageRenderedDesc.AddRootBufferSRV("g_VsmStreamingIncompletePages");
         markPhysicalPageRenderedDesc.AddRootBufferUAV("g_VsmPhysicalPageMetadataUAV");
         markPhysicalPageRenderedDesc.AddRootBufferUAV("g_VsmPhysicalPageViewsUAV");
         s_MarkPhysicalPageRenderedProgram =
@@ -1492,6 +1517,7 @@ namespace Renderer::VirtualShadowMap
             dagCullDesc.AddRootBufferUAV("g_VsmCandidateMeshletsUAV");
             dagCullDesc.AddRootBufferUAV("g_VsmRasterItemsUAV");
             dagCullDesc.AddRootBufferUAV("g_VsmCullCounters");
+            dagCullDesc.AddRootBufferUAV("g_VsmStreamingIncompletePagesUAV");
             s_MultiViewDAGCullPrograms[passIndex] = ProgramUtils::GetProgram(dagCullDesc, dagCullName.c_str());
             if (!s_MultiViewDAGCullPrograms[passIndex])
                 return false;
@@ -1589,6 +1615,8 @@ namespace Renderer::VirtualShadowMap
             L"VSM Physical Page Metadata",
             kPhysicalPageCapacity,
             sizeof(VsmPhysicalPageMetadata));
+        s_StreamingIncompletePagesGpu.Create(L"VSM Streaming Incomplete Pages",
+            kPhysicalPageCapacity / kRequestMaskWordBits, sizeof(uint32_t));
         s_PreviousToCurrentViewIdsGpu.Create(
             L"VSM Previous To Current View IDs",
             kMaxShadowViews,
@@ -1669,6 +1697,7 @@ namespace Renderer::VirtualShadowMap
         s_PageStatistics = {};
         s_PageStatisticsGeneration = 0;
         s_PageStatisticsRenderBudget = 0;
+        s_PageStatisticsStreamingRetryBudget = 0;
         s_Initialized = true;
         return true;
     }
@@ -1697,6 +1726,7 @@ namespace Renderer::VirtualShadowMap
         s_PageTablesGpu[1].Destroy();
         s_PageRenderRequestsGpu.Destroy();
         s_PhysicalPageMetadataGpu.Destroy();
+        s_StreamingIncompletePagesGpu.Destroy();
         s_PreviousToCurrentViewIdsGpu.Destroy();
         s_InvalidationBoundsGpu.Destroy();
         s_InvalidationPageRangesGpu.Destroy();
@@ -1751,6 +1781,7 @@ namespace Renderer::VirtualShadowMap
         s_PageStatistics = {};
         s_PageStatisticsGeneration = 0;
         s_PageStatisticsRenderBudget = 0;
+        s_PageStatisticsStreamingRetryBudget = 0;
         s_Initialized = false;
     }
 
@@ -1775,6 +1806,7 @@ namespace Renderer::VirtualShadowMap
         s_FrameNumber = 0;
         ++s_PageStatisticsGeneration;
         s_PageStatisticsRenderBudget = 0;
+        s_PageStatisticsStreamingRetryBudget = 0;
         PublishPageStatistics({});
 
         ComputeContext& context = gfxContext.GetComputeContext();
@@ -1795,6 +1827,7 @@ namespace Renderer::VirtualShadowMap
         clearBuffer(s_PageTablesGpu[1], kInvalidPageTableEntry);
         clearBuffer(s_PageRenderRequestsGpu);
         clearBuffer(s_PhysicalPageMetadataGpu);
+        clearBuffer(s_StreamingIncompletePagesGpu);
         clearBuffer(s_PreviousToCurrentViewIdsGpu, kInvalidViewId);
         clearBuffer(s_EmptyPhysicalPagesGpu);
         clearBuffer(s_EvictionCandidatesGpu);
@@ -1847,6 +1880,7 @@ namespace Renderer::VirtualShadowMap
         s_DirtyViewIds.clear();
         s_CurrentPageTableIndex ^= 1u;
         ++s_FrameNumber;
+        s_StreamingUploadVersion = GeometryStreaming::GetUploadVersion();
     }
 
     namespace
@@ -2279,6 +2313,8 @@ namespace Renderer::VirtualShadowMap
             context.TransitionResource(
                 GeometryStreaming::m_GroupDataLocationGPU,
                 D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+            context.TransitionResource(GeometryStreaming::m_GroupNodeIndicesGPU,
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         }
 
         void BuildDirectionalPageFlags(ComputeContext& context)
@@ -2483,6 +2519,7 @@ namespace Renderer::VirtualShadowMap
             context.TransitionResource(
                 GeometryStreaming::m_GeometryStreamingRequestMaskGPU,
                 D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            context.TransitionResource(s_StreamingIncompletePagesGpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             context.FlushResourceBarriers();
 
             {
@@ -2505,12 +2542,14 @@ namespace Renderer::VirtualShadowMap
                 binder.SetRootBufferUAV("g_VsmCandidateMeshletsUAV", s_CullResources.CandidateMeshletsGpu);
                 binder.SetRootBufferUAV("g_VsmRasterItemsUAV", s_CullResources.RasterItemsGpu);
                 binder.SetRootBufferUAV("g_VsmCullCounters", s_CullResources.CountersGpu);
+                binder.SetRootBufferUAV("g_VsmStreamingIncompletePagesUAV", s_StreamingIncompletePagesGpu);
                 binder.Apply();
                 context.DispatchIndirect(s_CullResources.CullDispatchArgsGpu, sizeof(D3D12_DISPATCH_ARGUMENTS));
             }
 
             context.TransitionResource(s_CullResources.RasterItemsGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             context.TransitionResource(s_CullResources.CountersGpu, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            context.InsertUAVBarrier(s_StreamingIncompletePagesGpu);
             context.FlushResourceBarriers();
         }
 
@@ -2619,6 +2658,9 @@ namespace Renderer::VirtualShadowMap
         ScopedTimer timer(L"VSM: Render Directional Physical Pages Depth", gfxContext);
         ComputeContext& context = gfxContext.GetComputeContext();
         PreparePhysicalPageRenderResources(gfxContext);
+        // Per-draw feedback is rebuilt independently of persistent retry flags.
+        context.ClearBufferUAV(s_StreamingIncompletePagesGpu, s_StreamingIncompletePagesGpu.GetBufferSize(), 0u);
+        context.InsertUAVBarrier(s_StreamingIncompletePagesGpu);
         BuildDirectionalPageFlags(context);
         ResetMultiViewCullResources(context);
         BuildCullDispatchArgs(context);
@@ -2651,7 +2693,7 @@ namespace Renderer::VirtualShadowMap
             0u,
             kPhysicalPageCapacity,
             VSM_ADDRESS_TYPE_DIRECTIONAL_CLIPMAP,
-            false);
+            true);
         CommitPendingPhysicalHZB();
     }
 

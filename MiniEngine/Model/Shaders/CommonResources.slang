@@ -236,6 +236,11 @@ StructuredBuffer<GroupDataLocation> GetGroupDataLocationBufferSRV()
     return GetBindlessResourceHandle<StructuredBuffer<GroupDataLocation>>(SRV_GROUP_DATA_LOCATION_BUFFER);
 }
 
+StructuredBuffer<uint> GetGroupNodeIndicesBufferSRV()
+{
+    return GetBindlessResourceHandle<StructuredBuffer<uint>>(SRV_GROUP_NODE_INDICES_BUFFER);
+}
+
 StructuredBuffer<VisibleMeshletPayload> GetVisibleMeshletBufferSRV()
 {
     return GetBindlessResourceHandle<StructuredBuffer<VisibleMeshletPayload>>(SRV_VISIBLE_MESHLET_BUFFER);

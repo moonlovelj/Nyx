@@ -44,6 +44,8 @@
 #define VSM_PHYSICAL_PAGE_METADATA_DIRTY 0x4u
 // Debug history for this frame; survives rendering and is reset during cache reuse.
 #define VSM_PHYSICAL_PAGE_METADATA_DYNAMIC_INVALIDATED_THIS_FRAME 0x8u
+// Cached depth is usable, but target geometry LOD was not resident. Retry after uploads.
+#define VSM_PHYSICAL_PAGE_METADATA_STREAMING_INCOMPLETE 0x10u
 #define VSM_PAGE_RENDER_REQUEST_HISTORY_VALID 0x1u
 
 #define VSM_REQUEST_MASK_WORD_LOG2 5u
@@ -68,7 +70,7 @@
 #define VSM_REQUESTED_PAGE_COUNT_OFFSET 0u
 #define VSM_INVALID_ADDRESS_PIXEL_COUNT_OFFSET 4u
 
-#define VSM_PAGE_MANAGEMENT_COUNTERS_SIZE 56u
+#define VSM_PAGE_MANAGEMENT_COUNTERS_SIZE 64u
 #define VSM_RENDER_REQUEST_COUNT_OFFSET 0u
 #define VSM_REUSED_PAGE_COUNT_OFFSET 4u
 #define VSM_NEW_PAGE_COUNT_OFFSET 8u
@@ -83,6 +85,8 @@
 #define VSM_EVICTION_CANDIDATE_COUNT_OFFSET 44u
 #define VSM_EVICTION_CANDIDATE_READ_OFFSET 48u
 #define VSM_EVICTED_PAGE_COUNT_OFFSET 52u
+#define VSM_STREAMING_RETRY_PAGE_COUNT_OFFSET 56u
+#define VSM_STREAMING_PENDING_PAGE_COUNT_OFFSET 60u
 
 #define VSM_EVICTION_AGE_VALID_BIT 0x80000000u
 #define VSM_EVICTION_AGE_MASK 0x7fffffffu
@@ -298,6 +302,7 @@ namespace Renderer::VirtualShadowMap
 
         // Frame-local owner remapped through g_VsmPreviousToCurrentViewIds.
         VSM_UINT OwnerViewId;
+        VSM_UINT LastStreamingUploadVersion;
     };
 
     struct VsmEvictionCandidate
@@ -353,7 +358,7 @@ namespace Renderer::VirtualShadowMap
     static_assert(sizeof(DirectionalVsmAddressGpu) == 80);
     static_assert(sizeof(VsmProjectionGpu) == 80);
     static_assert(sizeof(VsmPageRenderRequest) == 16);
-    static_assert(sizeof(VsmPhysicalPageMetadata) == 36);
+    static_assert(sizeof(VsmPhysicalPageMetadata) == 40);
     static_assert(sizeof(VsmEvictionCandidate) == 8);
     static_assert(sizeof(VsmInvalidationBoundsGpu) == 32);
     static_assert(sizeof(VsmInvalidationPageRange) == 16);

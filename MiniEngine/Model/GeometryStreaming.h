@@ -7,6 +7,7 @@
 namespace GeometryStreaming
 {
 	extern StructuredBuffer m_HierarchyNodesGPU;
+    extern StructuredBuffer m_GroupNodeIndicesGPU;
 	extern std::vector<ByteAddressBuffer> m_GeometryChunksGPU;
 	extern StructuredBuffer m_GroupDataLocationGPU;
 	extern std::vector<Renderer::GroupDataLocation> m_GroupDataLocations;
@@ -17,6 +18,7 @@ namespace GeometryStreaming
 	void Shutdown();
 
 	void Update(uint32_t frameIndex); 
+	uint32_t GetUploadVersion();
 	void EnqueueAsyncLoad(uint32_t pageIdx);
 	void OnPageIOComplete(uint32_t pageIdx, std::vector<uint8_t>&& pageData);
 	void SyncMemoryAndAddressTable(uint32_t frameIndex);
