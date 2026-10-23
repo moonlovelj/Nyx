@@ -229,16 +229,19 @@ The retry budget and pending/retried page counts are available under
 
 - [Unreal Engine Nanite talks and publications](https://advances.realtimerendering.com/s2021/Karis_Nanite_SIGGRAPH_Advances_2021_final.pdf)
 - [Microsoft MiniEngine](https://github.com/microsoft/DirectX-Graphics-Samples/tree/master/MiniEngine)
+- [DirectXTex](https://github.com/microsoft/DirectXTex), [DirectXMesh](https://github.com/microsoft/DirectXMesh), and [DirectXMath](https://github.com/microsoft/DirectXMath)
 - [meshoptimizer](https://github.com/zeux/meshoptimizer)
 - [lz4](https://github.com/lz4/lz4)
 - [cgltf](https://github.com/jkuhlmann/cgltf)
 - [imgui](https://github.com/ocornut/imgui)
 - [Slang](https://github.com/shader-slang/slang)
 - [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler)
+- [D3D12 Agility SDK](https://www.nuget.org/packages/Microsoft.Direct3D.D3D12/1.616.1) and [PIX Event Runtime](https://devblogs.microsoft.com/pix/winpixeventruntime/)
+- [Intel XeGTAO](https://github.com/GameTechDev/XeGTAO) and [Intel TAA](https://github.com/GameTechDev/TAA)
 - Inspiration references: [nanite-webgpu](https://github.com/Scthe/nanite-webgpu), [vk_lod_clusters](https://github.com/nvpro-samples/vk_lod_clusters)
 
 ## License
 
-- Nyx source code: MIT License (`LICENSE`)
-- Third-party components: original licenses (`THIRD_PARTY_NOTICES.md`)
+- Nyx source code: MIT License ([LICENSE](LICENSE))
+- Third-party components: original licenses ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md))
 - Scene assets may have separate licenses and restrictions; verify before redistribution
