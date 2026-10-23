@@ -61,6 +61,11 @@ Screenshots:
 - Async page IO + LZ4-compressed geometry pages
 - Runtime Slang shader compilation and reflection-driven root signatures/bindings
 - Runtime debug/tuning UI (pixel error, culling freeze, debug modes)
+- Directional virtual shadow maps with clipmaps and GPU-driven page allocation
+- Persistent shadow page caching with GPU LRU eviction and dynamic-object invalidation
+- Multi-view shadow rendering with two-pass HZB occlusion culling and coarse-page fallback
+- Directional SMRT soft shadows with adaptive receiver bias and short-range screen-space tracing
+- Geometry-streaming-aware shadow cache refresh with budgeted page retries
 
 ## Quick Start
 
@@ -83,14 +88,13 @@ Recommended for large scenes:
 ### Build
 
 1. Open `MiniEngine/SceneViewer/SceneViewer.sln`
-2. Select `Release | x64`
+2. Select `Release | Windows` (builds x64 binaries)
 3. Build and run `SceneViewer`
 
 The build automatically copies the Slang runtime, Slang standard module, `dxcompiler.dll`, and `dxil.dll` to the application output directory.
 
-By default, SceneViewer loads:
-
-- `Assets/bunny/bunny.gltf`
+Without `-model`, SceneViewer loads `Assets/bunny/bunny.gltf` with **10,000 instances**.
+With `-model`, the instance count defaults to **1**; use `-instances` to change it.
 
 ### Shader Toolchain
 
@@ -132,7 +136,7 @@ Typical path (default MiniEngine layout):
 Arguments:
 
 - `-model <path>`: glTF/glb scene path
-- `-instances <N>`: instance count (clamped to `1..1000000`)
+- `-instances <N>`: instance count when used with `-model` (default **1**, clamped to `1..1000000`)
 - `-rebuild 1`: force rebuild `.mini` cache
 
 ## Controls
@@ -144,6 +148,14 @@ Arguments:
 - `Backspace`: engine tuning/debug UI
 
 ## Architecture Overview
+
+### Virtualized Geometry
+
+Meshes are split into meshlets, then grouped and simplified to build the
+LOD hierarchy. The GPU selects LODs using a screen-space error threshold
+and performs frustum and HZB culling in two passes. Geometry pages are
+compressed with LZ4 and loaded as needed. Root pages stay resident,
+providing a coarse LOD while finer geometry is loading.
 
 ### Offline / First-load Build (`.gltf/.glb` -> `.mini`)
 
@@ -157,20 +169,38 @@ Arguments:
 
 ### Runtime Frame Flow
 
-1. Instance culling
-2. DAG/hierarchy culling (frustum + HZB)
-3. Build indirect mesh dispatch args
-4. Mesh shader pass 0
-5. Export depth and generate HZB
-6. Repeat cull + mesh shader pass 1
-7. Resolve visibility buffer to GBuffer
-8. Deferred lighting + post effects
+1. Instance and DAG/hierarchy culling
+2. Two-pass visibility rendering with depth export and HZB generation
+3. Mark VSM page requests from visible receivers
+4. Reuse cached shadow pages and allocate physical pages for new requests
+5. Build multi-view shadow rendering data
+6. Resolve the visibility buffer to GBuffer
+7. Render directional VSM depth with two-pass HZB culling
+8. Deferred lighting with VSM shadow sampling, followed by post effects
+
+### Directional Virtual Shadow Maps
+
+The sun uses clipmaps centered on the camera. Visible pixels determine
+which shadow pages are needed. Pages are cached across frames in a shared
+physical pool, with GPU LRU eviction to reclaim space. Object movement
+marks affected pages for redraw. Shadow updates use multi-view rendering
+and two-pass HZB culling, with SMRT sampling for soft shadows.
 
 ### Streaming Runtime
 
 - Page size: **256 KB**
 - Chunk size: **256 MB**
 - GPU request mask readback + async page load + LZ4 decompress + upload
+
+### Shadow Updates During Streaming
+
+If a shadow page is rendered before its target geometry LOD has loaded,
+it is marked incomplete. Its cached depth can still be sampled. After new
+geometry is uploaded, incomplete pages are retried under a per-frame
+budget, so shadow detail catches up as geometry loads.
+
+The retry budget and pending/retried page counts are available under
+`Renderer/VSM` in the runtime tuning UI.
 
 ## Technical Snapshot
 
@@ -180,7 +210,7 @@ Arguments:
 - DXIL compiler backend: **DXC 2026-05-27**
 - Shader Model: **6.6**
 - Agility SDK package: `Microsoft.Direct3D.D3D12 1.616.1`
-- Meshlet defaults: max vertices **128**, max triangles **128**, group size **32**, BVH node children **8**
+- Meshlet defaults: max vertices **64**, max triangles **84**, group size **32**, BVH node children **8**
 
 ## Repository Layout
 
@@ -212,7 +242,3 @@ Arguments:
 - Nyx source code: MIT License (`LICENSE`)
 - Third-party components: original licenses (`THIRD_PARTY_NOTICES.md`)
 - Scene assets may have separate licenses and restrictions; verify before redistribution
-
-## Contact
-
-- `love.jingjing.forever.1314@gmail.com`

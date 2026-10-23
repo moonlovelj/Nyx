@@ -105,7 +105,12 @@ foreach ($shaderTree in $shaderTrees) {
   Copy-DirectoryContents -Source $shaderTree.Source -Destination $shaderTree.Destination
 }
 
-$modelShaderHeaders = @("StructsIO.h", "MeshletStructs.h")
+$modelShaderHeaders = @(
+  "StructsIO.h",
+  "MeshletStructs.h",
+  "VirtualShadowMapShared.h",
+  "VirtualShadowMapCullShared.h"
+)
 $modelPackageRoot = Join-Path $payloadRoot "MiniEngine\Model"
 New-Item -ItemType Directory -Path $modelPackageRoot -Force | Out-Null
 foreach ($headerName in $modelShaderHeaders) {
@@ -173,6 +178,8 @@ $requiredPackagePaths = @(
   "MiniEngine\Model\Shaders\VBufferMesh.slang",
   "MiniEngine\Model\StructsIO.h",
   "MiniEngine\Model\MeshletStructs.h",
+  "MiniEngine\Model\VirtualShadowMapShared.h",
+  "MiniEngine\Model\VirtualShadowMapCullShared.h",
   "MiniEngine\Core\Shaders\Math.hlsli",
   "Textures\HDRIs",
   "Assets\bunny"
