@@ -93,6 +93,7 @@ enum { kMinLightGridDim = 8 };
 namespace Lighting
 {
     IntVar LightGridDim("Application/Forward+/Light Grid Dim", 16, kMinLightGridDim, 32, 8 );
+    NumVar IBLIntensity("Viewer/Lighting/IBL Intensity", 1.0f, 0.0f, 8.0f, 0.05f);
 
     ComputePSO m_FillLightGridCS_8(L"Fill Light Grid 8 CS");
     ComputePSO m_FillLightGridCS_16(L"Fill Light Grid 16 CS");
@@ -469,6 +470,7 @@ void Lighting::RenderDeferredLighting(
     constants["ViewportHeight"].Set(viewConstants.ViewportHeight);
     constants["TileCountX"].Set(frame.TileCount[0]);
     constants["IBLSpecularLDMapMipCount"].Set(frame.IBLSpecularLDMapMipCount);
+    constants["IBLIntensity"].Set(static_cast<float>(IBLIntensity));
     constants["VsmClipmapId"].Set(frame.SunVsmClipmapId);
     constants["EnableSunVsmSampling"].Set(frame.EnableSunVsmSampling);
     constants["ScreenRayLengthMultiplier"].Set(projectionScaleY > 0.0f ? 1.0f / projectionScaleY : 0.0f);

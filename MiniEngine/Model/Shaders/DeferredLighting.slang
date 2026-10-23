@@ -28,6 +28,7 @@ struct DeferredLightingConstants
     uint VsmClipmapId;
     uint EnableSunVsmSampling;
     float ScreenRayLengthMultiplier;
+    float IBLIntensity;
 };
 
 ConstantBuffer<DeferredLightingConstants> g_DeferredLighting;
@@ -242,8 +243,8 @@ void computeMain(
                 ShadeLights(colorAccum.rgb, Surface, DTid, posW);
 
                 // Add IBL and modulate by runtime SSAO.
-                colorAccum.rgb += EvaluateIBLDiffuse(Surface) * ssao;
-                colorAccum.rgb += EvaluateIBLSpecular(Surface) * ssao;
+                colorAccum.rgb += EvaluateIBLDiffuse(Surface) * ssao * g_DeferredLighting.IBLIntensity;
+                colorAccum.rgb += EvaluateIBLSpecular(Surface) * ssao * g_DeferredLighting.IBLIntensity;
 
                 sceneColor[DTid] = colorAccum;
             }
