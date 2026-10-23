@@ -49,6 +49,9 @@ These are used by separate utilities, rather than SceneViewer.
 
 ## Assets
 
+[Bistro Metallic-Roughness](https://github.com/moonlovelj/bistro-metalrough):
+[MIT](MiniEngine/SceneViewer/Assets/bistro-metalrough/LICENSE), Copyright (c) 2023 NVIDIA GameWorks.
+
 Scene assets and external datasets may have separate license and usage
 restrictions. Verify asset terms before redistribution.
 

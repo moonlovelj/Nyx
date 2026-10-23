@@ -75,6 +75,7 @@ Screenshots:
 - Visual Studio 2022 with the Desktop development with C++ workload
 - DX12 GPU with Mesh Shader support
 - NuGet package restore enabled
+- Git and Git LFS
 
 Slang and DXC are included under `MiniEngine/ThirdParty`; no separate shader compiler installation is required.
 
@@ -84,6 +85,23 @@ Recommended for large scenes:
 - 32 GB+ RAM (48 GB+ recommended for rebuilding very large assets)
 - NVMe SSD
 - Large free disk space
+
+### Clone
+
+Install Git LFS, then clone with the Bistro asset submodule (~1.55 GiB):
+
+```powershell
+git lfs install
+git clone --recurse-submodules https://github.com/moonlovelj/Nyx.git
+cd Nyx
+```
+
+For an existing checkout, run from the repository root:
+
+```powershell
+git submodule update --init --recursive
+git -C MiniEngine/SceneViewer/Assets/bistro-metalrough lfs pull
+```
 
 ### Build
 
@@ -130,6 +148,7 @@ Typical path (default MiniEngine layout):
 ```powershell
 .\SceneViewer.exe -model .\Assets\bunny\bunny.gltf
 .\SceneViewer.exe -model .\Assets\Jinx\scene.gltf -instances 3600
+.\SceneViewer.exe -model .\Assets\bistro-metalrough\bistro_metalrough.gltf
 .\SceneViewer.exe -model .\Assets\bunny\bunny.gltf -rebuild 1
 ```
 
@@ -146,6 +165,7 @@ Arguments:
 - Mouse wheel: movement speed scale
 - `Shift`: fine movement toggle
 - `Backspace`: engine tuning/debug UI
+- Hold `Alt`: interact with the UI
 
 ## Architecture Overview
 
