@@ -179,6 +179,10 @@ namespace GameCore
 
         s_ExitRequested = false;
 
+        // Monitor dimensions, window clients, and swap-chain buffers must all use physical pixels.
+        if (!SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
+            SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
         Microsoft::WRL::Wrappers::RoInitializeWrapper InitializeWinRT(RO_INIT_MULTITHREADED);
         ASSERT_SUCCEEDED(InitializeWinRT);
 
@@ -207,6 +211,7 @@ namespace GameCore
 
         ASSERT(g_hWnd != 0);
 
+        Display::ConfigureWindow();
         InitializeApplication(app);
 
         ShowWindow( g_hWnd, nCmdShow/*SW_SHOWDEFAULT*/ );
@@ -302,6 +307,15 @@ namespace GameCore
         case WM_SIZE:
             Display::Resize((UINT)(UINT64)lParam & 0xFFFF, (UINT)(UINT64)lParam >> 16);
             break;
+
+        case WM_DPICHANGED:
+        {
+            const RECT& suggestedRect = *reinterpret_cast<const RECT*>(lParam);
+            SetWindowPos(hWnd, nullptr, suggestedRect.left, suggestedRect.top,
+                suggestedRect.right - suggestedRect.left, suggestedRect.bottom - suggestedRect.top,
+                SWP_NOZORDER | SWP_NOACTIVATE);
+            break;
+        }
 
         case WM_DESTROY:
             RequestExit();

@@ -11,7 +11,8 @@
 // Author:  James Stanard 
 //
 
-#include "ToneMappingUtility.hlsli"
+#include "ShaderUtility.hlsli"
+#include "PBRNeutralToneMapping.hlsli"
 #include "PostEffectsRS.hlsli"
 #include "PixelPacking.hlsli"
 
@@ -30,6 +31,7 @@ cbuffer CB0 : register(b0)
 {
     float2 g_RcpBufferDim;
     float g_BloomStrength;
+    float ToneMapPeakBrightnessRatio;
 };
 
 [RootSignature(PostEffects_RootSig)]
@@ -42,9 +44,9 @@ void main( uint3 DTid : SV_DispatchThreadID )
     float3 hdrColor = SrcColor[DTid.xy] + g_BloomStrength * Bloom.SampleLevel(LinearSampler, TexCoord, 0);
 
     // Tone map to LDR and convert to greyscale
-    float luma = ToneMapLuma(RGBToLuminance(hdrColor) * Exposure[0]);
+    float luma = RGBToLuminance(PBRNeutralToneMapping(hdrColor * Exposure[0], ToneMapPeakBrightnessRatio));
 
-    float logLuma = LinearToLogLuminance(luma);
+    float logLuma = LinearToLogLuminance(luma / ToneMapPeakBrightnessRatio);
 
 #if SUPPORT_TYPED_UAV_LOADS
     SrcColor[DTid.xy] = luma.xxx;

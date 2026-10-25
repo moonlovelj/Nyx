@@ -484,6 +484,9 @@ void SceneViewer::Update( float deltaT )
         m_HasPreviousFrame = false;
     m_UsingglTFCamera = bUseglTFCamera;
 
+    // Monitor-native modes can be ultrawide or portrait, so update projection from render dimensions.
+    m_Camera.SetAspectRatio(static_cast<float>(g_SceneColorBuffer.GetHeight()) /
+        static_cast<float>(g_SceneColorBuffer.GetWidth()));
     if (!bUseglTFCamera)
         m_CameraController->Update(deltaT);
 
@@ -493,7 +496,6 @@ void SceneViewer::Update( float deltaT )
 
     gfxContext.Finish();
     
-    //m_Camera.SetAspectRatio((float)g_DisplayHeight / g_DisplayWidth);
 	if (bUseglTFCamera)
 	{
 		std::shared_ptr<Math::Camera> Camera = ModelInstanceManager::GetModelInstance(0).GetCameras()[0];

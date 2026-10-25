@@ -24,12 +24,13 @@ namespace PostEffects
 
     // Tone mapping parameters
     extern ExpVar Exposure;				// Brightness scaler when adapative exposure is disabled
+    extern NumVar ExposureCompensationEV; // Exposure offset in stops for auto and manual modes
     extern BoolVar EnableAdaptation;	// Automatically adjust brightness based on perceived luminance
 
     // Adapation parameters
     extern ExpVar MinExposure;
     extern ExpVar MaxExposure;
-    extern NumVar TargetLuminance;
+    extern NumVar TargetLuminance;    // Target display-linear gray after PBR Neutral tone mapping
     extern NumVar AdaptationRate;
 
     // Bloom parameters

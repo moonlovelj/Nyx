@@ -11,7 +11,7 @@
 // Author:  James Stanard 
 //
 
-#include "ToneMappingUtility.hlsli"
+#include "HDRDisplayMapping.hlsli"
 #include "PresentRS.hlsli"
 
 Texture2D<float3> MainBuffer : register(t0);
@@ -28,7 +28,7 @@ float3 main( float4 position : SV_Position, float2 uv : TexCoord0 ) : SV_Target0
 {
     int2 ST = (int2)position.xy;
 
-    float3 MainColor = ApplyREC2084Curve(MainBuffer[ST] / 10000.0);
+    float3 MainColor = MapSceneToHDR10(MainBuffer[ST], PaperWhiteRatio, MaxBrightness);
 
     float4 OverlayColor = OverlayBuffer[ST];
 

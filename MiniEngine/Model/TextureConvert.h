@@ -30,11 +30,13 @@ enum TexConversionFlags
 
 inline uint8_t TextureOptions(bool sRGB, bool hasAlpha=false, bool invertY=false)
 {
-    return (sRGB ? kSRGB : 0) | (hasAlpha ? kPreserveAlpha : 0) | (invertY ? kFlipVertical : 0);
+    return kDefaultBC | kQualityBC | (sRGB ? kSRGB : 0) |
+        (hasAlpha ? kPreserveAlpha : 0) | (invertY ? kFlipVertical : 0);
 }
 
-// If the DDS version of the texture specified does not exist or is older than the source texture, reconvert it.
-void CompileTextureOnDemand(const std::wstring& originalFile, uint32_t flags);
+// Rebuild source-derived DDS caches when stale or incompatible with the requested format.
+// Existing DDS source files and DDS-only packages are kept as authored.
+bool CompileTextureOnDemand(const std::wstring& originalFile, uint32_t flags);
 
 // Loads a non-DDS texture such as TGA, PNG, or JPG, then converts it to a more optimal
 // DDS format with a full mip chain.  Resultant file has the same path with the file extension

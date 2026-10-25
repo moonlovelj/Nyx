@@ -18,6 +18,8 @@
 namespace Display
 {
     void Initialize(void);
+    // Apply the selected output resolution and window style, including before graphics startup.
+    void ConfigureWindow(void);
     void Shutdown(void);
     void Resize(uint32_t width, uint32_t height);
     void Present(void);

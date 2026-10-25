@@ -167,6 +167,10 @@ Arguments:
 - `Backspace`: engine tuning/debug UI
 - Hold `Alt`: interact with the UI
 
+Rendering and display resolutions default to **Monitor Native**, using the window's monitor desktop resolution in physical pixels, with a borderless fullscreen window. Windows DPI scaling does not reduce the rendering resolution. Under `Graphics/Display`, change `Native Resolution` to adjust internal rendering, or select a preset for `Display Resolution` to return to a regular window.
+
+Source material textures compile to BC7 DDS with full mip chains, using sRGB for color maps and linear formats for data maps. Existing `.mini` geometry caches automatically adopt this policy. Stale DDS files and caches with incompatible formats are rebuilt from the source image on load; the first conversion can take longer. BC6H/BC7 encoding uses GPU acceleration when available, with a CPU fallback. Authored DDS inputs are preserved, and DDS-only packages remain loadable.
+
 ## Architecture Overview
 
 ### Virtualized Geometry

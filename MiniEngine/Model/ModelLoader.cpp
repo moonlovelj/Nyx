@@ -52,8 +52,13 @@ std::vector<uint32_t> LoadMaterials(Model& model,
     model.textures.resize(numTextures);
     for (size_t ti = 0; ti < numTextures; ++ti)
     {
+        if (textureOptions[ti] == 0xFF)
+            continue; // Image is not referenced by any material.
+
         std::wstring originalFile = basePath + textureNames[ti];
-        CompileTextureOnDemand(originalFile, textureOptions[ti]);
+        // Older .mini caches predate BC7 defaults; upgrade without rebuilding geometry.
+        const uint32_t conversionFlags = textureOptions[ti] | kDefaultBC | kQualityBC;
+        CompileTextureOnDemand(originalFile, conversionFlags);
 
         std::wstring ddsFile = Utility::RemoveExtension(originalFile) + L".dds";
         model.textures[ti] = TextureManager::LoadDDSFromFile(ddsFile);

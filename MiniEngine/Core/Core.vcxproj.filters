@@ -674,6 +674,12 @@
     <None Include="Shaders\ColorSpaceUtility.hlsli">
       <Filter>Shaders</Filter>
     </None>
+    <None Include="Shaders\HDRDisplayMapping.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="Shaders\PBRNeutralToneMapping.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
     <None Include="Shaders\CommonRS.hlsli">
       <Filter>Shaders</Filter>
     </None>

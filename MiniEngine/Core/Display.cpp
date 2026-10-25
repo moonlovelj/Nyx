@@ -66,6 +66,21 @@ namespace
     BoolVar s_EnableVSync("Timing/VSync", true);
     BoolVar s_LimitTo30Hz("Timing/Limit To 30Hz", false);
     BoolVar s_DropRandomFrames("Timing/Drop Random Frames", false);
+
+    MONITORINFO GetWindowMonitorInfo()
+    {
+        const HMONITOR monitor = GameCore::g_hWnd != nullptr
+            ? MonitorFromWindow(GameCore::g_hWnd, MONITOR_DEFAULTTONEAREST)
+            : MonitorFromPoint(POINT{}, MONITOR_DEFAULTTOPRIMARY);
+        MONITORINFO info = {};
+        info.cbSize = sizeof(info);
+        if (!GetMonitorInfoW(monitor, &info))
+        {
+            info.rcMonitor = {0, 0, static_cast<LONG>(g_DisplayWidth), static_cast<LONG>(g_DisplayHeight)};
+            info.rcWork = info.rcMonitor;
+        }
+        return info;
+    }
 }
 
 namespace Graphics
@@ -74,17 +89,18 @@ namespace Graphics
     void PreparePresentHDR();
     void CompositeOverlays( GraphicsContext& Context );
 
-    enum eResolution { k720p, k900p, k1080p, k1440p, k1800p, k2160p };
+    enum eResolution { k720p, k900p, k1080p, k1440p, k1800p, k2160p, kMonitorNative, kResolutionCount };
     enum eEQAAQuality { kEQAA1x1, kEQAA1x8, kEQAA1x16 };
 
-    const uint32_t kNumPredefinedResolutions = 6;
+    const uint32_t kNumPredefinedResolutions = kResolutionCount;
 
-    const char* ResolutionLabels[] = { "1280x720", "1600x900", "1920x1080", "2560x1440", "3200x1800", "3840x2160" };
-    EnumVar NativeResolution("Graphics/Display/Native Resolution", k1080p, kNumPredefinedResolutions, ResolutionLabels);
+    char MonitorResolutionLabel[64] = "Monitor Native";
+    const char* ResolutionLabels[] = { "1280x720", "1600x900", "1920x1080", "2560x1440", "3200x1800", "3840x2160", MonitorResolutionLabel };
+    EnumVar NativeResolution("Graphics/Display/Native Resolution", kMonitorNative, kNumPredefinedResolutions, ResolutionLabels);
 #ifdef _GAMING_DESKTOP
     // This can set the window size to common dimensions.  It's also possible for the window to take on other dimensions
     // through resizing or going full-screen.
-    EnumVar DisplayResolution("Graphics/Display/Display Resolution", k1080p, kNumPredefinedResolutions, ResolutionLabels);
+    EnumVar DisplayResolution("Graphics/Display/Display Resolution", kMonitorNative, kNumPredefinedResolutions, ResolutionLabels);
 #endif
 
     bool g_bEnableHDROutput = false;
@@ -103,6 +119,14 @@ namespace Graphics
     {
         switch (res)
         {
+        case kMonitorNative:
+        {
+            const MONITORINFO monitorInfo = GetWindowMonitorInfo();
+            width = static_cast<uint32_t>(monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left);
+            height = static_cast<uint32_t>(monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top);
+            sprintf_s(MonitorResolutionLabel, "Monitor Native (%ux%u)", width, height);
+            break;
+        }
         default:
         case k720p:
             width = 1280;
@@ -152,19 +176,16 @@ namespace Graphics
     void SetDisplayResolution(void)
     {
 #ifdef _GAMING_DESKTOP
-        static int SelectedDisplayRes = DisplayResolution;
-        if (SelectedDisplayRes == DisplayResolution)
+        static int SelectedDisplayRes = -1;
+        uint32_t width, height;
+        ResolutionToUINT(eResolution((int)DisplayResolution), width, height);
+        const bool monitorModeChanged = DisplayResolution == kMonitorNative &&
+            (g_DisplayWidth != width || g_DisplayHeight != height);
+        if (SelectedDisplayRes == DisplayResolution && !monitorModeChanged)
             return;
 
         SelectedDisplayRes = DisplayResolution;
-        ResolutionToUINT((eResolution)SelectedDisplayRes, g_DisplayWidth, g_DisplayHeight);
-        DEBUGPRINT("Changing display resolution to %ux%u", g_DisplayWidth, g_DisplayHeight);
-
-        g_CommandManager.IdleGPU();
-
-        Display::Resize(g_DisplayWidth, g_DisplayHeight);
-
-        SetWindowPos(GameCore::g_hWnd, 0, 0, 0, g_DisplayWidth, g_DisplayHeight, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        Display::ConfigureWindow();
 #endif
     }
 
@@ -192,14 +213,57 @@ namespace Graphics
     EnumVar DebugZoom("Graphics/Display/Magnify Pixels", kDebugZoomOff, kDebugZoomCount, DebugZoomLabels);
 }
 
+void Display::ConfigureWindow(void)
+{
+#ifdef _GAMING_DESKTOP
+    uint32_t width, height;
+    ResolutionToUINT(eResolution((int)DisplayResolution), width, height);
+    const MONITORINFO monitorInfo = GetWindowMonitorInfo();
+    const bool monitorNative = DisplayResolution == kMonitorNative;
+
+    LONG_PTR style = GetWindowLongPtrW(GameCore::g_hWnd, GWL_STYLE);
+    style &= ~(static_cast<LONG_PTR>(WS_OVERLAPPEDWINDOW) | WS_POPUP);
+    style |= monitorNative ? WS_POPUP : WS_OVERLAPPEDWINDOW;
+    SetWindowLongPtrW(GameCore::g_hWnd, GWL_STYLE, style);
+
+    RECT windowRect = monitorInfo.rcMonitor;
+    if (!monitorNative)
+    {
+        windowRect = {0, 0, static_cast<LONG>(width), static_cast<LONG>(height)};
+        AdjustWindowRectExForDpi(&windowRect, static_cast<DWORD>(style), FALSE,
+            static_cast<DWORD>(GetWindowLongPtrW(GameCore::g_hWnd, GWL_EXSTYLE)), GetDpiForWindow(GameCore::g_hWnd));
+        const LONG outerWidth = windowRect.right - windowRect.left;
+        const LONG outerHeight = windowRect.bottom - windowRect.top;
+        const LONG left = monitorInfo.rcWork.left + std::max(0L,
+            (monitorInfo.rcWork.right - monitorInfo.rcWork.left - outerWidth) / 2);
+        const LONG top = monitorInfo.rcWork.top + std::max(0L,
+            (monitorInfo.rcWork.bottom - monitorInfo.rcWork.top - outerHeight) / 2);
+        windowRect = {left, top, left + outerWidth, top + outerHeight};
+    }
+
+    SetWindowPos(GameCore::g_hWnd, nullptr, windowRect.left, windowRect.top,
+        windowRect.right - windowRect.left, windowRect.bottom - windowRect.top,
+        SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOACTIVATE);
+
+    RECT clientRect = {};
+    if (GetClientRect(GameCore::g_hWnd, &clientRect))
+        Resize(static_cast<uint32_t>(clientRect.right), static_cast<uint32_t>(clientRect.bottom));
+#endif
+}
+
 void Display::Resize(uint32_t width, uint32_t height)
 {
-    g_CommandManager.IdleGPU();
+    // Ignore minimization and allow WM_SIZE while the initial window is being configured.
+    if (width == 0 || height == 0)
+        return;
 
-	width = std::max(width, 1u);
-    height = std::max(height, 1u);
+    const bool sizeChanged = g_DisplayWidth != width || g_DisplayHeight != height;
     g_DisplayWidth = width;
     g_DisplayHeight = height;
+    if (s_SwapChain1 == nullptr || !sizeChanged)
+        return;
+
+    g_CommandManager.IdleGPU();
 
     DEBUGPRINT("Changing display resolution to %ux%u", width, height);
 

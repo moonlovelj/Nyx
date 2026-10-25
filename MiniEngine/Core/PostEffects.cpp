@@ -24,6 +24,7 @@
 #include "DepthOfField.h"
 #include "FXAA.h"
 #include "Math/Random.h"
+#include <cmath>
 
 #include "CompiledShaders/ToneMapCS.h"
 #include "CompiledShaders/ToneMap2CS.h"
@@ -81,9 +82,11 @@ namespace PostEffects
     BoolVar EnableAdaptation("Graphics/HDR/Adaptive Exposure", true);
     ExpVar MinExposure("Graphics/HDR/Min Exposure", 1.0f / 64.0f, -8.0f, 0.0f, 0.25f);
     ExpVar MaxExposure("Graphics/HDR/Max Exposure", 64.0f, 0.0f, 8.0f, 0.25f);
-    NumVar TargetLuminance("Graphics/HDR/Key", 0.08f, 0.01f, 0.99f, 0.01f);
+    // Display-linear gray after PBR Neutral tone mapping.
+    NumVar TargetLuminance("Graphics/HDR/Key", 0.18f, 0.01f, 0.99f, 0.01f);
     NumVar AdaptationRate("Graphics/HDR/Adaptation Rate", 0.05f, 0.01f, 1.0f, 0.01f);
     ExpVar Exposure("Graphics/HDR/Exposure", 1.0f, -8.0f, 8.0f, 0.25f);
+    NumVar ExposureCompensationEV("Graphics/HDR/Exposure Compensation (EV)", 0.0f, -8.0f, 8.0f, 0.25f);
     BoolVar DrawHistogram("Graphics/HDR/Draw Histogram", false);
 
     BoolVar BloomEnable("Graphics/Bloom/Enable", true);
@@ -112,6 +115,13 @@ namespace PostEffects
     ComputePSO CopyBackPostBufferCS(L"Post Effects: Copy Back Post Buffer CS");
 
     StructuredBuffer g_Exposure;
+
+    float GetToneMapPeakBrightnessRatio()
+    {
+        return g_bEnableHDROutput
+            ? static_cast<float>(g_MaxDisplayLuminance) / static_cast<float>(g_HDRPaperWhite)
+            : 1.0f;
+    }
 
     void UpdateExposure(ComputeContext&);
     void BlurBuffer(ComputeContext&, ColorBuffer buffer[2], const ColorBuffer& lowerResBuf, float upsampleBlendFactor );
@@ -169,9 +179,10 @@ void PostEffects::Initialize( void )
 
 #undef CreatePSO
 
+    const float initialExposure = Exposure * std::exp2(static_cast<float>(ExposureCompensationEV));
     __declspec(align(16)) float initExposure[] =
     {
-        Exposure, 1.0f / Exposure, Exposure, 0.0f,
+        initialExposure, 1.0f / initialExposure, initialExposure, 0.0f,
         kInitialMinLog, kInitialMaxLog, kInitialMaxLog - kInitialMinLog, 1.0f / (kInitialMaxLog - kInitialMinLog)
     };
     g_Exposure.Create(L"Exposure", 8, 4, initExposure);
@@ -329,9 +340,10 @@ void PostEffects::UpdateExposure( ComputeContext& Context )
 
     if (!EnableAdaptation)
     {
+        const float manualExposure = Exposure * std::exp2(static_cast<float>(ExposureCompensationEV));
         __declspec(align(16)) float initExposure[] =
         {
-            Exposure, 1.0f / Exposure, Exposure, 0.0f,
+            manualExposure, 1.0f / manualExposure, manualExposure, 0.0f,
             kInitialMinLog, kInitialMaxLog, kInitialMaxLog - kInitialMinLog, 1.0f / (kInitialMaxLog - kInitialMinLog)
         };
         Context.WriteBuffer(g_Exposure, 0, initExposure, sizeof(initExposure));
@@ -356,12 +368,18 @@ void PostEffects::UpdateExposure( ComputeContext& Context )
         float AdaptationRate;
         float MinExposure;
         float MaxExposure;
+        float ExposureCompensationEV;
         uint32_t PixelCount; 
+        float ToneMapPeakBrightnessRatio;
     } constants =
     {
-        TargetLuminance, AdaptationRate, MinExposure, MaxExposure,
-        g_LumaLR.GetWidth() * g_LumaLR.GetHeight()
+        TargetLuminance,
+        // Preserve the tuning value's 60 Hz response at any render frame rate.
+        1.0f - std::pow(1.0f - static_cast<float>(AdaptationRate), 60.0f * Graphics::GetFrameTime()),
+        MinExposure, MaxExposure, ExposureCompensationEV,
+        g_LumaLR.GetWidth() * g_LumaLR.GetHeight(), GetToneMapPeakBrightnessRatio()
     };
+    static_assert(sizeof(constants) == 32, "Exposure constants must match the shader cbuffer layout.");
     Context.TransitionResource(g_Histogram, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     Context.TransitionResource(g_Exposure, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     Context.SetDynamicDescriptor(1, 0, g_Exposure.GetUAV());
@@ -397,7 +415,7 @@ void PostEffects::ProcessHDR( ComputeContext& Context )
     // Set constants
     Context.SetConstants(0, 1.0f / g_SceneColorBuffer.GetWidth(), 1.0f / g_SceneColorBuffer.GetHeight(),
         (float)BloomStrength);
-    Context.SetConstant(0, 3, (float)g_HDRPaperWhite / (float)g_MaxDisplayLuminance);
+    Context.SetConstant(0, 3, GetToneMapPeakBrightnessRatio());
     Context.SetConstant(0, 4, (float)g_MaxDisplayLuminance);
 
     // Separate out SDR result from its perceived luminance

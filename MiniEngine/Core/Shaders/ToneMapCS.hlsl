@@ -12,6 +12,7 @@
 //
 
 #include "ToneMappingUtility.hlsli"
+#include "PBRNeutralToneMapping.hlsli"
 #include "PostEffectsRS.hlsli"
 #include "PixelPacking.hlsli"
 
@@ -31,33 +32,10 @@ cbuffer CB0 : register(b0)
 {
     float2 g_RcpBufferDim;
     float g_BloomStrength;
-    float PaperWhiteRatio; // PaperWhite / MaxBrightness
+    float ToneMapPeakBrightnessRatio; // HDR: peak nits / paper-white nits; SDR: 1
     float MaxBrightness;
 };
 
-
-// Input color is non-negative and resides in the Linear Rec. 709 color space.
-// Output color is also Linear Rec. 709, but in the [0, 1] range.
-
-float3 PBRNeutralToneMapping(float3 color)
-{
-    const float startCompression = 0.8 - 0.04;
-    const float desaturation = 0.15;
-
-    float x = min(color.r, min(color.g, color.b));
-    float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
-    color -= offset;
-
-    float peak = max(color.r, max(color.g, color.b));
-    if (peak < startCompression) return color;
-
-    const float d = 1. - startCompression;
-    float newPeak = 1. - d * d / (peak + d - startCompression);
-    color *= newPeak / peak;
-
-    float g = 1. - 1. / (desaturation * (peak - newPeak) + 1.);
-    return lerp(color, newPeak * float3(1, 1, 1), g);
-}
 
 [RootSignature(PostEffects_RootSig)]
 [numthreads( 8, 8, 1 )]
@@ -75,34 +53,18 @@ void main( uint3 DTid : SV_DispatchThreadID )
     hdrColor += g_BloomStrength * Bloom.SampleLevel(LinearSampler, TexCoord, 0);
     hdrColor *= Exposure[0];
 
-    
 #if ENABLE_HDR_DISPLAY_MAPPING
-
-    //hdrColor = TM_Stanard(REC709toREC2020(hdrColor) * PaperWhiteRatio) * MaxBrightness;
-    // Write the HDR color as-is and defer display mapping until we composite with UI
-
-    hdrColor = PBRNeutralToneMapping(hdrColor);
+    // Preserve highlight headroom above paper white. Display encoding happens at present.
+    float3 mappedColor = PBRNeutralToneMapping(hdrColor, ToneMapPeakBrightnessRatio);
+#else
+    float3 mappedColor = PBRNeutralToneMapping(hdrColor);
+#endif
 
 #if SUPPORT_TYPED_UAV_LOADS
-    ColorRW[DTid.xy] = hdrColor;
+    ColorRW[DTid.xy] = mappedColor;
 #else
-    DstColor[DTid.xy] = Pack_R11G11B10_FLOAT(hdrColor);
+    DstColor[DTid.xy] = Pack_R11G11B10_FLOAT(mappedColor);
 #endif
-    OutLuma[DTid.xy] = RGBToLogLuminance(hdrColor);
-
-#else
-
-    // Tone map to SDR
-    //float3 sdrColor = TM_Stanard(hdrColor);
-    float3 sdrColor = PBRNeutralToneMapping(hdrColor);
-
-#if SUPPORT_TYPED_UAV_LOADS
-    ColorRW[DTid.xy] = sdrColor;
-#else
-    DstColor[DTid.xy] = Pack_R11G11B10_FLOAT(sdrColor);
-#endif
-
-    OutLuma[DTid.xy] = RGBToLogLuminance(sdrColor);
-
-#endif
+    // The FXAA luminance buffer is UNORM; normalize HDR highlights to avoid clipping it.
+    OutLuma[DTid.xy] = RGBToLogLuminance(mappedColor / ToneMapPeakBrightnessRatio);
 }

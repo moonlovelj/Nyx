@@ -472,6 +472,8 @@
     <None Include="Shaders\BicubicFilterFunctions.hlsli" />
     <None Include="Shaders\BitonicSortCommon.hlsli" />
     <None Include="Shaders\ColorSpaceUtility.hlsli" />
+    <None Include="Shaders\HDRDisplayMapping.hlsli" />
+    <None Include="Shaders\PBRNeutralToneMapping.hlsli" />
     <None Include="Shaders\CommonRS.hlsli" />
     <None Include="Shaders\DoFCommon.hlsli" />
     <None Include="Shaders\DoFRS.hlsli" />
