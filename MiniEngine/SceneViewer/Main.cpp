@@ -96,7 +96,7 @@ int wmain(int /*argc*/, wchar_t** /*argv*/)
     return GameCore::RunApplication(SceneViewer(), L"SceneViewer", GetModuleHandle(nullptr), SW_SHOWDEFAULT);
 }
 
-ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 6.0f, -5.0f, 20.0f, 0.1f); // unit: lx
+ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 12.0f, -5.0f, 20.0f, 0.1f); // unit: lx
 NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0f, 0.1f );
 NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f);
 NumVar g_SunAngularDiameter("Viewer/Lighting/Sun Angular Diameter", 0.5357f, 0.0f, 5.0f, 0.01f);
