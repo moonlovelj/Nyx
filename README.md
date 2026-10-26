@@ -4,7 +4,7 @@ A personal DirectX 12 renderer exploring Nanite-style geometry, demand-driven st
 
 **Mesh shaders · Continuous LOD · Geometry streaming · Virtual shadow maps**
 
-[Watch Demo](https://www.youtube.com/watch?v=4YmfQTLy4jc) · [Zorah](#zorah-virtualized-geometry) · [Bistro](#bistro-virtual-shadow-maps) · [Gallery](#zorah-gallery) · [Build and Run](#build-and-run) · [Architecture](#architecture-overview)
+[Watch Demo](https://www.youtube.com/watch?v=4YmfQTLy4jc) · [Zorah](#zorah-showcase) · [Bistro](#bistro-showcase) · [Gallery](#zorah-gallery) · [Build and Run](#build-and-run) · [Architecture](#architecture-overview)
 
 [![Zorah rendered in Nyx: lit view of the central courtyard](Images/Zorah/Lit.jpg)](https://www.youtube.com/watch?v=4YmfQTLy4jc)
 
@@ -12,9 +12,9 @@ A personal DirectX 12 renderer exploring Nanite-style geometry, demand-driven st
 
 *Video recorded on AMD Ryzen 9 9950X · 96 GB RAM · NVIDIA GeForce RTX 5070.*
 
-## Zorah: Virtualized Geometry
+## Zorah Showcase
 
-[NVIDIA's Zorah geometry export](https://developer.download.nvidia.com/ProGraphics/nvpro-samples/zorah_main_public.v2.gltf.7z) provides a large-scale scene for exploring hierarchical LOD, GPU-driven culling, and demand-driven geometry streaming.
+[NVIDIA's Zorah scene](https://developer.download.nvidia.com/ProGraphics/nvpro-samples/zorah_main_public.v2.gltf.7z) showcases virtualized geometry and virtual shadow maps at large scale, with hierarchical LOD selection, GPU-driven culling, demand-driven geometry streaming, and visualization modes for both geometry and shadows.
 
 | Scene geometry | Triangle count |
 | --- | ---: |
@@ -35,9 +35,9 @@ The comparison uses the same camera in all six modes. Click a mode below for its
 
 [View the full-resolution comparison — 11520 × 4320](Images/Zorah/Zorah_Merge.jpg)
 
-## Bistro: Virtual Shadow Maps
+## Bistro Showcase
 
-Bistro demonstrates directional virtual shadow maps in a textured scene, including detailed shadows and cache invalidation from animated objects.
+Bistro showcases the same virtualized geometry and virtual shadow map pipeline in a textured scene, highlighting shadow cache invalidation from animated objects.
 
 [![Bistro rendered in Nyx: cafe frontage and sunlit street](Images/Bistro/main.jpg)](Images/Bistro/main.jpg)
 
