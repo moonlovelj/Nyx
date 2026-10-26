@@ -1,79 +1,108 @@
-# Nanite-style virtualized geometry renderer on DirectX 12
+# Nyx — Virtualized Geometry & Virtual Shadow Maps
 
-Nanite-style virtualized geometry renderer on DirectX 12 (built on Microsoft MiniEngine).
+A personal DirectX 12 renderer exploring Nanite-style geometry, demand-driven streaming, and cached virtual shadow maps. Built on Microsoft MiniEngine.
 
-Nyx is a personal research project focused on extreme-scale geometry rendering: continuous LOD, GPU-driven culling, mesh-shader dispatch, and demand-driven geometry streaming.
+**Mesh shaders · Continuous LOD · Geometry streaming · Virtual shadow maps**
 
-The current stress test scene is [Zorah](https://developer.download.nvidia.com/ProGraphics/nvpro-samples/zorah_main_public.v2.gltf.7z) (NVIDIA), with:
+[Watch Demo](https://www.youtube.com/watch?v=4YmfQTLy4jc) · [Zorah](#zorah-virtualized-geometry) · [Bistro](#bistro-virtual-shadow-maps) · [Gallery](#zorah-gallery) · [Build and Run](#build-and-run) · [Architecture](#architecture-overview)
 
-- **1,639,668,228 unique triangles**
-- **18,949,504,889 instanced triangles**
+[![Zorah rendered in Nyx: lit view of the central courtyard](Images/Zorah/Lit.jpg)](https://www.youtube.com/watch?v=4YmfQTLy4jc)
 
-## Showcase
+**[▶ Watch the Zorah demo on YouTube](https://www.youtube.com/watch?v=4YmfQTLy4jc)** · [View the original 4K screenshot](Images/Zorah/Lit.jpg)
 
-Test platform for the screenshots/video below: **i7-14700KF + RTX 4070 Ti SUPER**, rendered at **4K**.
+*Video recorded on AMD Ryzen 9 9950X · 96 GB RAM · NVIDIA GeForce RTX 5070.*
 
-Demo video:
+## Zorah: Virtualized Geometry
 
-<h2 align="center">🎬 Nyx – Nanite-Style Virtualized Geometry Renderer</h2>
+[NVIDIA's Zorah geometry export](https://developer.download.nvidia.com/ProGraphics/nvpro-samples/zorah_main_public.v2.gltf.7z) provides a large-scale scene for exploring hierarchical LOD, GPU-driven culling, and demand-driven geometry streaming.
 
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=mBEIvRWloCw">
-    <img src="https://img.youtube.com/vi/mBEIvRWloCw/maxresdefault.jpg" width="1000">
-  </a>
-</p>
+| Scene geometry | Triangle count |
+| --- | ---: |
+| Unique geometry | **1,627,207,159** |
+| Including instances | **18,937,042,387** |
 
+These are source-scene totals. The geometry rasterized each frame depends on visibility and LOD selection.
 
-<p align="center">
-  4K • 144Hz • 18.9B Instanced Triangles • RTX 4070 Ti SUPER
-</p>
+[![Six views of the same Zorah camera: Lit, LOD, Meshlet, Triangle, VSM Clipmap, and VSM Page](Images/Zorah/Zorah_Merge_Compress.jpg)](Images/Zorah/Zorah_Merge.jpg)
 
+The comparison uses the same camera in all six modes. Click a mode below for its individual 4K screenshot.
 
-Screenshots:
+| Top left | Top center | Top right |
+| --- | --- | --- |
+| [Lit](Images/Zorah/Lit.jpg) | [LOD](Images/Zorah/LOD.jpg) | [Meshlet](Images/Zorah/Meshlet.jpg) |
+| **Bottom left** | **Bottom center** | **Bottom right** |
+| [Triangle](Images/Zorah/Triangle.jpg) | [VSM Clipmap](Images/Zorah/VSMClip.jpg) | [VSM Page](Images/Zorah/VSMPage.jpg) |
 
-<p align="center">Lit mode</p>
+[View the full-resolution comparison — 11520 × 4320](Images/Zorah/Zorah_Merge.jpg)
 
-![Zorah shading](Images/Zorah_Shading.png)
+## Bistro: Virtual Shadow Maps
 
+Bistro demonstrates directional virtual shadow maps in a textured scene, including detailed shadows and cache invalidation from animated objects.
 
+[![Bistro rendered in Nyx: cafe frontage and sunlit street](Images/Bistro/main.jpg)](Images/Bistro/main.jpg)
 
-<p align="center">Meshlet mode</p>
+### Dynamic Shadow Cache Invalidation
 
-![Zorah meshlets](Images/Zorah_Meshlet.png)
+<img src="Images/Bistro/VSM_Dynamic_1080P.gif" alt="Animated objects in Bistro invalidate affected virtual shadow map pages" width="100%">
 
+Moving objects invalidate affected cached shadow pages, which are then updated. The animation shows the shadow cache responding as objects move through the scene.
 
+<details>
+<summary>More Bistro views</summary>
 
-<p align="center">Triangle mode</p>
+[![Bistro viewed from above](Images/Bistro/1.jpg)](Images/Bistro/1.jpg)
 
-![Zorah triangles](Images/Zorah_Triangle.png)
+</details>
 
+## Zorah Gallery
 
+<details>
+<summary>Explore six additional lit views — click a screenshot for the 4K original</summary>
 
-![Zorah GPU trace](Images/Zorah_GPUTrace.png)
+<table>
+  <tr>
+    <td><a href="Images/Zorah/1.jpg"><img src="Images/Zorah/1.jpg" alt="Zorah lit view 1: carved arches and columns" width="480"></a></td>
+    <td><a href="Images/Zorah/2.jpg"><img src="Images/Zorah/2.jpg" alt="Zorah lit view 2: courtyard and planted terraces" width="480"></a></td>
+  </tr>
+  <tr>
+    <td><a href="Images/Zorah/3.jpg"><img src="Images/Zorah/3.jpg" alt="Zorah lit view 3: palace buildings and surrounding mountains" width="480"></a></td>
+    <td><a href="Images/Zorah/4.jpg"><img src="Images/Zorah/4.jpg" alt="Zorah lit view 4: central fountain and stairways" width="480"></a></td>
+  </tr>
+  <tr>
+    <td><a href="Images/Zorah/5.jpg"><img src="Images/Zorah/5.jpg" alt="Zorah lit view 5: ornamental dome interior" width="480"></a></td>
+    <td><a href="Images/Zorah/6.jpg"><img src="Images/Zorah/6.jpg" alt="Zorah lit view 6: elevated view across the scene" width="480"></a></td>
+  </tr>
+</table>
+
+</details>
 
 ## Core Features
 
-- Nanite-style meshlet hierarchy with DAG/BVH traversal
+### Virtualized Geometry
+
+- Nanite-style meshlet hierarchy with DAG/BVH traversal and screen-space LOD selection
 - GPU-driven rendering via indirect `DispatchMesh`
-- Two-pass frustum + HZB occlusion culling
-- Visibility buffer pipeline, then resolve to deferred GBuffer
-- Dynamic geometry streaming with residency/address table updates
-- Async page IO + LZ4-compressed geometry pages
-- Runtime Slang shader compilation and reflection-driven root signatures/bindings
-- Runtime debug/tuning UI (pixel error, culling freeze, debug modes)
+- Two-pass frustum and HZB occlusion culling
+- Visibility buffer rendering with deferred GBuffer resolve
+- Demand-driven streaming with residency/address table updates, async page I/O, and LZ4-compressed geometry pages
+
+### Virtual Shadow Maps
+
 - Directional virtual shadow maps with clipmaps and GPU-driven page allocation
 - Persistent shadow page caching with GPU LRU eviction and dynamic-object invalidation
 - Multi-view shadow rendering with two-pass HZB occlusion culling and coarse-page fallback
 - Directional SMRT soft shadows with adaptive receiver bias and short-range screen-space tracing
 - Geometry-streaming-aware shadow cache refresh with budgeted page retries
 
-## Quick Start
+Runtime Slang compilation provides shader reflection and root signature/binding generation. The tuning UI exposes pixel error, culling freeze, visualization modes, camera locking, and animation pause/resume.
+
+## Build and Run
 
 ### Requirements
 
 - Windows 10/11
 - Visual Studio 2022 with the Desktop development with C++ workload
-- DX12 GPU with Mesh Shader support
+- DX12 GPU and driver supporting mesh shaders, Shader Model 6.6, and 64-bit integer atomics on typed textures
 - NuGet package restore enabled
 - Git and Git LFS
 
@@ -113,6 +142,20 @@ The build automatically copies the Slang runtime, Slang standard module, `dxcomp
 
 Without `-model`, SceneViewer loads `Assets/bunny/bunny.gltf` with **10,000 instances**.
 With `-model`, the instance count defaults to **1**; use `-instances` to change it.
+
+### Run the Showcase Scenes
+
+From `MiniEngine\Build\x64\Release\Output\SceneViewer\`, load Bistro with:
+
+```powershell
+.\SceneViewer.exe -model .\Assets\bistro-metalrough\bistro_metalrough.gltf
+```
+
+Zorah is downloaded separately. Extract the [Zorah geometry export](https://developer.download.nvidia.com/ProGraphics/nvpro-samples/zorah_main_public.v2.gltf.7z) into `MiniEngine/SceneViewer/Assets/zorah_main_public.v2.gltf/`, then run:
+
+```powershell
+.\SceneViewer.exe -model .\Assets\zorah_main_public.v2.gltf\zorah_main_public.v2.gltf
+```
 
 ### Shader Toolchain
 
@@ -154,7 +197,7 @@ Arguments:
 
 Rendering and display resolutions default to **Monitor Native**, using the window's monitor desktop resolution in physical pixels, with a borderless fullscreen window. Windows DPI scaling does not reduce the rendering resolution. Under `Graphics/Display`, change `Native Resolution` to adjust internal rendering, or select a preset for `Display Resolution` to return to a regular window.
 
-Source material textures compile to BC7 DDS with full mip chains, using sRGB for color maps and linear formats for data maps. Existing `.mini` geometry caches automatically adopt this policy. Stale DDS files and caches with incompatible formats are rebuilt from the source image on load; the first conversion can take longer. BC6H/BC7 encoding uses GPU acceleration when available, with a CPU fallback. Authored DDS inputs are preserved, and DDS-only packages remain loadable.
+Source LDR material textures default to BC7 DDS with full mip chains when both dimensions are multiples of four; other LDR dimensions use uncompressed RGBA8. Color maps use sRGB formats, and data maps use linear formats. Existing `.mini` geometry caches automatically adopt this policy. Stale DDS files and caches with incompatible formats are rebuilt from the source image on load; the first conversion can take longer. BC6H/BC7 encoding uses GPU acceleration when available, with a CPU fallback. Authored DDS inputs are preserved, and DDS-only packages remain loadable.
 
 ## Architecture Overview
 
@@ -163,8 +206,12 @@ Source material textures compile to BC7 DDS with full mip chains, using sRGB for
 Meshes are split into meshlets, then grouped and simplified to build the
 LOD hierarchy. The GPU selects LODs using a screen-space error threshold
 and performs frustum and HZB culling in two passes. Geometry pages are
-compressed with LZ4 and loaded as needed. Root pages stay resident,
-providing a coarse LOD while finer geometry is loading.
+compressed with LZ4 and loaded as needed. Root pages are pinned within the
+residency budget (up to 6,144 pages, subject to available slots), providing
+a coarse LOD while finer geometry is loading.
+
+<details>
+<summary>Offline build and runtime frame flow</summary>
 
 ### Offline / First-load Build (`.gltf/.glb` -> `.mini`)
 
@@ -186,6 +233,8 @@ providing a coarse LOD while finer geometry is loading.
 6. Resolve the visibility buffer to GBuffer
 7. Render directional VSM depth with two-pass HZB culling
 8. Deferred lighting with VSM shadow sampling, followed by post effects
+
+</details>
 
 ### Directional Virtual Shadow Maps
 
@@ -236,6 +285,8 @@ The retry budget and pending/retried page counts are available under
 
 ## Acknowledgements
 
+- Zorah geometry export: NVIDIA
+- [Bistro Metallic-Roughness](https://github.com/moonlovelj/bistro-metalrough), based on Amazon Lumberyard Bistro
 - [Unreal Engine Nanite talks and publications](https://advances.realtimerendering.com/s2021/Karis_Nanite_SIGGRAPH_Advances_2021_final.pdf)
 - [Microsoft MiniEngine](https://github.com/microsoft/DirectX-Graphics-Samples/tree/master/MiniEngine)
 - [DirectXTex](https://github.com/microsoft/DirectXTex), [DirectXMesh](https://github.com/microsoft/DirectXMesh), and [DirectXMath](https://github.com/microsoft/DirectXMath)
