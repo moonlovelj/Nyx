@@ -4,7 +4,7 @@ A personal DirectX 12 renderer exploring Nanite-style geometry, demand-driven st
 
 **Mesh shaders · Continuous LOD · Geometry streaming · Virtual shadow maps**
 
-[Watch Demo](https://www.youtube.com/watch?v=4YmfQTLy4jc) · [Zorah](#zorah-showcase) · [Bistro](#bistro-showcase) · [Gallery](#zorah-gallery) · [Build and Run](#build-and-run) · [Architecture](#architecture-overview)
+[Watch Demo](https://www.youtube.com/watch?v=4YmfQTLy4jc) · [Download](https://github.com/moonlovelj/Nyx/releases/latest) · [Zorah](#zorah-showcase) · [Bistro](#bistro-showcase) · [Gallery](#zorah-gallery) · [Build and Run](#build-and-run) · [Architecture](#architecture-overview)
 
 [![Zorah rendered in Nyx: lit view of the central courtyard](Images/Zorah/Lit.jpg)](https://www.youtube.com/watch?v=4YmfQTLy4jc)
 
@@ -98,7 +98,11 @@ Runtime Slang compilation provides shader reflection and root signature/binding 
 
 ## Build and Run
 
-### Requirements
+### Run a Release Build
+
+Download the Windows x64 ZIP from the [latest release](https://github.com/moonlovelj/Nyx/releases/latest), extract the entire archive, and run `LaunchBistro.cmd` to start the included Bistro demo.
+
+### Source Build Requirements
 
 - Windows 10/11
 - Visual Studio 2022 with the Desktop development with C++ workload
