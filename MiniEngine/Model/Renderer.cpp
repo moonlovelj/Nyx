@@ -169,8 +169,6 @@ namespace Renderer
     TextureRef s_IrradianceCubeMap;
     float s_SpecularIBLRange;
     float s_SpecularIBLBias;
-    uint32_t g_SSAOFullScreenID;
-    uint32_t g_SceneHZBIDs[2];
 
     //RootSignature m_RootSig;
     GraphicsPSO m_SkyboxPSO(L"Renderer: Skybox PSO");
@@ -387,10 +385,6 @@ void Renderer::Initialize(void)
     if (!VirtualShadowMap::Initialize())
         return;
 
-    g_SSAOFullScreenID = g_SSAOFullScreen.GetVersionID();
-    g_SceneHZBIDs[0] = g_FurthestHZB[0].GetVersionID();
-    g_SceneHZBIDs[1] = g_FurthestHZB[1].GetVersionID();
-
 	GPUDrivenDrawIndirectCommandSignature.Reset(1);
 	GPUDrivenDrawIndirectCommandSignature[0].DispatchMesh();
 	GPUDrivenDrawIndirectCommandSignature.Finalize(nullptr, sizeof(DispatchMeshCommand));
@@ -527,54 +521,56 @@ void Renderer::Initialize(void)
     ProgramUtils::SetProgram(m_ObjectVelocityPSO, *m_ObjectVelocityProgram);
     m_ObjectVelocityPSO.Finalize();
 
-    // Initialize bindless resource descriptor bindings
-    {
-        // srv
-        SetBindlessResourceDescriptor(SRV_SCENE_COLOR, g_SceneColorBuffer.GetSRV());
-		SetBindlessResourceDescriptor(SRV_SCENE_DEPTH, g_SceneDepthBuffer.GetDepthSRV());
-		//SetBindlessResourceDescriptor(SRV_SCENE_STENCIL, g_SceneDepthBuffer.GetStencilSRV());
-		SetBindlessResourceDescriptor(SRV_GBUFFER_A, g_GBufferA.GetSRV());
-		SetBindlessResourceDescriptor(SRV_GBUFFER_B, g_GBufferB.GetSRV());
-		SetBindlessResourceDescriptor(SRV_GBUFFER_C, g_GBufferC.GetSRV());
-		SetBindlessResourceDescriptor(SRV_GBUFFER_D, g_GBufferD.GetSRV());
-		SetBindlessResourceDescriptor(SRV_IBL_CUBE_MAP, GetDefaultTexture(kBlackCubeMap));
-		SetBindlessResourceDescriptor(SRV_IBL_DIFFUSE_LD, GetDefaultTexture(kBlackCubeMap));
-		SetBindlessResourceDescriptor(SRV_IBL_SPECULAR_LD, GetDefaultTexture(kBlackCubeMap));
-		SetBindlessResourceDescriptor(SRV_IBL_LUT, GetDefaultTexture(kBlackTransparent2D));
-		SetBindlessResourceDescriptor(SRV_SSAO, g_SSAOFullScreen.GetSRV());
-		SetBindlessResourceDescriptor(SRV_SCENE_HZB0, g_FurthestHZB[0].GetSRV());
-		SetBindlessResourceDescriptor(SRV_SCENE_HZB1, g_FurthestHZB[1].GetSRV());
-		SetBindlessResourceDescriptor(SRV_VBUFFER, g_VisibilityBuffer.GetSRV());
-
-        // uav
-		SetBindlessResourceDescriptor(UAV_SCENE_COLOR, g_SceneColorBuffer.GetUAV());
-		SetBindlessResourceDescriptor(UAV_VBUFFER, g_VisibilityBuffer.GetUAV());
-		SetBindlessResourceDescriptor(UAV_GBUFFER_A, g_GBufferA.GetUAV());
-		SetBindlessResourceDescriptor(UAV_GBUFFER_B, g_GBufferB.GetUAV());
-		SetBindlessResourceDescriptor(UAV_GBUFFER_C, g_GBufferC.GetUAV());
-		SetBindlessResourceDescriptor(UAV_GBUFFER_D, g_GBufferD.GetUAV());
-    }
+    // Initialize bindless resource descriptor bindings.
+    UpdateGlobalDescriptors(true);
+    SetBindlessResourceDescriptor(SRV_IBL_CUBE_MAP, GetDefaultTexture(kBlackCubeMap));
+    SetBindlessResourceDescriptor(SRV_IBL_DIFFUSE_LD, GetDefaultTexture(kBlackCubeMap));
+    SetBindlessResourceDescriptor(SRV_IBL_SPECULAR_LD, GetDefaultTexture(kBlackCubeMap));
+    SetBindlessResourceDescriptor(SRV_IBL_LUT, GetDefaultTexture(kBlackTransparent2D));
 
     s_Initialized = true;
 }
 
-void Renderer::UpdateGlobalDescriptors(void)
+void Renderer::UpdateGlobalDescriptors(bool forceUpdate)
 {
-    if (g_SSAOFullScreenID == g_SSAOFullScreen.GetVersionID() &&
-        g_SceneHZBIDs[0] == g_FurthestHZB[0].GetVersionID() &&
-        g_SceneHZBIDs[1] == g_FurthestHZB[1].GetVersionID())
+    struct Binding
     {
-        return;
+        uint32_t Index;
+        const GpuResource* Resource;
+        D3D12_CPU_DESCRIPTOR_HANDLE Handle;
+    };
+    const Binding bindings[] = {
+        { SRV_SCENE_COLOR, &g_SceneColorBuffer, g_SceneColorBuffer.GetSRV() },
+        { SRV_SCENE_DEPTH, &g_SceneDepthBuffer, g_SceneDepthBuffer.GetDepthSRV() },
+        { SRV_GBUFFER_A, &g_GBufferA, g_GBufferA.GetSRV() },
+        { SRV_GBUFFER_B, &g_GBufferB, g_GBufferB.GetSRV() },
+        { SRV_GBUFFER_C, &g_GBufferC, g_GBufferC.GetSRV() },
+        { SRV_GBUFFER_D, &g_GBufferD, g_GBufferD.GetSRV() },
+        { SRV_VBUFFER, &g_VisibilityBuffer, g_VisibilityBuffer.GetSRV() },
+        { SRV_SSAO, &g_SSAOFullScreen, g_SSAOFullScreen.GetSRV() },
+        { SRV_SCENE_HZB0, &g_FurthestHZB[0], g_FurthestHZB[0].GetSRV() },
+        { SRV_SCENE_HZB1, &g_FurthestHZB[1], g_FurthestHZB[1].GetSRV() },
+        { UAV_SCENE_COLOR, &g_SceneColorBuffer, g_SceneColorBuffer.GetUAV() },
+        { UAV_VBUFFER, &g_VisibilityBuffer, g_VisibilityBuffer.GetUAV() },
+        { UAV_GBUFFER_A, &g_GBufferA, g_GBufferA.GetUAV() },
+        { UAV_GBUFFER_B, &g_GBufferB, g_GBufferB.GetUAV() },
+        { UAV_GBUFFER_C, &g_GBufferC, g_GBufferC.GetUAV() },
+        { UAV_GBUFFER_D, &g_GBufferD, g_GBufferD.GetUAV() },
+    };
+    static uint32_t versions[_countof(bindings)] = {};
+
+    // Each binding follows its own resource; buffers may also be recreated independently.
+    // Initialization forces a copy because a new descriptor heap has no cached bindings.
+    for (uint32_t i = 0; i < _countof(bindings); ++i)
+    {
+        const Binding& binding = bindings[i];
+        const uint32_t version = binding.Resource->GetVersionID();
+        if (!forceUpdate && versions[i] == version)
+            continue;
+
+        SetBindlessResourceDescriptor(binding.Index, binding.Handle);
+        versions[i] = version;
     }
-
-	SetBindlessResourceDescriptor(SRV_SSAO, g_SSAOFullScreen.GetSRV());
-    SetBindlessResourceDescriptor(SRV_SCENE_HZB0, g_FurthestHZB[0].GetSRV());
-    SetBindlessResourceDescriptor(SRV_SCENE_HZB1, g_FurthestHZB[1].GetSRV());
-
-    g_SSAOFullScreenID = g_SSAOFullScreen.GetVersionID();
-    g_SceneHZBIDs[0] = g_FurthestHZB[0].GetVersionID();
-    g_SceneHZBIDs[1] = g_FurthestHZB[1].GetVersionID();
-
 }
 
 void Renderer::SetIBLTextures()

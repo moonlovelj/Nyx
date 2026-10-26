@@ -31,6 +31,7 @@ public:
     CameraController( Camera& camera ) : m_TargetCamera(camera) {}
     virtual ~CameraController() {}
     virtual void Update( float dt ) = 0;
+    virtual void ResetMomentum() = 0;
 
     // Helper function
     static void ApplyMomentum( float& oldValue, float& newValue, float deltaTime );
@@ -48,6 +49,7 @@ public:
     FlyingFPSCamera( Camera& camera, Vector3 worldUp );
 
     virtual void Update( float dt ) override;
+    virtual void ResetMomentum() override;
 
     void SlowMovement( bool enable ) { m_FineMovement = enable; }
     void SlowRotation( bool enable ) { m_FineRotation = enable; }
@@ -93,6 +95,7 @@ public:
         Math::Vector3 upVec = Math::Vector3(Math::kYUnitVector) );
 
     virtual void Update( float dt ) override;
+    virtual void ResetMomentum() override;
 
     void EnableMomentum( bool enable ) { m_Momentum = enable; }
 

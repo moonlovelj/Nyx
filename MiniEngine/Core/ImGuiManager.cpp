@@ -60,11 +60,27 @@ namespace
     static const UINT kSrvHeapSize = 512;
     static const UINT kFramesInFlight = 3;
     static HWND s_Hwnd = nullptr;
+    static ImGuiStyle s_BaseStyle;
+    static float s_DpiScale = 0.0f;
     static bool s_CaptureMouseFromWndProc = false;
     static bool s_CaptureKeyboardFromWndProc = false;
     static bool s_MouseButtonsFromWndProc = false;
     static bool s_LastMouseButtons[5] = { false, false, false, false, false };
     static bool s_AltHeld = false;
+
+    void UpdateDpiScale()
+    {
+        const float dpiScale = ImGui_ImplWin32_GetDpiScaleForHwnd(s_Hwnd);
+        if (dpiScale == s_DpiScale)
+            return;
+
+        // Always scale the original style so monitor changes cannot accumulate rounding errors.
+        ImGuiStyle& style = ImGui::GetStyle();
+        style = s_BaseStyle;
+        style.ScaleAllSizes(dpiScale);
+        style.FontScaleDpi = dpiScale;
+        s_DpiScale = dpiScale;
+    }
 }
 
 namespace ImGuiManager
@@ -85,6 +101,11 @@ namespace ImGuiManager
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
         ImGui::StyleColorsDark();
+        ImGui::GetStyle().FontSizeBase = 16.0f;
+        s_BaseStyle = ImGui::GetStyle();
+        s_DpiScale = 0.0f;
+        UpdateDpiScale();
+        io.Fonts->AddFontDefaultVector();
 
         ImGui_ImplWin32_Init(hwnd);
 
@@ -128,6 +149,7 @@ namespace ImGuiManager
         s_SrvHeapAlloc.Destroy();
         s_SrvHeap.Reset();
         s_Hwnd = nullptr;
+        s_DpiScale = 0.0f;
         s_Initialized = false;
     }
 
@@ -136,6 +158,8 @@ namespace ImGuiManager
         if (!s_Initialized)
             return;
 
+        // Apply DPI changes before either backend or ImGui starts the new frame.
+        UpdateDpiScale();
         ImGui_ImplDX12_NewFrame();
         ImGui_ImplWin32_NewFrame();
 

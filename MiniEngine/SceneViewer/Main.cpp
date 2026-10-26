@@ -104,6 +104,8 @@ BoolVar g_EnableSunVsmSampling("Viewer/Lighting/Enable Sun VSM Sampling", true);
 BoolVar g_InvalidateSunVsmCache("Viewer/Lighting/Invalidate VSM Cache", false);
 //NumVar g_SunLightSize("Viewer/Lighting/Sun Light Size", 0.5f, 0.0f, 2.0f, 0.1f);
 BoolVar g_UseglTFCamera("Camera/Use glTF Camera", false);
+BoolVar g_LockCamera("Camera/Lock Camera", false);
+BoolVar g_PauseAnimations("Application/Pause Animations", false);
 
 void ChangeIBLSet(EngineVar::ActionType);
 void ChangeIBLBias(EngineVar::ActionType);
@@ -487,16 +489,22 @@ void SceneViewer::Update( float deltaT )
     // Monitor-native modes can be ultrawide or portrait, so update projection from render dimensions.
     m_Camera.SetAspectRatio(static_cast<float>(g_SceneColorBuffer.GetHeight()) /
         static_cast<float>(g_SceneColorBuffer.GetWidth()));
-    if (!bUseglTFCamera)
+    if (g_LockCamera)
+    {
+        m_CameraController->ResetMomentum();
+        m_Camera.Update();
+    }
+    else if (!bUseglTFCamera)
         m_CameraController->Update(deltaT);
 
     GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Update");
 
-    ModelInstanceManager::Update(gfxContext, deltaT);
+    // Freeze animation time while keeping transforms and GPU scene data up to date.
+    ModelInstanceManager::Update(gfxContext, g_PauseAnimations ? 0.0f : deltaT);
 
     gfxContext.Finish();
     
-	if (bUseglTFCamera)
+	if (bUseglTFCamera && !g_LockCamera)
 	{
 		std::shared_ptr<Math::Camera> Camera = ModelInstanceManager::GetModelInstance(0).GetCameras()[0];
 		m_Camera.SetFOV(Camera->GetFOV());

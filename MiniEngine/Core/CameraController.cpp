@@ -136,6 +136,15 @@ void FlyingFPSCamera::Update( float deltaTime )
     m_TargetCamera.Update();
 }
 
+void FlyingFPSCamera::ResetMomentum()
+{
+    m_LastYaw = 0.0f;
+    m_LastPitch = 0.0f;
+    m_LastForward = 0.0f;
+    m_LastStrafe = 0.0f;
+    m_LastAscent = 0.0f;
+}
+
 void FlyingFPSCamera::SetHeadingPitchAndPosition(float heading, float pitch, const Vector3& position)
 {
     m_CurrentHeading = heading;
@@ -186,6 +195,12 @@ OrbitCamera::OrbitCamera( Camera& camera, Math::BoundingSphere focus, Vector3 wo
 
     m_Momentum = true;
 
+    m_LastYaw = 0.0f;
+    m_LastPitch = 0.0f;
+}
+
+void OrbitCamera::ResetMomentum()
+{
     m_LastYaw = 0.0f;
     m_LastPitch = 0.0f;
 }

@@ -120,23 +120,6 @@ Nyx uses the bundled **Slang** and **DXC** toolchain to compile Shader Model 6.6
 
 Packaged builds load shaders and includes from their bundled `MiniEngine` tree. Local builds fall back to the repository source tree.
 
-### Zorah Quick Start (Prebuilt Cache)
-
-Building Zorah cache locally can be time-consuming and memory-intensive.
-If you only want to run the demo, use the prebuilt files:
-
-- [Download prebuilt Zorah package](https://pan.quark.cn/s/28de91939fee)
-
-After download, extract/copy the files to:
-
-`MiniEngine/SceneViewer/Assets/zorah_main_public/`
-
-Then run:
-
-```powershell
-.\SceneViewer.exe -model .\Assets\zorah_main_public\zorah_main_public.gltf
-```
-
 ## Command Line
 
 From the SceneViewer output directory, examples:
@@ -166,6 +149,8 @@ Arguments:
 - `Shift`: fine movement toggle
 - `Backspace`: engine tuning/debug UI
 - Hold `Alt`: interact with the UI
+- `Camera/Lock Camera`: freeze the current camera for screenshots; uncheck to resume camera control
+- `Application/Pause Animations`: pause all model animations at the current time; uncheck to resume playback
 
 Rendering and display resolutions default to **Monitor Native**, using the window's monitor desktop resolution in physical pixels, with a borderless fullscreen window. Windows DPI scaling does not reduce the rendering resolution. Under `Graphics/Display`, change `Native Resolution` to adjust internal rendering, or select a preset for `Display Resolution` to return to a regular window.
 

@@ -319,7 +319,7 @@ namespace Renderer
 
     void SetIBLTextures();
     void SetIBLBias(float LODBias);
-    void UpdateGlobalDescriptors(void);
+    void UpdateGlobalDescriptors(bool forceUpdate = false);
     void DrawSkybox(GraphicsContext& gfxContext,
         const RenderView& view,
         const FrameConstants& frame);

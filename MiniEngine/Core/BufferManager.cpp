@@ -125,10 +125,16 @@ void Graphics::InitializeRenderingBuffers( uint32_t bufferWidth, uint32_t buffer
         g_GBufferB.Create( L"GBufferB", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, esram );
         g_GBufferC.Create( L"GBufferC", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, esram );
         g_GBufferD.Create( L"GBufferD", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, esram );
-        g_IBLCubeMap.CreateCube(L"IBLCubeMap", IBL::g_IBLCubeMapSize, IBL::g_IBLCubeMapSize, 0, DXGI_FORMAT_R16G16B16A16_FLOAT, esram);
-        g_IBLDiffuseLDMap.CreateCube( L"IBLDiffuseLDMap", IBL::g_IBLDiffuseLDMapSize, IBL::g_IBLDiffuseLDMapSize, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, esram );
-        g_IBLSpecularLDMap.CreateCube(L"IBLSpecularLDMap", IBL::g_IBLSpecularLDMapSize, IBL::g_IBLSpecularLDMapSize, 0, DXGI_FORMAT_R16G16B16A16_FLOAT, esram);
-		g_IBLLut.Create(L"IBL Lut", IBL::g_IBLLutSize, IBL::g_IBLLutSize, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
+        // IBL textures are independent of the render resolution. Preserve their
+        // precomputed contents and shader-visible descriptors when scene buffers resize.
+        if (g_IBLCubeMap.GetResource() == nullptr)
+            g_IBLCubeMap.CreateCube(L"IBLCubeMap", IBL::g_IBLCubeMapSize, IBL::g_IBLCubeMapSize, 0, DXGI_FORMAT_R16G16B16A16_FLOAT, esram);
+        if (g_IBLDiffuseLDMap.GetResource() == nullptr)
+            g_IBLDiffuseLDMap.CreateCube( L"IBLDiffuseLDMap", IBL::g_IBLDiffuseLDMapSize, IBL::g_IBLDiffuseLDMapSize, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, esram );
+        if (g_IBLSpecularLDMap.GetResource() == nullptr)
+            g_IBLSpecularLDMap.CreateCube(L"IBLSpecularLDMap", IBL::g_IBLSpecularLDMapSize, IBL::g_IBLSpecularLDMapSize, 0, DXGI_FORMAT_R16G16B16A16_FLOAT, esram);
+        if (g_IBLLut.GetResource() == nullptr)
+            g_IBLLut.Create(L"IBL Lut", IBL::g_IBLLutSize, IBL::g_IBLLutSize, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
         g_VelocityBuffer.Create( L"Motion Vectors", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R32_UINT );
         g_PostEffectsBuffer.Create( L"Post Effects Buffer", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R32_UINT );
 		g_VisibilityBuffer.Create(L"Visibility Buffer", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R32G32_UINT, esram);
