@@ -9,6 +9,7 @@ struct ResolveVBufferToGBufferConstants
     uint ViewportWidth;
     uint ViewportHeight;
     uint ViewMode;
+    float MaterialGradientScale;
 };
 
 ConstantBuffer<ResolveVBufferToGBufferConstants> g_ResolveVBufferToGBuffer;
@@ -67,7 +68,10 @@ float4 SampleTextureWithDerivs(
         uv_dx = lerp(vsOutput.uv0_dx, vsOutput.uv1_dx, (flags >> offset) & 1);
         uv_dy = lerp(vsOutput.uv0_dy, vsOutput.uv1_dy, (flags >> offset) & 1);
     }
-    return texture.SampleGrad(texSampler, uv, uv_dx, uv_dy);
+    // SampleGrad ignores implicit derivative bias: scale both gradients equally
+    // to shift the selected mip while preserving the anisotropic footprint ratio.
+    const float gradientScale = g_ResolveVBufferToGBuffer.MaterialGradientScale;
+    return texture.SampleGrad(texSampler, uv, uv_dx * gradientScale, uv_dy * gradientScale);
 }
 
 float3 ComputeNormal(VSOutput vsOutput, Texture2D<float4> NormalTexture,

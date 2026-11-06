@@ -115,22 +115,22 @@ void FXAA::Shutdown(void)
     WorkCounters.Destroy();
 }
 
-void FXAA::Render( ComputeContext& Context, bool bUsePreComputedLuma )
+void FXAA::Render( ComputeContext& Context, ColorBuffer& frameColor, bool bUsePreComputedLuma )
 {
     ScopedTimer _prof(L"FXAA", Context);
 
     if (ForceOffPreComputedLuma)
         bUsePreComputedLuma = false;
 
-    ColorBuffer& Target = g_bTypedUAVLoadSupport_R11G11B10_FLOAT ? g_SceneColorBuffer : g_PostEffectsBuffer;
+    ColorBuffer& Target = g_bTypedUAVLoadSupport_R11G11B10_FLOAT ? frameColor : g_PostEffectsBuffer;
 
     Context.SetRootSignature(RootSig);
     Context.SetConstants(0, 1.0f / Target.GetWidth(), 1.0f / Target.GetHeight(), (float)ContrastThreshold, (float)SubpixelRemoval);
     Context.SetConstant(0, 4, g_FXAAWorkQueue.GetElementCount() - 1);
 
     // Apply algorithm to each quarter of the screen separately to reduce maximum size of work buffers.
-    uint32_t BlockWidth = Target.GetWidth() / 2;
-    uint32_t BlockHeight = Target.GetHeight() / 2;
+    const uint32_t BlockWidth = Math::AlignUp((Target.GetWidth() + 1) / 2, 8);
+    const uint32_t BlockHeight = Math::AlignUp((Target.GetHeight() + 1) / 2, 8);
 
     D3D12_CPU_DESCRIPTOR_HANDLE Pass1UAVs[] =
     {
@@ -150,9 +150,14 @@ void FXAA::Render( ComputeContext& Context, bool bUsePreComputedLuma )
     {
         for (uint32_t y = 0; y < 2; y++)
         {
+            const uint32_t left = x * BlockWidth;
+            const uint32_t top = y * BlockHeight;
+            if (left >= Target.GetWidth() || top >= Target.GetHeight())
+                continue;
+
             // Pass 1
-            Context.SetConstant(0, 5, x*BlockWidth);
-            Context.SetConstant(0, 6, y*BlockHeight);
+            Context.SetConstant(0, 5, left);
+            Context.SetConstant(0, 6, top);
 
             // Begin by analysing the luminance buffer and setting aside high-contrast pixels in
             // work queues to be processed later.  There are horizontal edge and vertical edge work
@@ -178,7 +183,7 @@ void FXAA::Render( ComputeContext& Context, bool bUsePreComputedLuma )
                 Context.SetDynamicDescriptors(2, 0, _countof(Pass1SRVs) - 1, Pass1SRVs);
             }
 
-            Context.Dispatch2D(BlockWidth, BlockHeight);
+            Context.Dispatch2D(std::min(BlockWidth, Target.GetWidth() - left), std::min(BlockHeight, Target.GetHeight() - top));
 
             // Pass 2
 

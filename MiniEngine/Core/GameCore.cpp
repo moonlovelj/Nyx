@@ -19,6 +19,7 @@
 #include "BufferManager.h"
 #include "CommandContext.h"
 #include "PostEffects.h"
+#include "FXAA.h"
 #include "Display.h"
 #include "ImGuiManager.h"
 #include "Util/CommandLineArg.h"
@@ -70,6 +71,14 @@ namespace GameCore
 
     bool UpdateApplication( IGameApp& game )
     {
+        if (gIsSupending)
+        {
+            WaitMessage();
+            return !game.IsDone();
+        }
+        const PixelSize outputSize = Display::GetRequestedOutputSize();
+        Display::ApplyFrameResolution(outputSize, game.GetReconstructionRenderSize(outputSize));
+
         float DeltaTime = Graphics::GetFrameTime();
     
         GameInput::Update(DeltaTime);
@@ -77,10 +86,12 @@ namespace GameCore
         EngineProfiling::Update();
         EngineTuning::Update(DeltaTime);
         
+        TemporalEffects::BeginFrame(Graphics::GetFrameCount(), game.GetTemporalMode(), Display::GetFrameResolution());
         game.Update(DeltaTime);
         game.RenderScene();
 
-        PostEffects::Render();
+        ColorBuffer& frameColor = game.GetFrameColor();
+        PostEffects::Render(frameColor);
 
         GraphicsContext& UiContext = GraphicsContext::Begin(L"Render UI");
         UiContext.TransitionResource(g_OverlayBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
@@ -95,12 +106,24 @@ namespace GameCore
 
         UiContext.Finish();
 
-        Display::Present();
+        Display::Present(frameColor);
 
         return !game.IsDone();
     }
 
     // Default implementation to be overridden by the application
+    ColorBuffer& IGameApp::GetFrameColor()
+    {
+        return g_ReconstructionOutput.GetResource() ? g_ReconstructionOutput : g_SceneColorBuffer;
+    }
+
+    TemporalEffects::Mode IGameApp::GetTemporalMode() const
+    {
+        if (TemporalEffects::EnableTAA)
+            return TemporalEffects::Mode::TAA;
+        return FXAA::Enable ? TemporalEffects::Mode::FXAA : TemporalEffects::Mode::Off;
+    }
+
     bool IGameApp::IsDone( void )
     {
         return s_ExitRequested;
@@ -304,7 +327,14 @@ namespace GameCore
             DestroyWindow(hWnd);
             return 0;
 
+        case WM_ENTERSIZEMOVE:
+            TemporalEffects::InvalidateHistory(TemporalEffects::ResetReason::RenderInterrupted);
+            break;
+
         case WM_SIZE:
+            if ((wParam == SIZE_MINIMIZED) != gIsSupending)
+                TemporalEffects::InvalidateHistory(TemporalEffects::ResetReason::RenderInterrupted);
+            gIsSupending = wParam == SIZE_MINIMIZED;
             Display::Resize((UINT)(UINT64)lParam & 0xFFFF, (UINT)(UINT64)lParam >> 16);
             break;
 

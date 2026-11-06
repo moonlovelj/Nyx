@@ -14,6 +14,8 @@
 #pragma once
 
 #include "pch.h"
+#include "Display.h"
+#include "TemporalEffects.h"
 
 namespace GameCore
 {
@@ -37,6 +39,13 @@ namespace GameCore
 
         // Official rendering pass
         virtual void RenderScene( void ) = 0;
+
+        // Return the backend's render size for this output, or {} to render at output size.
+        virtual PixelSize GetReconstructionRenderSize(PixelSize /*outputSize*/) { return {}; }
+        // Return the HDR result written by RenderScene: scene color in native-resolution mode,
+        // or g_ReconstructionOutput when GetReconstructionRenderSize supplied a size.
+        virtual ColorBuffer& GetFrameColor();
+        virtual TemporalEffects::Mode GetTemporalMode() const;
 
         // Optional UI (overlay) rendering pass.  This is LDR.  The buffer is already cleared.
         virtual void RenderUI( class GraphicsContext& ) {};

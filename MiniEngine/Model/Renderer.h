@@ -63,6 +63,7 @@ namespace Renderer
             , InvViewportWidth(0.0f)
             , InvViewportHeight(0.0f)
             , LodScale(0.0f)
+            , MaterialGradientScale(1.0f)
         {
         }
 
@@ -86,7 +87,10 @@ namespace Renderer
         uint32_t ViewportHeight;
         float InvViewportWidth;
         float InvViewportHeight;
+        // Output-pixel scale for geometry LOD and VSM receiver clipmap selection.
+        // Views without a LOD resolution override use their raster viewport.
         float LodScale;
+        float MaterialGradientScale;
     };
 
     struct FrameConstants
@@ -143,6 +147,8 @@ namespace Renderer
             : m_Camera(nullptr)
             , m_Viewport{}
             , m_Scissor{}
+            , m_LodWidth(0)
+            , m_LodHeight(0)
             , m_HasHistory(false)
         {
         }
@@ -216,6 +222,19 @@ namespace Renderer
             m_Scissor = scissor;
         }
 
+        // A zero size follows the raster viewport (the default for other views).
+        void SetLodResolution(uint32_t width, uint32_t height)
+        {
+            m_LodWidth = width;
+            m_LodHeight = height;
+            UpdateLodScale();
+        }
+
+        void SetMaterialMipBias(float bias)
+        {
+            m_Constants.MaterialGradientScale = std::exp2(bias);
+        }
+
         void SetHZBSize(uint32_t width, uint32_t height)
         {
             const float widthF = static_cast<float>(width);
@@ -266,28 +285,31 @@ namespace Renderer
                 SetPreviousView(nullptr);
         }
 
-        void UpdateLodScale()
+        float ComputeLodScale(float width, float height) const
         {
             const float scaleX = std::fabs(static_cast<float>(m_Constants.ProjMatrix.GetX().GetX()));
             const float scaleY = std::fabs(static_cast<float>(m_Constants.ProjMatrix.GetY().GetY()));
 
-            if (scaleX > 0.0f && scaleY > 0.0f && m_Viewport.Width > 0.0f && m_Viewport.Height > 0.0f)
+            if (scaleX > 0.0f && scaleY > 0.0f && width > 0.0f && height > 0.0f)
             {
-                const float lodScaleX = 2.0f / (scaleX * m_Viewport.Width);
-                const float lodScaleY = 2.0f / (scaleY * m_Viewport.Height);
+                return std::min(2.0f / (scaleX * width), 2.0f / (scaleY * height));
+            }
+            return 0.0f;
+        }
 
-                m_Constants.LodScale = std::min(lodScaleX, lodScaleY);
-            }
-            else
-            {
-                m_Constants.LodScale = 0.0f;
-            }
+        void UpdateLodScale()
+        {
+            m_Constants.LodScale = m_LodWidth && m_LodHeight
+                ? ComputeLodScale(static_cast<float>(m_LodWidth), static_cast<float>(m_LodHeight))
+                : ComputeLodScale(m_Viewport.Width, m_Viewport.Height);
         }
 
         ViewConstants m_Constants;
         const BaseCamera* m_Camera;
         D3D12_VIEWPORT m_Viewport;
         D3D12_RECT m_Scissor;
+        uint32_t m_LodWidth;
+        uint32_t m_LodHeight;
         bool m_HasHistory;
     };
 
@@ -316,6 +338,7 @@ namespace Renderer
     void Shutdown(void);
 
     std::string GetModelShaderPath(const char* shaderFileName);
+    bool IsDiscreteDebugView();
 
     void SetIBLTextures();
     void SetIBLBias(float LODBias);

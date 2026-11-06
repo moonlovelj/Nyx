@@ -59,6 +59,8 @@ using namespace Graphics;
 
 namespace
 {
+    FrameResolution s_FrameResolution = {};
+    PixelSize s_RequestedOutputSize = {1920, 1080};
     float s_FrameTime = 0.0f;
     uint64_t s_FrameIndex = 0;
     int64_t s_FrameStartTick = 0;
@@ -85,8 +87,8 @@ namespace
 
 namespace Graphics
 {
-    void PreparePresentSDR();
-    void PreparePresentHDR();
+    void PreparePresentSDR(ColorBuffer& frameColor);
+    void PreparePresentHDR(ColorBuffer& frameColor);
     void CompositeOverlays( GraphicsContext& Context );
 
     enum eResolution { k720p, k900p, k1080p, k1440p, k1800p, k2160p, kMonitorNative, kResolutionCount };
@@ -96,7 +98,6 @@ namespace Graphics
 
     char MonitorResolutionLabel[64] = "Monitor Native";
     const char* ResolutionLabels[] = { "1280x720", "1600x900", "1920x1080", "2560x1440", "3200x1800", "3840x2160", MonitorResolutionLabel };
-    EnumVar NativeResolution("Graphics/Display/Native Resolution", kMonitorNative, kNumPredefinedResolutions, ResolutionLabels);
 #ifdef _GAMING_DESKTOP
     // This can set the window size to common dimensions.  It's also possible for the window to take on other dimensions
     // through resizing or going full-screen.
@@ -109,8 +110,6 @@ namespace Graphics
     const char* HDRModeLabels[] = { "HDR", "SDR", "Side-by-Side" };
     EnumVar HDRDebugMode("Graphics/Display/HDR Debug Mode", 0, 3, HDRModeLabels);
 
-    uint32_t g_NativeWidth = 0;
-    uint32_t g_NativeHeight = 0;
     uint32_t g_DisplayWidth = 1920;
     uint32_t g_DisplayHeight = 1080;
     ColorBuffer g_PreDisplayBuffer;
@@ -155,24 +154,6 @@ namespace Graphics
         }
     }
 
-    void SetNativeResolution(void)
-    {
-        uint32_t NativeWidth, NativeHeight;
-
-        ResolutionToUINT(eResolution((int)NativeResolution), NativeWidth, NativeHeight);
-
-        if (g_NativeWidth == NativeWidth && g_NativeHeight == NativeHeight)
-            return;
-        DEBUGPRINT("Changing native resolution to %ux%u", NativeWidth, NativeHeight);
-
-        g_NativeWidth = NativeWidth;
-        g_NativeHeight = NativeHeight;
-
-        g_CommandManager.IdleGPU();
-
-        InitializeRenderingBuffers(NativeWidth, NativeHeight);
-    }
-
     void SetDisplayResolution(void)
     {
 #ifdef _GAMING_DESKTOP
@@ -180,7 +161,7 @@ namespace Graphics
         uint32_t width, height;
         ResolutionToUINT(eResolution((int)DisplayResolution), width, height);
         const bool monitorModeChanged = DisplayResolution == kMonitorNative &&
-            (g_DisplayWidth != width || g_DisplayHeight != height);
+            (s_RequestedOutputSize != PixelSize{width, height});
         if (SelectedDisplayRes == DisplayResolution && !monitorModeChanged)
             return;
 
@@ -253,18 +234,23 @@ void Display::ConfigureWindow(void)
 
 void Display::Resize(uint32_t width, uint32_t height)
 {
-    // Ignore minimization and allow WM_SIZE while the initial window is being configured.
-    if (width == 0 || height == 0)
-        return;
+    if (width && height)
+        s_RequestedOutputSize = {width, height};
+}
 
-    const bool sizeChanged = g_DisplayWidth != width || g_DisplayHeight != height;
-    g_DisplayWidth = width;
-    g_DisplayHeight = height;
-    if (s_SwapChain1 == nullptr || !sizeChanged)
-        return;
+PixelSize Display::GetRequestedOutputSize()
+{
+    SetDisplayResolution();
+    return s_RequestedOutputSize;
+}
 
-    g_CommandManager.IdleGPU();
+const FrameResolution& Display::GetFrameResolution()
+{
+    return s_FrameResolution;
+}
 
+static void ResizeSwapChain(uint32_t width, uint32_t height)
+{
     DEBUGPRINT("Changing display resolution to %ux%u", width, height);
 
     g_PreDisplayBuffer.Create(L"PreDisplay Buffer", width, height, 1, SwapChainFormat);
@@ -283,10 +269,48 @@ void Display::Resize(uint32_t width, uint32_t height)
     }
 
     g_CurrentBuffer = 0;
+}
+
+void Display::ApplyFrameResolution(PixelSize outputSize, PixelSize reconstructionRenderSize)
+{
+    if (!outputSize.IsValid())
+        return;
+
+    const bool reconstruct = reconstructionRenderSize.IsValid();
+    const PixelSize renderSize = reconstruct ? reconstructionRenderSize : outputSize;
+
+    const bool renderChanged = renderSize != s_FrameResolution.renderSize;
+    const bool outputChanged = outputSize != s_FrameResolution.outputSize;
+    const bool hadReconstruction = g_ReconstructionOutput.GetResource() != nullptr;
+    if (!renderChanged && !outputChanged && reconstruct == hadReconstruction)
+        return;
 
     g_CommandManager.IdleGPU();
+    if (outputSize != PixelSize{g_DisplayWidth, g_DisplayHeight})
+        ResizeSwapChain(outputSize.width, outputSize.height);
+    g_DisplayWidth = outputSize.width;
+    g_DisplayHeight = outputSize.height;
 
-    ResizeDisplayDependentBuffers(g_NativeWidth, g_NativeHeight);
+    if (renderChanged)
+        CreateSceneBuffers(renderSize.width, renderSize.height);
+
+    if (outputChanged)
+        g_OverlayBuffer.Create(L"UI Overlay", outputSize.width, outputSize.height, 1, DXGI_FORMAT_R8G8B8A8_UNORM);
+
+    if (reconstruct && (outputChanged || !hadReconstruction))
+        g_ReconstructionOutput.Create(L"Reconstruction Output", outputSize.width, outputSize.height, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
+    else if (!reconstruct && hadReconstruction)
+        g_ReconstructionOutput.Destroy();
+
+    const PixelSize postSize = reconstruct ? outputSize : renderSize;
+    if (!g_LumaBuffer.GetResource() || postSize != PixelSize{g_LumaBuffer.GetWidth(), g_LumaBuffer.GetHeight()})
+        CreatePostEffectsBuffers(postSize.width, postSize.height);
+
+    if (!g_HorizontalBuffer.GetResource() || g_HorizontalBuffer.GetWidth() != outputSize.width ||
+        g_HorizontalBuffer.GetHeight() != renderSize.height)
+        g_HorizontalBuffer.Create(L"Bicubic Intermediate", outputSize.width, renderSize.height, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
+
+    s_FrameResolution = {renderSize, outputSize};
 }
 
 // Initialize the DirectX resources required to run.
@@ -297,6 +321,8 @@ void Display::Initialize(void)
     Microsoft::WRL::ComPtr<IDXGIFactory4> dxgiFactory;
     ASSERT_SUCCEEDED(CreateDXGIFactory2(0, MY_IID_PPV_ARGS(&dxgiFactory)));
 
+    g_DisplayWidth = s_RequestedOutputSize.width;
+    g_DisplayHeight = s_RequestedOutputSize.height;
     DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
     swapChainDesc.Width = g_DisplayWidth;
     swapChainDesc.Height = g_DisplayHeight;
@@ -395,7 +421,7 @@ void Display::Initialize(void)
 
 #undef CreatePSO
 
-    SetNativeResolution();
+    ApplyFrameResolution(s_RequestedOutputSize, {});
 
     g_PreDisplayBuffer.Create(L"PreDisplay Buffer", g_DisplayWidth, g_DisplayHeight, 1, SwapChainFormat);
     ImageScaling::Initialize(g_PreDisplayBuffer.GetFormat());
@@ -405,6 +431,8 @@ void Display::Shutdown( void )
 {
     s_SwapChain1->SetFullscreenState(FALSE, nullptr);
     s_SwapChain1->Release();
+    s_SwapChain1 = nullptr;
+    s_FrameResolution = {};
 
     for (UINT i = 0; i < SWAP_CHAIN_BUFFER_COUNT; ++i)
         g_DisplayPlane[i].Destroy();
@@ -412,16 +440,16 @@ void Display::Shutdown( void )
     g_PreDisplayBuffer.Destroy();
 }
 
-void Graphics::PreparePresentHDR(void)
+void Graphics::PreparePresentHDR(ColorBuffer& frameColor)
 {
     GraphicsContext& Context = GraphicsContext::Begin(L"Present");
 
-    bool NeedsScaling = g_NativeWidth != g_DisplayWidth || g_NativeHeight != g_DisplayHeight;
+    const bool NeedsScaling = frameColor.GetWidth() != g_DisplayWidth || frameColor.GetHeight() != g_DisplayHeight;
 
     Context.SetRootSignature(s_PresentRS);
     Context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    Context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    Context.SetDynamicDescriptor(0, 0, g_SceneColorBuffer.GetSRV());
+    Context.TransitionResource(frameColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    Context.SetDynamicDescriptor(0, 0, frameColor.GetSRV());
 
     ColorBuffer& Dest = DebugZoom == kDebugZoomOff ? g_DisplayPlane[g_CurrentBuffer] : g_PreDisplayBuffer;
 
@@ -439,7 +467,7 @@ void Graphics::PreparePresentHDR(void)
         Context.SetPipelineState(NeedsScaling ? ScaleAndCompositeHDRPS : PresentHDRPS);
     }
     Context.SetConstants(1, (float)g_HDRPaperWhite / 10000.0f, (float)g_MaxDisplayLuminance,
-        0.7071f / g_NativeWidth, 0.7071f / g_NativeHeight);
+        0.7071f / frameColor.GetWidth(), 0.7071f / frameColor.GetHeight());
     Context.TransitionResource(Dest, D3D12_RESOURCE_STATE_RENDER_TARGET);
     Context.SetRenderTarget(Dest.GetRTV());
     Context.SetViewportAndScissor(0, 0, g_DisplayWidth, g_DisplayHeight);
@@ -477,7 +505,7 @@ void Graphics::CompositeOverlays( GraphicsContext& Context )
     Context.Draw(3);
 }
 
-void Graphics::PreparePresentSDR(void)
+void Graphics::PreparePresentSDR(ColorBuffer& frameColor)
 {
     GraphicsContext& Context = GraphicsContext::Begin(L"Present");
 
@@ -485,11 +513,11 @@ void Graphics::PreparePresentSDR(void)
     Context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
     // We're going to be reading these buffers to write to the swap chain buffer(s)
-    Context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | 
+    Context.TransitionResource(frameColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    Context.SetDynamicDescriptor(0, 0, g_SceneColorBuffer.GetSRV());
+    Context.SetDynamicDescriptor(0, 0, frameColor.GetSRV());
 
-    bool NeedsScaling = g_NativeWidth != g_DisplayWidth || g_NativeHeight != g_DisplayHeight;
+    const bool NeedsScaling = frameColor.GetWidth() != g_DisplayWidth || frameColor.GetHeight() != g_DisplayHeight;
 
     // On Windows, prefer scaling and compositing in one step via pixel shader
     if (DebugZoom == kDebugZoomOff && (UpsampleFilter == kSharpening || !NeedsScaling))
@@ -497,7 +525,7 @@ void Graphics::PreparePresentSDR(void)
         Context.TransitionResource(g_OverlayBuffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
         Context.SetDynamicDescriptor(0, 1, g_OverlayBuffer.GetSRV());
         Context.SetPipelineState(NeedsScaling ? ScaleAndCompositeSDRPS : CompositeSDRPS);
-        Context.SetConstants(1, 0.7071f / g_NativeWidth, 0.7071f / g_NativeHeight);
+        Context.SetConstants(1, 0.7071f / frameColor.GetWidth(), 0.7071f / frameColor.GetHeight());
         Context.TransitionResource(g_DisplayPlane[g_CurrentBuffer], D3D12_RESOURCE_STATE_RENDER_TARGET);
         Context.SetRenderTarget(g_DisplayPlane[g_CurrentBuffer].GetRTV());
         Context.SetViewportAndScissor(0, 0, g_DisplayWidth, g_DisplayHeight);
@@ -510,14 +538,14 @@ void Graphics::PreparePresentSDR(void)
         // Scale or Copy
         if (NeedsScaling)
         {
-            ImageScaling::Upscale(Context, Dest, g_SceneColorBuffer, eScalingFilter((int)UpsampleFilter));
+            ImageScaling::Upscale(Context, Dest, frameColor, eScalingFilter((int)UpsampleFilter));
         }
         else
         {
             Context.SetPipelineState(PresentSDRPS);
             Context.TransitionResource(Dest, D3D12_RESOURCE_STATE_RENDER_TARGET);
             Context.SetRenderTarget(Dest.GetRTV());
-            Context.SetViewportAndScissor(0, 0, g_NativeWidth, g_NativeHeight);
+            Context.SetViewportAndScissor(0, 0, frameColor.GetWidth(), frameColor.GetHeight());
             Context.Draw(3);
         }
 
@@ -544,12 +572,12 @@ void Graphics::PreparePresentSDR(void)
     Context.Finish();
 }
 
-void Display::Present(void)
+void Display::Present(ColorBuffer& frameColor)
 {
     if (g_bEnableHDROutput)
-        PreparePresentHDR();
+        PreparePresentHDR(frameColor);
     else
-        PreparePresentSDR();
+        PreparePresentSDR(frameColor);
 
     UINT PresentInterval = s_EnableVSync ? std::min(4, (int)Round(s_FrameTime * 60.0f)) : 0;
 
@@ -590,10 +618,6 @@ void Display::Present(void)
 
     ++s_FrameIndex;
 
-    TemporalEffects::Update((uint32_t)s_FrameIndex);
-
-    SetNativeResolution();
-    SetDisplayResolution();
 }
 
 uint64_t Graphics::GetFrameCount(void)

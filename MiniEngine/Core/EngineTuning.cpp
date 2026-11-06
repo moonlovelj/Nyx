@@ -13,10 +13,13 @@
 
 
 #include "pch.h"
+#include "Reconstruction.h"
+#include "FXAA.h"
 #include "TextRenderer.h"
 #include "GameInput.h"
 #include "EngineProfiling.h"
 #include "ImGuiManager.h"
+#include "Display.h"
 #include "imgui.h"
 
 using namespace std;
@@ -156,6 +159,10 @@ namespace
 {
     void DrawVarImGui( const std::string& name, EngineVar& var )
     {
+        // SceneViewer selects one AA mode; keep legacy toggles for other sample apps.
+        if (Reconstruction::IsInitialized() &&
+            (&var == &TemporalEffects::EnableTAA || &var == &FXAA::Enable))
+            return;
         if (auto* boolVar = dynamic_cast<BoolVar*>(&var))
         {
             bool value = *boolVar;
@@ -260,6 +267,13 @@ void VariableGroup::DisplayImGui( void )
             bool open = ImGui::TreeNodeEx(iter->first.c_str(), flags);
             if (open)
             {
+                if (this == sm_RootGroup.FindChild("Graphics") && iter->first == "AA")
+                {
+                    const FrameResolution& resolution = Display::GetFrameResolution();
+                    ImGui::Text("Actual render %u x %u   Output %u x %u", resolution.renderSize.width, resolution.renderSize.height,
+                        resolution.outputSize.width, resolution.outputSize.height);
+                    Reconstruction::DrawSettings();
+                }
                 subGroup->DisplayImGui();
                 ImGui::TreePop();
             }

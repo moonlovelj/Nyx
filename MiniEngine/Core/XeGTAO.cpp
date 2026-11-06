@@ -24,7 +24,7 @@ namespace XeGTAO
     BoolVar Enable("Graphics/XeGTAO/Enable", true);
 
     const char* kQualityLabels[] = { "Low", "Medium", "High", "Ultra" };
-    EnumVar g_QualityLevel("Graphics/XeGTAO/Quality", 4, 4, kQualityLabels);
+    EnumVar g_QualityLevel("Graphics/XeGTAO/Quality", 2, 4, kQualityLabels);
     IntVar g_DenoisePasses("Graphics/XeGTAO/Denoise Passes", 3, 0, 3);
 
     NumVar g_EffectRadius("Graphics/XeGTAO/Radius", 0.5f, 0.05f, 5.0f, 0.05f);
@@ -152,7 +152,7 @@ namespace
         outConstants.ThinOccluderCompensation = XeGTAO::g_ThinOccluderCompensation;
         outConstants.DepthMipSamplingOffset = XeGTAO::g_DepthMipSamplingOffset;
         outConstants.DenoiseBlurBeta = (XeGTAO::g_DenoisePasses == 0) ? 1e4f : 1.2f;
-        const bool useTemporalNoise = (bool)TemporalEffects::EnableTAA;
+        const bool useTemporalNoise = TemporalEffects::IsTemporalReconstructionEnabled();
         outConstants.NoiseIndex = (XeGTAO::g_DenoisePasses > 0 && useTemporalNoise) ? (frameIndex % 64) : 0;
 
         outConstants.Padding0 = 0.0f;

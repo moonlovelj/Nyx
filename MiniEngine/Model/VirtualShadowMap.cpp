@@ -1971,6 +1971,8 @@ namespace Renderer::VirtualShadowMap
         s_Views[firstViewId + desc.LevelCount - 1u].Flags |= VSM_SHADOW_VIEW_FLAG_COARSE_FALLBACK;
 
         const Renderer::ViewConstants& receiverViewConstants = receiverView.GetConstants();
+        // Use the receiver's output-pixel scale so DLSS render size does not
+        // reduce clipmap detail. Shadow-view geometry LOD remains independent.
         // Converts the previous ceil(log2(distance / firstLevelRadius)) coverage rule
         // into the floor(log2(distance) + bias) form used by the shader.
         const float coverageLodBias =

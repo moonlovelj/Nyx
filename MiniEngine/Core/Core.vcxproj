@@ -134,6 +134,7 @@
     <ClInclude Include="ProgramUtils.h" />
     <ClInclude Include="EngineTuning.h" />
     <ClInclude Include="Display.h" />
+    <ClInclude Include="DlssResolution.h" />
     <ClInclude Include="ReadbackBuffer.h" />
     <ClInclude Include="RootSignature.h" />
     <ClInclude Include="SamplerManager.h" />
@@ -301,6 +302,7 @@
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
     <FxCompile Include="Shaders\CopyBackPostBufferCS.hlsl" />
+    <FxCompile Include="Shaders\PrepareExposureCS.hlsl" />
     <FxCompile Include="Shaders\DebugDrawHistogramCS.hlsl" />
     <FxCompile Include="Shaders\DebugLuminanceHdr2CS.hlsl" />
     <FxCompile Include="Shaders\DebugLuminanceHdrCS.hlsl" />
@@ -540,4 +542,12 @@
     </PropertyGroup>
     <Error Condition="!Exists('..\..\Packages\WinPixEventRuntime.1.0.240308001\build\WinPixEventRuntime.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\Packages\WinPixEventRuntime.1.0.240308001\build\WinPixEventRuntime.targets'))" />
   </Target>
+  <ItemGroup>
+    <ClInclude Include="DlssBackend.h" />
+    <ClInclude Include="EngineVersion.h" />
+    <ClInclude Include="Reconstruction.h" />
+    <ClCompile Include="DlssBackend.cpp" />
+    <ClCompile Include="Reconstruction.cpp" />
+    <FxCompile Include="Shaders\ReconstructionFallbackCS.hlsl" />
+  </ItemGroup>
 </Project>

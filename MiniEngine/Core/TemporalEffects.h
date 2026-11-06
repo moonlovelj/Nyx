@@ -14,37 +14,73 @@
 #pragma once
 
 #include "EngineTuning.h"
+#include "Display.h"
 
 class CommandContext;
 
 namespace TemporalEffects
 {
-    // Temporal antialiasing involves jittering sample positions and accumulating color over time to 
-    // effectively supersample the image.
+    enum class Mode
+    {
+        Off, FXAA, TAA, DLAA, DLSSQuality, DLSSBalanced, DLSSPerformance, DLSSUltraPerformance
+    };
+
+    enum class ResetReason : uint32_t
+    {
+        None = 0,
+        FirstFrame = 1 << 0,
+        ModeChanged = 1 << 1,
+        ResolutionChanged = 1 << 2,
+        CameraCut = 1 << 3,
+        ProjectionChanged = 1 << 4,
+        SceneReloaded = 1 << 5,
+        RenderInterrupted = 1 << 6,
+        Manual = 1 << 7,
+        DebugViewChanged = 1 << 8
+    };
+
+    inline ResetReason operator|(ResetReason a, ResetReason b)
+    {
+        return static_cast<ResetReason>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    }
+
+    struct JitterOffset
+    {
+        float x = 0.0f;
+        float y = 0.0f;
+    };
+
+    struct TemporalFrameState
+    {
+        uint64_t frameIndex = 0;
+        FrameResolution resolution = {};
+        Mode mode = Mode::Off;
+        JitterOffset jitter;
+        JitterOffset previousJitter;
+        uint32_t sequenceLength = 1;
+        bool historyValid = false;
+        ResetReason resetReasons = ResetReason::FirstFrame;
+    };
+
     extern BoolVar EnableTAA;
 
-    void Initialize( void );
+    void Initialize();
+    void Shutdown();
 
-    void Shutdown( void );
+    // Begin before camera/view updates. Only CommitFrame advances submitted history.
+    void BeginFrame(uint64_t frameIndex, Mode mode, const FrameResolution& resolution);
+    bool PrepareFrame(CommandContext& context, ResetReason reasons = ResetReason::None);
+    void CommitFrame();
+    void InvalidateHistory(ResetReason reason);
+    const TemporalFrameState& GetFrameState();
+    bool IsTemporalReconstructionEnabled();
+    bool UsesDlss();
 
-    // Call once per frame to increment the internal frame counter and, in the case of TAA, choosing the next
-    // jittered sample position.
-    void Update( uint64_t FrameIndex );
+    uint32_t GetFrameIndexMod2();
+    uint32_t GetFrameIndex();
 
-    // Returns the current ping-pong buffer index (0 or 1).
-    uint32_t GetFrameIndexMod2( void );
-
-    uint32_t GetFrameIndex(void);
-
-    // Centered pixel offsets [-0.5, 0.5), positive right/down. Disabled TAA returns zero.
-    void GetJitterOffset( float& JitterX, float& JitterY );
-
-    void ClearHistory(CommandContext& Context);
-
-    // Call before rendering/culling. Returns false when all temporal consumers must reset.
-    bool PrepareFrame(CommandContext& Context, bool historyValid);
-
-    // Delta is previous submitted jitter minus current jitter, in pixels.
-    void ResolveImage(CommandContext& Context, float jitterDeltaX = 0.0f, float jitterDeltaY = 0.0f);
-
+    // Centered render-pixel offsets, positive right/down, shared by projection and reconstruction.
+    void GetJitterOffset(float& x, float& y);
+    void ClearHistory(CommandContext& context);
+    void ResolveImage(CommandContext& context);
 }

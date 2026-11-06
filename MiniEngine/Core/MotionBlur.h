@@ -29,7 +29,7 @@ namespace MotionBlur
 
     void GenerateCameraVelocityBuffer( CommandContext& Context, const Math::Camera& camera, bool UseLinearZ = true );
     // Reprojection includes jitter; subtract previous-minus-current pixel jitter from XY velocity.
-    void GenerateCameraVelocityBuffer( CommandContext& Context, const Math::Matrix4& reprojectionMatrix, float nearClip, float farClip, bool UseLinearZ = true, float jitterDeltaX = 0.0f, float jitterDeltaY = 0.0f);
+    void GenerateCameraVelocityBuffer( CommandContext& Context, const Math::Matrix4& reprojectionMatrix, float nearClip, float farClip, bool UseLinearZ = true, float jitterDeltaX = 0.0f, float jitterDeltaY = 0.0f, const Math::Matrix4* skyReprojection = nullptr);
 
     // Generate motion blur only associated with the camera.  Does not handle fast-moving objects well, but
     // does not require a full screen velocity buffer.

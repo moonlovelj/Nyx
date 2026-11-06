@@ -4,6 +4,7 @@
 #include "Camera.h"
 #include "CommandContext.h"
 #include "TemporalEffects.h"
+#include "Reconstruction.h"
 #include "MotionBlur.h"
 #include "DepthOfField.h"
 #include "PostEffects.h"
@@ -63,6 +64,11 @@ public:
     virtual void Update( float deltaT ) override;
     virtual void RenderScene( void ) override;
     virtual void RenderUI( class GraphicsContext& ) override;
+    PixelSize GetReconstructionRenderSize(PixelSize outputSize) override
+    {
+        return Reconstruction::PrepareFrame(outputSize, Renderer::IsDiscreteDebugView());
+    }
+    TemporalEffects::Mode GetTemporalMode() const override { return Reconstruction::GetStatus().actualMode; }
     void ReloadModel( const std::wstring& filePath, bool useOrbit, uint32_t instanceCount = 1 );
     void QueueModelReload( const std::wstring& filePath, bool useOrbit );
 
@@ -72,7 +78,6 @@ private:
     Renderer::ViewConstants m_PreviousView;
     bool m_HasPreviousFrame = false;
     bool m_UsingglTFCamera = false;
-    uint32_t m_PreviousFrameIndex = 0;
     float m_CameraCutDistance = 1.0f;
     unique_ptr<CameraController> m_CameraController;
 
@@ -344,6 +349,7 @@ void SceneViewer::ReloadModel(const std::wstring& filePath, bool useOrbit, uint3
 
     ModelInstanceManager::Initialize(model, instanceCount);
     m_HasPreviousFrame = false;
+    TemporalEffects::InvalidateHistory(TemporalEffects::ResetReason::SceneReloaded);
     const Vector3 sceneCenter = ModelInstanceManager::GetInstanceDistributionCenter();
     const Vector3 sceneHalfExtents = ModelInstanceManager::GetInstanceDistributionHalfExtents();
     const float sceneRadius = std::max(ModelInstanceManager::GetInstanceDistributionRadius() * 0.1f, 0.01f);
@@ -389,6 +395,7 @@ void SceneViewer::Startup( void )
     // Setup your data
 
     EnsureSceneViewerResourceRoot();
+    Reconstruction::Initialize();
 
     MotionBlur::Enable = false;
     TemporalEffects::EnableTAA = true;
@@ -437,6 +444,7 @@ void SceneViewer::Startup( void )
 
 void SceneViewer::Cleanup( void )
 {
+    Reconstruction::Shutdown();
     // Free up resources in an orderly fashion
 	ModelInstanceManager::Cleanup();
 
@@ -483,12 +491,11 @@ void SceneViewer::Update( float deltaT )
         ? ModelInstanceManager::GetModelInstance(0).GetNumCameras() : 0;
     const bool bUseglTFCamera = NumCameras > 0 && g_UseglTFCamera;
     if (bUseglTFCamera != m_UsingglTFCamera)
-        m_HasPreviousFrame = false;
+        TemporalEffects::InvalidateHistory(TemporalEffects::ResetReason::CameraCut);
     m_UsingglTFCamera = bUseglTFCamera;
 
-    // Monitor-native modes can be ultrawide or portrait, so update projection from render dimensions.
-    m_Camera.SetAspectRatio(static_cast<float>(g_SceneColorBuffer.GetHeight()) /
-        static_cast<float>(g_SceneColorBuffer.GetWidth()));
+    const FrameResolution& resolution = Display::GetFrameResolution();
+    m_Camera.SetAspectRatio(static_cast<float>(resolution.outputSize.height) / resolution.outputSize.width);
     if (g_LockCamera)
     {
         m_CameraController->ResetMomentum();
@@ -517,15 +524,15 @@ void SceneViewer::Update( float deltaT )
     // Sample offsets are applied by RenderView's projection, never by the viewport.
     m_MainViewport.TopLeftX = m_MainViewport.TopLeftY = 0.0f;
 
-    m_MainViewport.Width = (float)g_SceneColorBuffer.GetWidth();
-    m_MainViewport.Height = (float)g_SceneColorBuffer.GetHeight();
+    m_MainViewport.Width = (float)resolution.renderSize.width;
+    m_MainViewport.Height = (float)resolution.renderSize.height;
     m_MainViewport.MinDepth = 0.0f;
     m_MainViewport.MaxDepth = 1.0f;
 
     m_MainScissor.left = 0;
     m_MainScissor.top = 0;
-    m_MainScissor.right = (LONG)g_SceneColorBuffer.GetWidth();
-    m_MainScissor.bottom = (LONG)g_SceneColorBuffer.GetHeight();
+    m_MainScissor.right = (LONG)resolution.renderSize.width;
+    m_MainScissor.bottom = (LONG)resolution.renderSize.height;
 
 	GeometryStreaming::Update(TemporalEffects::GetFrameIndex());
 }
@@ -534,10 +541,19 @@ void SceneViewer::RenderScene( void )
 {
     if (m_MainViewport.Width <= 0.0f || m_MainViewport.Height <= 0.0f)
     {
-        m_HasPreviousFrame = false;
+        TemporalEffects::InvalidateHistory(TemporalEffects::ResetReason::RenderInterrupted);
         return;
     }
     GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Render");
+    if (ModelInstanceManager::GetNumModelInstances() == 0)
+    {
+        TemporalEffects::InvalidateHistory(TemporalEffects::ResetReason::RenderInterrupted);
+        gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
+        gfxContext.ClearColor(g_SceneColorBuffer);
+        gfxContext.Finish();
+        Reconstruction::Render(false);
+        return;
+    }
 
     uint32_t FrameIndex = TemporalEffects::GetFrameIndexMod2();
     const D3D12_VIEWPORT& viewport = m_MainViewport;
@@ -547,33 +563,36 @@ void SceneViewer::RenderScene( void )
     Renderer::RenderView mainView;
     mainView.SetCamera(m_Camera);
     mainView.SetViewport(viewport);
+    const PixelSize outputSize = Display::GetFrameResolution().outputSize;
+    mainView.SetLodResolution(outputSize.width, outputSize.height);
+    mainView.SetMaterialMipBias(Reconstruction::GetMaterialMipBias());
     mainView.SetScissor(scissor);
     mainView.SetHZBSize(Renderer::GetCurrentHZB());
-    float jitterX, jitterY;
-    TemporalEffects::GetJitterOffset(jitterX, jitterY);
-    mainView.SetTemporalJitter(jitterX, jitterY);
+    const auto& temporal = TemporalEffects::GetFrameState();
+    mainView.SetTemporalJitter(temporal.jitter.x, temporal.jitter.y);
 
-    bool historyValid = m_HasPreviousFrame &&
-        TemporalEffects::GetFrameIndex() == m_PreviousFrameIndex + 1 &&
-        m_PreviousView.ViewportWidth == mainView.GetConstants().ViewportWidth &&
-        m_PreviousView.ViewportHeight == mainView.GetConstants().ViewportHeight;
-    if (historyValid)
+    auto resetReasons = TemporalEffects::ResetReason::None;
+    if (m_HasPreviousFrame)
     {
         const Matrix4& projection = m_Camera.GetProjMatrix();
         const Matrix4& previousProjection = m_PrevCamera.GetProjMatrix();
-        historyValid = DirectX::XMVector4Equal(projection.GetX(), previousProjection.GetX()) &&
-            DirectX::XMVector4Equal(projection.GetY(), previousProjection.GetY()) &&
-            DirectX::XMVector4Equal(projection.GetZ(), previousProjection.GetZ()) &&
-            DirectX::XMVector4Equal(projection.GetW(), previousProjection.GetW()) &&
-            static_cast<float>(Length(m_Camera.GetPosition() - m_PrevCamera.GetPosition())) <= m_CameraCutDistance &&
-            static_cast<float>(Dot(m_Camera.GetForwardVec(), m_PrevCamera.GetForwardVec())) >= 0.5f &&
-            static_cast<float>(Dot(m_Camera.GetUpVec(), m_PrevCamera.GetUpVec())) >= 0.5f;
+        if (!DirectX::XMVector4Equal(projection.GetX(), previousProjection.GetX()) ||
+            !DirectX::XMVector4Equal(projection.GetY(), previousProjection.GetY()) ||
+            !DirectX::XMVector4Equal(projection.GetZ(), previousProjection.GetZ()) ||
+            !DirectX::XMVector4Equal(projection.GetW(), previousProjection.GetW()))
+            resetReasons = resetReasons | TemporalEffects::ResetReason::ProjectionChanged;
+        if (static_cast<float>(Length(m_Camera.GetPosition() - m_PrevCamera.GetPosition())) > m_CameraCutDistance ||
+            static_cast<float>(Dot(m_Camera.GetForwardVec(), m_PrevCamera.GetForwardVec())) < 0.5f ||
+            static_cast<float>(Dot(m_Camera.GetUpVec(), m_PrevCamera.GetUpVec())) < 0.5f)
+            resetReasons = resetReasons | TemporalEffects::ResetReason::CameraCut;
     }
-    historyValid = TemporalEffects::PrepareFrame(gfxContext, historyValid);
+    else
+        resetReasons = resetReasons | TemporalEffects::ResetReason::FirstFrame;
+    const bool historyValid = TemporalEffects::PrepareFrame(gfxContext, resetReasons);
     mainView.SetPreviousView(historyValid ? &m_PreviousView : nullptr);
     const Renderer::ViewConstants& viewConstants = mainView.GetConstants();
-    const float jitterDeltaX = viewConstants.PrevJitterPixels.GetX() - viewConstants.JitterPixels.GetX();
-    const float jitterDeltaY = viewConstants.PrevJitterPixels.GetY() - viewConstants.JitterPixels.GetY();
+    const float jitterDeltaX = temporal.previousJitter.x - temporal.jitter.x;
+    const float jitterDeltaY = temporal.previousJitter.y - temporal.jitter.y;
 
     ParticleEffectManager::Update(gfxContext.GetComputeContext(), Graphics::GetFrameTime());
 
@@ -699,26 +718,37 @@ void SceneViewer::RenderScene( void )
     // Camera velocity covers the whole image; rigid object motion replaces its visible pixels.
     const Matrix4 reprojection = historyValid
         ? viewConstants.PrevViewProjMatrix * viewConstants.InverseViewProjMatrix : Matrix4(kIdentity);
+    const Matrix4 skyReprojection = historyValid
+        ? viewConstants.PrevProjMatrix * Matrix4(viewConstants.PrevViewMatrix.Get3x3()) *
+            Matrix4(Transpose(viewConstants.ViewMatrix.Get3x3())) * Invert(viewConstants.ProjMatrix)
+        : Matrix4(kIdentity);
     MotionBlur::GenerateCameraVelocityBuffer(gfxContext, reprojection,
-        m_Camera.GetNearClip(), m_Camera.GetFarClip(), true, jitterDeltaX, jitterDeltaY);
+        m_Camera.GetNearClip(), m_Camera.GetFarClip(), true, jitterDeltaX, jitterDeltaY, &skyReprojection);
     Renderer::GenerateObjectVelocity(gfxContext, mainView, m_Camera.GetFarClip());
 
-    TemporalEffects::ResolveImage(gfxContext, jitterDeltaX, jitterDeltaY);
+    PostEffects::PrepareExposure(gfxContext);
+    TemporalEffects::ResolveImage(gfxContext);
 
-    ParticleEffectManager::Render(gfxContext, m_Camera, g_SceneColorBuffer, g_SceneDepthBuffer,  g_LinearDepth[FrameIndex]);
+    // These legacy passes operate before reconstruction and are not yet adapted
+    // for DLSS inputs. Leave user settings intact so native rendering restores them.
+    if (!TemporalEffects::UsesDlss() && !Reconstruction::GetStatus().nativeDebugView)
+    {
+        ParticleEffectManager::Render(gfxContext, m_Camera, g_SceneColorBuffer, g_SceneDepthBuffer, g_LinearDepth[FrameIndex]);
 
-    // Until I work out how to couple these two, it's "either-or".
-    if (DepthOfField::Enable)
-        DepthOfField::Render(gfxContext, m_Camera.GetNearClip(), m_Camera.GetFarClip());
-    else
-        MotionBlur::RenderObjectBlur(gfxContext, g_VelocityBuffer);
+        // Until I work out how to couple these two, it's "either-or".
+        if (DepthOfField::Enable)
+            DepthOfField::Render(gfxContext, m_Camera.GetNearClip(), m_Camera.GetFarClip());
+        else
+            MotionBlur::RenderObjectBlur(gfxContext, g_VelocityBuffer);
+    }
 
     gfxContext.Finish();
+    Reconstruction::Render();
     ModelInstanceManager::CommitRenderedTransforms();
+    TemporalEffects::CommitFrame();
     m_PreviousView = viewConstants;
     m_PrevCamera = m_Camera;
-    m_PreviousFrameIndex = TemporalEffects::GetFrameIndex();
-    m_HasPreviousFrame = ModelInstanceManager::GetNumModelInstances() > 0;
+    m_HasPreviousFrame = true;
 }
 
 void SceneViewer::RenderUI( GraphicsContext& )

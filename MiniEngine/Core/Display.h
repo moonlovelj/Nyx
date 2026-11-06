@@ -15,14 +15,36 @@
 
 #include <cstdint>
 
+class ColorBuffer;
+
+struct PixelSize
+{
+    uint32_t width, height;
+
+    bool IsValid() const { return width != 0 && height != 0; }
+    bool operator==(PixelSize other) const { return width == other.width && height == other.height; }
+    bool operator!=(PixelSize other) const { return !(*this == other); }
+};
+
+struct FrameResolution
+{
+    PixelSize renderSize;
+    PixelSize outputSize;
+};
+
 namespace Display
 {
     void Initialize(void);
     // Apply the selected output resolution and window style, including before graphics startup.
     void ConfigureWindow(void);
     void Shutdown(void);
+    // Window messages only record the latest non-minimized client size.
     void Resize(uint32_t width, uint32_t height);
-    void Present(void);
+    PixelSize GetRequestedOutputSize();
+    // An empty reconstruction size renders at the output resolution.
+    void ApplyFrameResolution(PixelSize outputSize, PixelSize reconstructionRenderSize);
+    const FrameResolution& GetFrameResolution();
+    void Present(ColorBuffer& frameColor);
 }
 
 namespace Graphics

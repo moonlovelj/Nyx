@@ -118,6 +118,9 @@
     <FxCompile Include="Shaders\CopyBackPostBufferCS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="Shaders\PrepareExposureCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
     <FxCompile Include="Shaders\DebugLuminanceHdr2CS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
@@ -638,6 +641,7 @@
     <ClInclude Include="ProgramUtils.h" />
     <ClInclude Include="EngineTuning.h" />
     <ClInclude Include="Display.h" />
+    <ClInclude Include="DlssResolution.h" />
     <ClInclude Include="ReadbackBuffer.h" />
     <ClInclude Include="RootSignature.h" />
     <ClInclude Include="SamplerManager.h" />
@@ -772,5 +776,13 @@
     <Filter Include="Shaders">
       <UniqueIdentifier>{c5df3e3a-73f5-4b5b-8688-112163941bea}</UniqueIdentifier>
     </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="DlssBackend.h" />
+    <ClInclude Include="EngineVersion.h" />
+    <ClInclude Include="Reconstruction.h" />
+    <ClCompile Include="DlssBackend.cpp" />
+    <ClCompile Include="Reconstruction.cpp" />
+    <FxCompile Include="Shaders\ReconstructionFallbackCS.hlsl"><Filter>Shaders</Filter></FxCompile>
   </ItemGroup>
 </Project>

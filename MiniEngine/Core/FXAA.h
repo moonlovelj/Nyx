@@ -27,6 +27,6 @@ namespace FXAA
 
     void Initialize( void );
     void Shutdown( void );
-    void Render( ComputeContext& Context, bool bUsePreComputedLuma );
+    void Render( ComputeContext& Context, ColorBuffer& frameColor, bool bUsePreComputedLuma );
 
 } // namespace FXAA

@@ -16,7 +16,7 @@
 #include "PostEffectsRS.hlsli"
 #include "PixelPacking.hlsli"
 
-StructuredBuffer<float> Exposure : register(t0);
+Texture2D<float> Exposure : register(t0);
 Texture2D<float3> Bloom : register(t1);
 #if SUPPORT_TYPED_UAV_LOADS
 RWTexture2D<float3> SrcColor : register(u0);
@@ -44,7 +44,7 @@ void main( uint3 DTid : SV_DispatchThreadID )
     float3 hdrColor = SrcColor[DTid.xy] + g_BloomStrength * Bloom.SampleLevel(LinearSampler, TexCoord, 0);
 
     // Tone map to LDR and convert to greyscale
-    float luma = RGBToLuminance(PBRNeutralToneMapping(hdrColor * Exposure[0], ToneMapPeakBrightnessRatio));
+    float luma = RGBToLuminance(PBRNeutralToneMapping(hdrColor * Exposure[uint2(0, 0)], ToneMapPeakBrightnessRatio));
 
     float logLuma = LinearToLogLuminance(luma / ToneMapPeakBrightnessRatio);
 

@@ -67,4 +67,5 @@
       <AdditionalOptions>-HV 2021 %(AdditionalOptions)</AdditionalOptions>
     </FxCompile>
   </ItemDefinitionGroup>
+  <Import Project="$(MSBuildThisFileDirectory)Dlss.props" />
 </Project>

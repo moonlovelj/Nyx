@@ -1,3 +1,7 @@
 [submodule "MiniEngine/SceneViewer/Assets/bistro-metalrough"]
 	path = MiniEngine/SceneViewer/Assets/bistro-metalrough
 	url = https://github.com/moonlovelj/bistro-metalrough.git
+[submodule "MiniEngine/ThirdParty/DLSS"]
+	path = MiniEngine/ThirdParty/DLSS
+	url = https://github.com/NVIDIA/DLSS.git
+	shallow = true

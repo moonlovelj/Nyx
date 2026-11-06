@@ -22,7 +22,8 @@
 namespace Graphics
 {
     extern DepthBuffer g_SceneDepthBuffer;  // D32_FLOAT_S8_UINT
-    extern ColorBuffer g_SceneColorBuffer;  // R11G11B10_FLOAT
+    extern ColorBuffer g_SceneColorBuffer;  // R16G16B16A16_FLOAT
+    extern ColorBuffer g_ReconstructionOutput; // Output-sized HDR UAV while reconstruction is active
     extern ColorBuffer g_GBufferA;          // R16G16B16A16_FLOAT
     extern ColorBuffer g_GBufferB;          // R16G16B16A16_FLOAT
     extern ColorBuffer g_GBufferC;          // R16G16B16A16_FLOAT
@@ -38,6 +39,7 @@ namespace Graphics
 	extern HierarchicalDepthBuffer g_FurthestHZB[2];	    // R32_FLOAT (for Hi-Z depth culling)
 	extern ColorBuffer g_VisibilityBuffer;  // R32G32_UINT
 
+    extern ColorBuffer g_ReconstructionVelocity; // RG16F, current-to-previous render pixels, jitter removed
     extern ColorBuffer g_VelocityBuffer;    // R10G10B10  (3D velocity)
     extern ColorBuffer g_SSAOFullScreen;	// R8_UNORM
     extern ColorBuffer g_LinearDepth[2];	// Normalized planar distance (0 at eye, 1 at far plane) computed from the SceneDepthBuffer
@@ -89,8 +91,8 @@ namespace Graphics
     extern ByteAddressBuffer g_FXAAWorkQueue;
     extern TypedBuffer g_FXAAColorQueue;
 
-    void InitializeRenderingBuffers(uint32_t NativeWidth, uint32_t NativeHeight );
-    void ResizeDisplayDependentBuffers(uint32_t NativeWidth, uint32_t NativeHeight);
+    void CreateSceneBuffers(uint32_t width, uint32_t height);
+    void CreatePostEffectsBuffers(uint32_t width, uint32_t height);
     void DestroyRenderingBuffers();
 
 } // namespace Graphics

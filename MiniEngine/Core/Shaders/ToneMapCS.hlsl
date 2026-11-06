@@ -17,7 +17,7 @@
 #include "PixelPacking.hlsli"
 
 
-StructuredBuffer<float> Exposure : register( t0 );
+Texture2D<float> Exposure : register( t0 );
 Texture2D<float3> Bloom : register( t1 );
 #if SUPPORT_TYPED_UAV_LOADS
 RWTexture2D<float3> ColorRW : register( u0 );
@@ -51,7 +51,7 @@ void main( uint3 DTid : SV_DispatchThreadID )
 #endif
 
     hdrColor += g_BloomStrength * Bloom.SampleLevel(LinearSampler, TexCoord, 0);
-    hdrColor *= Exposure[0];
+    hdrColor *= Exposure[uint2(0, 0)];
 
 #if ENABLE_HDR_DISPLAY_MAPPING
     // Preserve highlight headroom above paper white. Display encoding happens at present.

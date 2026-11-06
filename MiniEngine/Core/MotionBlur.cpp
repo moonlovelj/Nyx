@@ -43,7 +43,7 @@ namespace MotionBlur
     ComputePSO s_MotionBlurPrePassCS(L"Motion Blur: Motion Blur Pre-Pass CS");
     ComputePSO s_MotionBlurFinalPassCS(L"Motion Blur: Motion Blur Final Pass CS");
     GraphicsPSO s_MotionBlurFinalPassPS(L"Motion Blur: Motion Blur Final Pass PS");
-    ComputePSO s_CameraVelocityCS[2] = { { L"Motion Blur: Camera Velocity CS" },{ L"Motion Blur: Camera Velocity Linear Z CS" } };
+    ComputePSO s_CameraVelocityCS(L"Motion Blur: Camera Velocity CS");
 }
 
 void MotionBlur::Initialize( void )
@@ -75,8 +75,7 @@ void MotionBlur::Initialize( void )
     CreatePSO( s_CameraMotionBlurPrePassCS[0], g_pCameraMotionBlurPrePassCS );
     CreatePSO( s_CameraMotionBlurPrePassCS[1], g_pCameraMotionBlurPrePassLinearZCS );
     CreatePSO( s_MotionBlurPrePassCS, g_pMotionBlurPrePassCS );
-    CreatePSO( s_CameraVelocityCS[0], g_pCameraVelocityCS );
-    CreatePSO( s_CameraVelocityCS[1], g_pCameraVelocityCS );
+    CreatePSO(s_CameraVelocityCS, g_pCameraVelocityCS);
 
 #undef CreatePSO
 }
@@ -95,7 +94,7 @@ void MotionBlur::GenerateCameraVelocityBuffer( CommandContext& BaseContext, cons
     GenerateCameraVelocityBuffer(BaseContext, camera.GetReprojectionMatrix(), camera.GetNearClip(), camera.GetFarClip(), UseLinearZ);
 }
 
-void MotionBlur::GenerateCameraVelocityBuffer( CommandContext& BaseContext, const Matrix4& reprojectionMatrix, float nearClip, float farClip, bool UseLinearZ, float jitterDeltaX, float jitterDeltaY)
+void MotionBlur::GenerateCameraVelocityBuffer( CommandContext& BaseContext, const Matrix4& reprojectionMatrix, float nearClip, float farClip, bool UseLinearZ, float jitterDeltaX, float jitterDeltaY, const Matrix4* skyReprojection)
 {
     ScopedTimer _prof(L"Generate Camera Velocity", BaseContext);
 
@@ -129,12 +128,28 @@ void MotionBlur::GenerateCameraVelocityBuffer( CommandContext& BaseContext, cons
     struct alignas(16) VelocityConstants
     {
         Matrix4 CurToPrevXForm;
+        Matrix4 SkyCurToPrevXForm;
         float JitterDelta[2];
-        float Padding[2];
+        uint32_t UseLinearDepth;
+        uint32_t Padding;
     };
-    const VelocityConstants constants = { CurToPrevXForm, { jitterDeltaX, jitterDeltaY }, {} };
+    // For our finite reverse-Z projection, infinity has NDC depth -near / (far - near).
+    // Inverse projection then produces a homogeneous direction (w = 0), so even
+    // the full reprojection fallback cannot apply camera translation to the sky.
+    const Matrix4 skyPreMult(
+        Vector4(RcpHalfDimX, 0.0f, 0.0f, 0.0f),
+        Vector4(0.0f, -RcpHalfDimY, 0.0f, 0.0f),
+        Vector4(0.0f, 0.0f, 1.0f, 0.0f),
+        Vector4(-1.0f, 1.0f, -RcpZMagic, 1.0f));
+    const Matrix4 skyTransform = postMult * (skyReprojection ? *skyReprojection : reprojectionMatrix) * skyPreMult;
+    const VelocityConstants constants = {CurToPrevXForm, skyTransform,
+        {jitterDeltaX, jitterDeltaY}, UseLinearZ ? 1u : 0u, 0};
+    static_assert(sizeof(VelocityConstants) == 144, "CameraVelocityCS constants must match.");
     Context.SetDynamicConstantBufferView(3, sizeof(constants), &constants);
     Context.TransitionResource(g_VelocityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+    Context.TransitionResource(g_ReconstructionVelocity, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    Context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
     ColorBuffer& LinearDepth = g_LinearDepth[ TemporalEffects::GetFrameIndexMod2() ];
     if (UseLinearZ)
@@ -142,9 +157,11 @@ void MotionBlur::GenerateCameraVelocityBuffer( CommandContext& BaseContext, cons
     else
         Context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
-    Context.SetPipelineState(s_CameraVelocityCS[UseLinearZ ? 1 : 0]);
+    Context.SetPipelineState(s_CameraVelocityCS);
     Context.SetDynamicDescriptor(1, 0, UseLinearZ ? LinearDepth.GetSRV() : g_SceneDepthBuffer.GetDepthSRV());
+    Context.SetDynamicDescriptor(1, 1, g_SceneDepthBuffer.GetDepthSRV());
     Context.SetDynamicDescriptor(2, 0, g_VelocityBuffer.GetUAV());
+    Context.SetDynamicDescriptor(2, 1, g_ReconstructionVelocity.GetUAV());
     Context.Dispatch2D(Width, Height);
 }
 
@@ -247,13 +264,7 @@ void MotionBlur::RenderCameraBlur( CommandContext& BaseContext, const Matrix4& r
             GrContext.Draw(3);
         }
     }
-    else
-    {
-        Context.SetPipelineState(s_CameraVelocityCS[UseLinearZ ? 1 : 0]);
-        Context.SetDynamicDescriptor(1, 0, UseLinearZ ? LinearDepth.GetSRV() : g_SceneDepthBuffer.GetDepthSRV());
-        Context.SetDynamicDescriptor(2, 0, g_VelocityBuffer.GetUAV());
-        Context.Dispatch2D(Width, Height);
-    }
+
 }
 
 void MotionBlur::RenderObjectBlur( CommandContext& BaseContext, ColorBuffer& velocityBuffer )

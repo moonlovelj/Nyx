@@ -157,6 +157,12 @@ namespace Renderer
     };
     EnumVar ViewMode("Visualize/View Mode", 0, _countof(ViewModeLabels), ViewModeLabels);
 
+    bool IsDiscreteDebugView()
+    {
+        // All current non-Lit modes display discrete geometry IDs or VSM state.
+        return ViewMode != 0;
+    }
+
     bool s_Initialized = false;
 
     DescriptorHeap s_TextureHeap;
@@ -873,6 +879,7 @@ void Renderer::ResolveVBufferToGBuffer(
     constants["ViewportWidth"].Set(viewConstants.ViewportWidth);
     constants["ViewportHeight"].Set(viewConstants.ViewportHeight);
     constants["ViewMode"].Set((uint32_t)ViewMode);
+    constants["MaterialGradientScale"].Set(viewConstants.MaterialGradientScale);
     SetCommonResources(binder, frame);
     binder.Apply();
 
@@ -1089,6 +1096,8 @@ void Renderer::GenerateObjectVelocity(GraphicsContext& gfxContext, const RenderV
     context.TransitionResource(depth, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     context.TransitionResource(g_VelocityBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.InsertUAVBarrier(g_VelocityBuffer);
+    context.TransitionResource(g_ReconstructionVelocity, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    context.InsertUAVBarrier(g_ReconstructionVelocity);
 
     ProgramBinder binder(*m_ObjectVelocityProgram, context);
     binder.SetRootSignature();
@@ -1110,6 +1119,7 @@ void Renderer::GenerateObjectVelocity(GraphicsContext& gfxContext, const RenderV
     binder["g_VBuffer"].SetSRV(g_VisibilityBuffer.GetSRV());
     binder["g_LinearDepth"].SetSRV(depth.GetSRV());
     binder["g_Velocity"].SetUAV(g_VelocityBuffer.GetUAV());
+    binder["g_ReconstructionVelocity"].SetUAV(g_ReconstructionVelocity.GetUAV());
     binder.Apply();
     context.Dispatch2D(constants.ViewportWidth, constants.ViewportHeight);
 }

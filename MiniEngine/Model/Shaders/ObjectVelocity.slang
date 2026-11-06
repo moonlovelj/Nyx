@@ -20,6 +20,7 @@ StructuredBuffer<VisibleMeshletPayload> g_VisibleMeshlets;
 ByteAddressBuffer g_Instances;
 StructuredBuffer<ObjectMotionData> g_ObjectMotion;
 RWTexture2D<uint> g_Velocity;
+RWTexture2D<float2> g_ReconstructionVelocity;
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
@@ -55,15 +56,22 @@ void computeMain(uint2 pixel : SV_DispatchThreadID)
         return;
     const float4 previousWorld = mul(motion.WorldToPreviousWorld, float4(worldH.xyz / worldH.w, 1.0));
     const float4 previousClip = mul(g_ObjectVelocity.PrevViewProjMatrix, previousWorld);
-    if (!all(isfinite(previousClip)) || previousClip.w <= 1e-6 ||
-        previousClip.z < 0.0 || previousClip.z > previousClip.w)
+    if (!all(isfinite(previousClip)) || previousClip.w <= 1e-6)
         return;
     const float2 previousUV = previousClip.xy / previousClip.w * float2(0.5, -0.5) + 0.5;
-    if (any(previousUV < 0.0) || any(previousUV >= 1.0))
+    const float2 pixelMotion = previousUV * g_ObjectVelocity.ViewportSize - currentPixel - g_ObjectVelocity.JitterDelta;
+    if (!all(isfinite(pixelMotion)))
+        return;
+
+    // Invalid object history leaves the camera fallback written by CameraVelocityCS.
+    // Valid offscreen correspondences remain usable by reconstruction.
+    g_ReconstructionVelocity[pixel] = clamp(pixelMotion, -65504.0, 65504.0);
+    if (previousClip.z < 0.0 || previousClip.z > previousClip.w ||
+        any(previousUV < 0.0) || any(previousUV >= 1.0))
         return;
 
     const float3 velocity = float3(
-        previousUV * g_ObjectVelocity.ViewportSize - currentPixel - g_ObjectVelocity.JitterDelta,
+        pixelMotion,
         previousClip.w * g_ObjectVelocity.RcpFarClip - g_LinearDepth[pixel]);
     if (all(isfinite(velocity)))
         g_Velocity[pixel] = PackVelocity(velocity);

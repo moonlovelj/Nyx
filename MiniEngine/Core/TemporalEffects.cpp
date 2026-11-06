@@ -19,6 +19,7 @@
 #include "CommandContext.h"
 #include "SystemTime.h"
 #include "PostEffects.h"
+#include <cmath>
 
 #include "CompiledShaders/TemporalBlendCS.h"
 #include "CompiledShaders/ResolveTAACS.h"
@@ -39,13 +40,36 @@ namespace TemporalEffects
     ComputePSO s_SharpenTAACS(L"TAA: Sharpen TAA CS");
     ComputePSO s_ResolveTAACS(L"TAA: Resolve TAA CS");
 
-    uint32_t s_FrameIndex = 0;
-    uint32_t s_FrameIndexMod2 = 0;
-    float s_JitterX = 0.0f;
-    float s_JitterY = 0.0f;
-    float s_JitterDeltaX = 0.0f;
-    float s_JitterDeltaY = 0.0f;
-    bool s_HistoryValid = false;
+    TemporalFrameState s_Frame;
+    TemporalFrameState s_SubmittedFrame;
+    ResetReason s_PendingReset = ResetReason::None;
+    bool s_HasSubmittedFrame = false;
+    bool s_FramePrepared = false;
+
+    float Halton(uint32_t index, uint32_t base)
+    {
+        float result = 0.0f;
+        float weight = 1.0f;
+        while (index > 0)
+        {
+            weight /= base;
+            result += weight * (index % base);
+            index /= base;
+        }
+        return result;
+    }
+
+    void ClearTaaHistory(CommandContext& context)
+    {
+        if (s_Frame.mode != Mode::TAA)
+            return;
+        GraphicsContext& graphics = context.GetGraphicsContext();
+        for (ColorBuffer& history : g_TemporalColor)
+        {
+            graphics.TransitionResource(history, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
+            graphics.ClearColor(history);
+        }
+    }
 
     void ApplyTemporalAA(ComputeContext& Context);
     void SharpenImage(ComputeContext& Context, ColorBuffer& TemporalColor);
@@ -67,14 +91,33 @@ void TemporalEffects::Initialize( void )
 
 void TemporalEffects::Shutdown( void )
 {
+    s_Frame = {};
+    s_SubmittedFrame = {};
+    s_PendingReset = ResetReason::None;
+    s_HasSubmittedFrame = false;
+    s_FramePrepared = false;
 }
 
-void TemporalEffects::Update( uint64_t FrameIndex )
+void TemporalEffects::BeginFrame(uint64_t frameIndex, Mode mode, const FrameResolution& resolution)
 {
-    s_FrameIndex = (uint32_t)FrameIndex;
-    s_FrameIndexMod2 = s_FrameIndex % 2;
+    s_Frame = {};
+    s_Frame.frameIndex = frameIndex;
+    s_Frame.mode = mode;
+    s_Frame.resolution = resolution;
+    s_FramePrepared = false;
+    s_Frame.resetReasons = s_HasSubmittedFrame ? ResetReason::None : ResetReason::FirstFrame;
+    if (s_HasSubmittedFrame)
+    {
+        if (frameIndex != s_SubmittedFrame.frameIndex + 1)
+            s_Frame.resetReasons = s_Frame.resetReasons | ResetReason::RenderInterrupted;
+        if (mode != s_SubmittedFrame.mode)
+            s_Frame.resetReasons = s_Frame.resetReasons | ResetReason::ModeChanged;
+        if (resolution.renderSize != s_SubmittedFrame.resolution.renderSize ||
+            resolution.outputSize != s_SubmittedFrame.resolution.outputSize)
+            s_Frame.resetReasons = s_Frame.resetReasons | ResetReason::ResolutionChanged;
+    }
 
-    if (EnableTAA)
+    if (mode == Mode::TAA)
     {
         static const float Halton23[8][2] =
         {
@@ -83,89 +126,87 @@ void TemporalEffects::Update( uint64_t FrameIndex )
             { 1.0f / 8.0f, 4.0f / 9.0f }, { 5.0f / 8.0f, 7.0f / 9.0f },
             { 3.0f / 8.0f, 2.0f / 9.0f }, { 7.0f / 8.0f, 5.0f / 9.0f }
         };
-
-        const float* Offset = Halton23[s_FrameIndex % 8];
-
-        s_JitterX = Offset[0] - 0.5f;
-        s_JitterY = Offset[1] - 0.5f;
+        const float* offset = Halton23[frameIndex % 8];
+        s_Frame.sequenceLength = 8;
+        s_Frame.jitter = {offset[0] - 0.5f, offset[1] - 0.5f};
     }
-    else
+    else if (UsesDlss() && resolution.renderSize.IsValid() && resolution.outputSize.IsValid())
     {
-        s_JitterX = 0.0f;
-        s_JitterY = 0.0f;
+        const double renderPixels = double(resolution.renderSize.width) * resolution.renderSize.height;
+        const double outputPixels = double(resolution.outputSize.width) * resolution.outputSize.height;
+        s_Frame.sequenceLength = static_cast<uint32_t>(std::max(1.0, std::ceil(8.0 * outputPixels / renderPixels)));
+        const uint32_t sample = static_cast<uint32_t>(frameIndex % s_Frame.sequenceLength) + 1;
+        s_Frame.jitter = {Halton(sample, 2) - 0.5f, Halton(sample, 3) - 0.5f};
     }
-
+    s_Frame.previousJitter = s_SubmittedFrame.jitter;
 }
 
-uint32_t TemporalEffects::GetFrameIndexMod2( void )
+const TemporalEffects::TemporalFrameState& TemporalEffects::GetFrameState() { return s_Frame; }
+bool TemporalEffects::UsesDlss() { return s_Frame.mode >= Mode::DLAA; }
+bool TemporalEffects::IsTemporalReconstructionEnabled() { return s_Frame.mode == Mode::TAA || UsesDlss(); }
+uint32_t TemporalEffects::GetFrameIndexMod2() { return static_cast<uint32_t>(s_Frame.frameIndex % 2); }
+uint32_t TemporalEffects::GetFrameIndex() { return static_cast<uint32_t>(s_Frame.frameIndex); }
+
+void TemporalEffects::GetJitterOffset(float& x, float& y)
 {
-    return s_FrameIndexMod2;
+    x = s_Frame.jitter.x;
+    y = s_Frame.jitter.y;
 }
 
-uint32_t TemporalEffects::GetFrameIndex(void)
+void TemporalEffects::InvalidateHistory(ResetReason reason)
 {
-    return s_FrameIndex;
+    s_PendingReset = s_PendingReset | reason;
 }
 
-void TemporalEffects::GetJitterOffset( float& JitterX, float& JitterY )
+void TemporalEffects::ClearHistory(CommandContext& context)
 {
-    JitterX = EnableTAA ? s_JitterX : 0.0f;
-    JitterY = EnableTAA ? s_JitterY : 0.0f;
+    InvalidateHistory(ResetReason::Manual);
+    s_Frame.historyValid = false;
+    s_Frame.previousJitter = s_Frame.jitter;
+    ClearTaaHistory(context);
 }
 
-void TemporalEffects::ClearHistory( CommandContext& Context )
+bool TemporalEffects::PrepareFrame(CommandContext& context, ResetReason reasons)
 {
-    s_HistoryValid = false;
-    TriggerReset = true;
-    GraphicsContext& gfxContext = Context.GetGraphicsContext();
-
-    if (EnableTAA)
-    {
-        gfxContext.TransitionResource(g_TemporalColor[0], D3D12_RESOURCE_STATE_RENDER_TARGET);
-        gfxContext.TransitionResource(g_TemporalColor[1], D3D12_RESOURCE_STATE_RENDER_TARGET, true);
-        gfxContext.ClearColor(g_TemporalColor[0]);
-        gfxContext.ClearColor(g_TemporalColor[1]);
-    }
-}
-
-bool TemporalEffects::PrepareFrame(CommandContext& Context, bool historyValid)
-{
-    static bool s_EnableTAA = false;
-    historyValid = historyValid && EnableTAA == s_EnableTAA && !TriggerReset;
-    if (!historyValid)
-        ClearHistory(Context);
-    s_EnableTAA = EnableTAA;
+    s_Frame.resetReasons = s_Frame.resetReasons | s_PendingReset | reasons;
+    if (TriggerReset)
+        s_Frame.resetReasons = s_Frame.resetReasons | ResetReason::Manual;
+    s_PendingReset = ResetReason::None;
     TriggerReset = false;
-    s_HistoryValid = historyValid;
-    return historyValid;
+    s_Frame.historyValid = s_Frame.resetReasons == ResetReason::None;
+    if (!s_Frame.historyValid)
+    {
+        s_Frame.previousJitter = s_Frame.jitter;
+        ClearTaaHistory(context);
+    }
+    s_FramePrepared = true;
+    return s_Frame.historyValid;
 }
 
-void TemporalEffects::ResolveImage( CommandContext& BaseContext, float jitterDeltaX, float jitterDeltaY )
+void TemporalEffects::CommitFrame()
 {
-    ScopedTimer _prof(L"Temporal Resolve", BaseContext);
-    ComputeContext& Context = BaseContext.GetComputeContext();
-    s_JitterDeltaX = s_HistoryValid ? jitterDeltaX : 0.0f;
-    s_JitterDeltaY = s_HistoryValid ? jitterDeltaY : 0.0f;
+    ASSERT(s_FramePrepared);
+    s_SubmittedFrame = s_Frame;
+    s_HasSubmittedFrame = true;
+    s_FramePrepared = false;
+}
 
-    if (!EnableTAA)
-    {
+void TemporalEffects::ResolveImage(CommandContext& baseContext)
+{
+    if (s_Frame.mode != Mode::TAA)
         return;
-    }
 
-    uint32_t Src = s_FrameIndexMod2;
-    uint32_t Dst = Src ^ 1;
-
-    {
-        ApplyTemporalAA(Context);
-        SharpenImage(Context, g_TemporalColor[Dst]);
-    }
+    ScopedTimer timer(L"Temporal Resolve", baseContext);
+    ComputeContext& context = baseContext.GetComputeContext();
+    ApplyTemporalAA(context);
+    SharpenImage(context, g_TemporalColor[GetFrameIndexMod2() ^ 1]);
 }
 
 void TemporalEffects::ApplyTemporalAA(ComputeContext& Context)
 {
     ScopedTimer _prof(L"Resolve Image", Context);
 
-    uint32_t Src = s_FrameIndexMod2;
+    uint32_t Src = GetFrameIndexMod2();
     uint32_t Dst = Src ^ 1;
 
     Context.SetRootSignature(g_CommonRS);
@@ -182,8 +223,8 @@ void TemporalEffects::ApplyTemporalAA(ComputeContext& Context)
     static_assert(sizeof(ConstantBuffer) == 32, "TemporalBlendCS constant buffer layout must match HLSL.");
     ConstantBuffer cbv = {
         1.0f / g_SceneColorBuffer.GetWidth(), 1.0f / g_SceneColorBuffer.GetHeight(),
-        1.0f / TemporalSpeedLimit, s_HistoryValid ? 1u : 0u,
-        { s_JitterDeltaX, s_JitterDeltaY }, {}
+        1.0f / TemporalSpeedLimit, s_Frame.historyValid ? 1u : 0u,
+        { s_Frame.previousJitter.x - s_Frame.jitter.x, s_Frame.previousJitter.y - s_Frame.jitter.y }, {}
     };
 
     Context.SetDynamicConstantBufferView(3, sizeof(cbv), &cbv);

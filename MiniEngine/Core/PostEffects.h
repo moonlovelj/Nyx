@@ -17,6 +17,8 @@
 #include "EngineTuning.h"
 
 class ComputeContext;
+class CommandContext;
+class ColorBuffer;
 
 namespace PostEffects
 {
@@ -40,8 +42,14 @@ namespace PostEffects
 
     void Initialize( void );
     void Shutdown( void );
-    void Render( void );
+    void Render(ColorBuffer& frameColor);
 
-    // Copy the contents of the post effects buffer onto the main scene buffer
-    void CopyBackPostBuffer( ComputeContext& Context );
+    // Snapshot Exposure[0] before reconstruction. Tone mapping reads this same texture.
+    void PrepareExposure(CommandContext& context);
+    ColorBuffer& GetExposureTexture();
+    constexpr float ReconstructionPreExposure = 1.0f;
+    constexpr bool ReconstructionAutoExposure = false;
+
+    // Copy the packed fallback result into this frame's color buffer.
+    void CopyBackPostBuffer( ComputeContext& Context, ColorBuffer& frameColor );
 }

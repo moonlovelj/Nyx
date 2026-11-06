@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <NyxDlssRoot>$(MSBuildThisFileDirectory)..\ThirdParty\DLSS\</NyxDlssRoot>
+    <NyxDlssLibrary>$(NyxDlssRoot)lib\Windows_x86_64\x64\nvsdk_ngx_d.lib</NyxDlssLibrary>
+    <NyxDlssLibrary Condition="'$(Configuration)'=='Debug'">$(NyxDlssRoot)lib\Windows_x86_64\x64\nvsdk_ngx_d_dbg.lib</NyxDlssLibrary>
+    <NyxEnableDlss Condition="'$(NyxEnableDlss)'=='' And '$(Platform)'=='x64' And Exists('$(NyxDlssRoot)include\nvsdk_ngx.h') And Exists('$(NyxDlssLibrary)')">true</NyxEnableDlss>
+    <NyxEnableDlss Condition="'$(NyxEnableDlss)'==''">false</NyxEnableDlss>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PreprocessorDefinitions Condition="'$(NyxEnableDlss)'=='true'">NYX_ENABLE_DLSS=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(NyxEnableDlss)'!='true'">NYX_ENABLE_DLSS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link Condition="'$(NyxEnableDlss)'=='true'">
+      <AdditionalDependencies>$(NyxDlssLibrary);%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <Target Name="NyxCopyDlssRuntime" AfterTargets="Build"
+          Condition="'$(NyxEnableDlss)'=='true' And '$(ConfigurationType)'=='Application'">
+    <Copy SourceFiles="$(NyxDlssRoot)lib\Windows_x86_64\rel\nvngx_dlss.dll"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true"
+          Condition="Exists('$(NyxDlssRoot)lib\Windows_x86_64\rel\nvngx_dlss.dll')" />
+    <Warning Text="DLSS runtime missing; DLAA/DLSS will fall back to TAA."
+             Condition="!Exists('$(NyxDlssRoot)lib\Windows_x86_64\rel\nvngx_dlss.dll')" />
+  </Target>
+</Project>
