@@ -34,7 +34,8 @@ inline uint8_t TextureOptions(bool sRGB, bool hasAlpha=false, bool invertY=false
         (hasAlpha ? kPreserveAlpha : 0) | (invertY ? kFlipVertical : 0);
 }
 
-// Rebuild source-derived DDS caches when stale or incompatible with the requested format.
+// Rebuild source-derived DDS caches when stale or incompatible with the converter
+// version/flags (.dds.nyxcache), requested format, or full mip chain.
 // Existing DDS source files and DDS-only packages are kept as authored.
 bool CompileTextureOnDemand(const std::wstring& originalFile, uint32_t flags);
 

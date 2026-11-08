@@ -19,6 +19,7 @@
 #include <d3d11.h>
 #include "DirectXTex.h"
 #include <mutex>
+#include <fstream>
 
 #pragma comment(lib, "d3d11.lib")
 
@@ -28,6 +29,19 @@ using namespace DirectX;
 
 namespace
 {
+    // Format and timestamps cannot identify DDS files made by the old converter,
+    // which applied an extra sRGB encoding to color PNGs without metadata.
+    constexpr uint32_t kTextureCacheMagic = 0x4354584e; // NXTC
+    constexpr uint32_t kTextureCacheVersion = 1;
+
+    bool IsTextureCacheCurrent(const std::wstring& ddsFile, uint32_t flags)
+    {
+        uint32_t stamp[3] = {};
+        std::ifstream file(ddsFile + L".nyxcache", std::ios::binary);
+        return file.read(reinterpret_cast<char*>(stamp), sizeof(stamp)) &&
+            stamp[0] == kTextureCacheMagic && stamp[1] == kTextureCacheVersion && stamp[2] == flags;
+    }
+
     DXGI_FORMAT GetOutputFormat(uint32_t flags, bool isHDR, size_t width, size_t height)
     {
         const bool compressed = (flags & (kDefaultBC | kQualityBC)) != 0 &&
@@ -121,13 +135,14 @@ bool CompileTextureOnDemand(const std::wstring& originalFile, uint32_t flags)
         TexMetadata cachedMetadata = {};
         const std::wstring ext = Utility::ToLower(Utility::GetFileExtension(originalFile));
         const bool isHDR = ext == L"hdr" || ext == L"exr";
-        incompatible = FAILED(GetMetadataFromDDSFile(ddsFile.c_str(), DDS_FLAGS_NONE, cachedMetadata)) ||
+        incompatible = !IsTextureCacheCurrent(ddsFile, flags) ||
+            FAILED(GetMetadataFromDDSFile(ddsFile.c_str(), DDS_FLAGS_NONE, cachedMetadata)) ||
             cachedMetadata.format != GetOutputFormat(flags, isHDR, cachedMetadata.width, cachedMetadata.height) ||
             cachedMetadata.mipLevels != GetFullMipCount(cachedMetadata.width, cachedMetadata.height);
     }
     if (ddsFileMissing || ddsFileStat.st_mtime < srcFileStat.st_mtime || incompatible)
     {
-        Utility::Printf("DDS texture %ws missing, stale, or format changed. Rebuilding.\n", Utility::RemoveBasePath(originalFile).c_str());
+        Utility::Printf("DDS texture %ws missing, stale, or conversion policy changed. Rebuilding.\n", Utility::RemoveBasePath(originalFile).c_str());
         return ConvertToDDS(originalFile, flags);
     }
     return true;
@@ -207,7 +222,9 @@ bool ConvertToDDS( const std::wstring& filePath, uint32_t Flags )
     else
     {
         // The material slot determines color space, regardless of PNG metadata.
-        const WIC_FLAGS wicFlags = bInterpretAsSRGB ? WIC_FLAGS_FORCE_SRGB : WIC_FLAGS_IGNORE_SRGB;
+        // FORCE_SRGB is a WIC *save* flag, not a load-time interpretation flag.
+        // Ignore embedded metadata and apply the material slot's interpretation below.
+        const WIC_FLAGS wicFlags = WIC_FLAGS_IGNORE_SRGB;
 
         HRESULT hr = LoadFromWICFile( filePath.c_str(), wicFlags, &info, *image );
         if (FAILED(hr))
@@ -215,6 +232,20 @@ bool ConvertToDDS( const std::wstring& filePath, uint32_t Flags )
             Utility::Printf( "Could not load texture \"%ws\" (WIC: %08X).\n", filePath.c_str(), hr );
             return false;
         }
+    }
+
+    if (!isHDR && ext != L"dds")
+    {
+        // These are already encoded color samples (or raw data samples). Retag
+        // without changing the bytes before Convert/GenerateMipMaps; converting
+        // UNORM -> UNORM_SRGB directly would encode the color a second time.
+        const DXGI_FORMAT interpretedFormat = bInterpretAsSRGB ? MakeSRGB(info.format) : MakeLinear(info.format);
+        if (interpretedFormat != info.format && !image->OverrideFormat(interpretedFormat))
+        {
+            Utility::Printf("Could not interpret texture color space: %ws\n", filePath.c_str());
+            return false;
+        }
+        info.format = image->GetMetadata().format;
     }
 
     if ( info.width > 16384 || info.height > 16384 )
@@ -276,8 +307,13 @@ bool ConvertToDDS( const std::wstring& filePath, uint32_t Flags )
     {
         std::unique_ptr<ScratchImage> timage(new ScratchImage);
 
+        // 16-bit PNG and other formats without an sRGB DXGI variant cannot be
+        // retagged above. Explicitly interpret both sides as sRGB so reducing
+        // their bit depth preserves encoded RGB samples (alpha stays linear).
+        const TEX_FILTER_FLAGS conversionFilter = bInterpretAsSRGB && !isHDR && ext != L"dds" ?
+            TEX_FILTER_SRGB : TEX_FILTER_DEFAULT;
         HRESULT hr = Convert( image->GetImages(), image->GetImageCount(), image->GetMetadata(),
-            tformat, TEX_FILTER_DEFAULT, 0.5f, *timage );
+            tformat, conversionFilter, 0.5f, *timage );
 
         if (FAILED(hr))
         {
@@ -346,11 +382,34 @@ bool ConvertToDDS( const std::wstring& filePath, uint32_t Flags )
         DeleteFileW(temporaryFile.c_str());
         return false;
     }
-    // Publish only complete output; a failed conversion leaves the previous cache intact.
+    // Do not let an old stamp certify new bytes if publication is interrupted,
+    // especially for flags (e.g. vertical flip) which do not change the format.
+    const std::wstring stampFile = wDest + L".nyxcache";
+    if (!DeleteFileW(stampFile.c_str()) && GetLastError() != ERROR_FILE_NOT_FOUND)
+    {
+        Utility::Printf("Could not invalidate texture cache version: %ws\n", stampFile.c_str());
+        DeleteFileW(temporaryFile.c_str());
+        return false;
+    }
+    // Publish only complete output; a failed conversion leaves the previous DDS intact.
     if (!MoveFileExW(temporaryFile.c_str(), wDest.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
     {
         Utility::Printf("Could not replace DDS cache \"%ws\" (%u).\n", wDest.c_str(), GetLastError());
         DeleteFileW(temporaryFile.c_str());
+        return false;
+    }
+
+    // Publish the stamp only after the complete DDS. Missing/old stamps trigger
+    // conversion again; DDS-only packages and authored DDS bypass this check.
+    const uint32_t stamp[] = {kTextureCacheMagic, kTextureCacheVersion, Flags};
+    const std::wstring temporaryStamp = temporaryFile + L".nyxcache";
+    std::ofstream cache(temporaryStamp, std::ios::binary);
+    cache.write(reinterpret_cast<const char*>(stamp), sizeof(stamp));
+    cache.close();
+    if (!cache || !MoveFileExW(temporaryStamp.c_str(), stampFile.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    {
+        Utility::Printf("Could not publish texture cache version: %ws\n", stampFile.c_str());
+        DeleteFileW(temporaryStamp.c_str());
         return false;
     }
 
