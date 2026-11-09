@@ -5,6 +5,7 @@
 #include "CommandContext.h"
 #include "TemporalEffects.h"
 #include "Reconstruction.h"
+#include "EngineProfiling.h"
 #include "MotionBlur.h"
 #include "DepthOfField.h"
 #include "PostEffects.h"
@@ -722,9 +723,11 @@ void SceneViewer::RenderScene( void )
         ? viewConstants.PrevProjMatrix * Matrix4(viewConstants.PrevViewMatrix.Get3x3()) *
             Matrix4(Transpose(viewConstants.ViewMatrix.Get3x3())) * Invert(viewConstants.ProjMatrix)
         : Matrix4(kIdentity);
+    EngineProfiling::BeginBlock(L"Reconstruction Motion Vectors", &gfxContext);
     MotionBlur::GenerateCameraVelocityBuffer(gfxContext, reprojection,
         m_Camera.GetNearClip(), m_Camera.GetFarClip(), true, jitterDeltaX, jitterDeltaY, &skyReprojection);
     Renderer::GenerateObjectVelocity(gfxContext, mainView, m_Camera.GetFarClip());
+    EngineProfiling::EndBlock(&gfxContext);
 
     PostEffects::PrepareExposure(gfxContext);
     TemporalEffects::ResolveImage(gfxContext);
@@ -744,6 +747,7 @@ void SceneViewer::RenderScene( void )
 
     gfxContext.Finish();
     Reconstruction::Render();
+    Reconstruction::CaptureDiagnostics(m_Camera.GetNearClip(), m_Camera.GetFarClip());
     ModelInstanceManager::CommitRenderedTransforms();
     TemporalEffects::CommitFrame();
     m_PreviousView = viewConstants;
@@ -751,8 +755,9 @@ void SceneViewer::RenderScene( void )
     m_HasPreviousFrame = true;
 }
 
-void SceneViewer::RenderUI( GraphicsContext& )
+void SceneViewer::RenderUI( GraphicsContext& context )
 {
+    Reconstruction::PresentDiagnostics(context, GetFrameColor());
     if (!m_ShowLoadingUI)
         return;
 

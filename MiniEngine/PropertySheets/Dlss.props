@@ -2,6 +2,7 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <NyxDlssRoot>$(MSBuildThisFileDirectory)..\ThirdParty\DLSS\</NyxDlssRoot>
+    <NyxDlssRuntime>$(NyxDlssRoot)lib\Windows_x86_64\rel\nvngx_dlss.dll</NyxDlssRuntime>
     <NyxDlssLibrary>$(NyxDlssRoot)lib\Windows_x86_64\x64\nvsdk_ngx_d.lib</NyxDlssLibrary>
     <NyxDlssLibrary Condition="'$(Configuration)'=='Debug'">$(NyxDlssRoot)lib\Windows_x86_64\x64\nvsdk_ngx_d_dbg.lib</NyxDlssLibrary>
     <NyxEnableDlss Condition="'$(NyxEnableDlss)'=='' And '$(Platform)'=='x64' And Exists('$(NyxDlssRoot)include\nvsdk_ngx.h') And Exists('$(NyxDlssLibrary)')">true</NyxEnableDlss>
@@ -16,12 +17,20 @@
       <AdditionalDependencies>$(NyxDlssLibrary);%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
+  <Target Name="NyxValidateDlssConfiguration" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(NyxEnableDlss)'!='true' And '$(NyxEnableDlss)'!='false'"
+           Text="NyxEnableDlss must be true or false." />
+    <Error Condition="'$(NyxEnableDlss)'=='true' And ('$(Platform)'!='x64' Or !Exists('$(NyxDlssRoot)include\nvsdk_ngx.h') Or !Exists('$(NyxDlssLibrary)'))"
+           Text="DLSS requires x64 and the pinned SDK submodule. Run git submodule update --init MiniEngine/ThirdParty/DLSS, or build with /p:NyxEnableDlss=false." />
+  </Target>
   <Target Name="NyxCopyDlssRuntime" AfterTargets="Build"
-          Condition="'$(NyxEnableDlss)'=='true' And '$(ConfigurationType)'=='Application'">
-    <Copy SourceFiles="$(NyxDlssRoot)lib\Windows_x86_64\rel\nvngx_dlss.dll"
+          Condition="'$(ConfigurationType)'=='Application'">
+    <Copy SourceFiles="$(NyxDlssRuntime)"
           DestinationFolder="$(OutDir)" SkipUnchangedFiles="true"
-          Condition="Exists('$(NyxDlssRoot)lib\Windows_x86_64\rel\nvngx_dlss.dll')" />
+          Condition="'$(NyxEnableDlss)'=='true' And Exists('$(NyxDlssRuntime)')" />
     <Warning Text="DLSS runtime missing; DLAA/DLSS will fall back to TAA."
-             Condition="!Exists('$(NyxDlssRoot)lib\Windows_x86_64\rel\nvngx_dlss.dll')" />
+             Condition="'$(NyxEnableDlss)'=='true' And !Exists('$(NyxDlssRuntime)')" />
+    <WriteLinesToFile File="$(OutDir)NyxDlssBuild.txt" Overwrite="true" WriteOnlyWhenDifferent="true"
+                      Lines="Enabled=$(NyxEnableDlss);Configuration=$(Configuration);Platform=$(Platform)" />
   </Target>
 </Project>

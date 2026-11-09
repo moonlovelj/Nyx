@@ -121,7 +121,7 @@ Recommended for large scenes:
 
 ### Clone
 
-Install Git LFS, then clone with the Bistro asset submodule (~1.55 GiB):
+Install Git LFS, then clone with the Bistro asset submodule (~1.55 GiB) and the pinned NVIDIA DLSS SDK:
 
 ```powershell
 git lfs install
@@ -146,6 +146,12 @@ The build automatically copies the Slang runtime, Slang standard module, `dxcomp
 
 Without `-model`, SceneViewer loads `Assets/bunny/bunny.gltf` with **10,000 instances**.
 With `-model`, the instance count defaults to **1**; use `-instances` to change it.
+
+### DLAA / DLSS
+
+- **Build:** The pinned DLSS SDK submodule enables support automatically and copies the production DLL. Use MSBuild `/p:NyxEnableDlss=false` to build without the SDK, or `true` to require it.
+- **Usage:** Select AA under **Graphics / AA**. DLSS Quality is the default, with TAA fallback when unavailable. DLAA/DLSS require a compatible NVIDIA RTX GPU and driver.
+- **Diagnostics:** The AA panel shows active mode, resolutions and fallback reasons, with views for depth, motion, exposure and reconstruction colors. Disable diagnostic views when profiling.
 
 ### Run the Showcase Scenes
 
@@ -199,7 +205,7 @@ Arguments:
 - `Camera/Lock Camera`: freeze the current camera for screenshots; uncheck to resume camera control
 - `Application/Pause Animations`: pause all model animations at the current time; uncheck to resume playback
 
-Rendering and display resolutions default to **Monitor Native**, using the window's monitor desktop resolution in physical pixels, with a borderless fullscreen window. Windows DPI scaling does not reduce the rendering resolution. Under `Graphics/Display`, change `Native Resolution` to adjust internal rendering, or select a preset for `Display Resolution` to return to a regular window.
+Display resolution defaults to **Monitor Native**, using the window's monitor desktop resolution in physical pixels, with a borderless fullscreen window. Under `Graphics/Display`, select a `Display Resolution` preset to return to a regular window. DLSS derives the internal render resolution from the selected quality mode and output size; all other modes render at display resolution. Windows DPI scaling does not reduce the selected output resolution.
 
 Source LDR material textures default to BC7 DDS with full mip chains when both dimensions are multiples of four; other LDR dimensions use uncompressed RGBA8. Color maps use sRGB formats, and data maps use linear formats. Existing `.mini` geometry caches automatically adopt this policy. Stale DDS files and caches with incompatible formats are rebuilt from the source image on load; the first conversion can take longer. BC6H/BC7 encoding uses GPU acceleration when available, with a CPU fallback. Authored DDS inputs are preserved, and DDS-only packages remain loadable.
 

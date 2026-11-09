@@ -30,5 +30,8 @@ namespace Reconstruction
     float GetMaterialMipBias();
     // After submitting the scene. Writes the output even on failure or an empty scene.
     void Render(bool hasScene = true);
+    // Capture before post effects, then display after post effects without changing temporal inputs.
+    void CaptureDiagnostics(float nearClip, float farClip);
+    void PresentDiagnostics(CommandContext& context, ColorBuffer& frameColor);
     void DrawSettings();
 }

@@ -7,6 +7,7 @@
 #include "FXAA.h"
 #include "imgui.h"
 #include "CompiledShaders/ReconstructionFallbackCS.h"
+#include "CompiledShaders/ReconstructionDiagnosticsCS.h"
 #include <array>
 #include <cmath>
 
@@ -25,6 +26,16 @@ namespace Reconstruction
         bool s_Failed = false;
         RootSignature s_FallbackRoot;
         ComputePSO s_FallbackPSO(L"Reconstruction: Spatial Fallback");
+        RootSignature s_DiagnosticsRoot;
+        ComputePSO s_DiagnosticsPSO(L"Reconstruction: Diagnostics");
+        ColorBuffer s_DiagnosticsBuffer;
+        uint64_t s_DiagnosticsFrame = UINT64_MAX;
+        enum DiagnosticView { DiagnosticOff, Depth, Motion, Exposure, InputColor, OutputColor };
+        int s_DiagnosticView = DiagnosticOff;
+        float s_MotionRange = 32.0f;
+        float s_DepthRange = 100.0f;
+        const char* const DiagnosticNames[] = {"Off", "Depth (linear)", "Motion vectors (RG16F)",
+            "Exposure (EV)", "Color before reconstruction", "Color after reconstruction"};
         const char* const ModeNames[] = {"Off", "FXAA", "TAA", "DLAA", "DLSS Quality",
             "DLSS Balanced", "DLSS Performance", "DLSS Ultra Performance"};
 
@@ -61,6 +72,16 @@ namespace Reconstruction
         s_FallbackPSO.SetRootSignature(s_FallbackRoot);
         s_FallbackPSO.SetComputeShader(g_pReconstructionFallbackCS, sizeof(g_pReconstructionFallbackCS));
         s_FallbackPSO.Finalize();
+        s_DiagnosticsRoot.Reset(3, 0);
+        s_DiagnosticsRoot[0].InitAsConstants(0, 8);
+        s_DiagnosticsRoot[1].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 2);
+        s_DiagnosticsRoot[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1);
+        s_DiagnosticsRoot.Finalize(L"Reconstruction Diagnostics");
+        s_DiagnosticsPSO.SetRootSignature(s_DiagnosticsRoot);
+        s_DiagnosticsPSO.SetComputeShader(g_pReconstructionDiagnosticsCS, sizeof(g_pReconstructionDiagnosticsCS));
+        s_DiagnosticsPSO.Finalize();
+        s_DiagnosticView = DiagnosticOff;
+        s_DiagnosticsFrame = UINT64_MAX;
     }
 
     void Shutdown()
@@ -68,6 +89,8 @@ namespace Reconstruction
         if (s_Backend)
             s_Backend->Shutdown();
         s_Backend.reset();
+        s_DiagnosticsBuffer.Destroy();
+        s_DiagnosticsFrame = UINT64_MAX;
     }
 
     void SetSettings(const ReconstructionSettings& settings)
@@ -159,6 +182,68 @@ namespace Reconstruction
         }
     }
 
+    void CaptureDiagnostics(float nearClip, float farClip)
+    {
+        if (!s_Backend || s_DiagnosticView == DiagnosticOff || s_Status.nativeDebugView)
+            return;
+        const auto output = Display::GetFrameResolution().outputSize;
+        // Output-size changes have already drained the GPU in ApplyFrameResolution.
+        // Keep this allocation across view toggles to avoid per-frame allocation/waits.
+        if (!s_DiagnosticsBuffer.GetResource() || s_DiagnosticsBuffer.GetWidth() != output.width ||
+            s_DiagnosticsBuffer.GetHeight() != output.height)
+            s_DiagnosticsBuffer.Create(L"Reconstruction Diagnostics", output.width, output.height, 1,
+                DXGI_FORMAT_R16G16B16A16_FLOAT);
+
+        GpuResource* source = &g_SceneColorBuffer;
+        D3D12_CPU_DESCRIPTOR_HANDLE sourceSRV = g_SceneColorBuffer.GetSRV();
+        if (s_DiagnosticView == Depth)
+        {
+            source = &g_SceneDepthBuffer;
+            sourceSRV = g_SceneDepthBuffer.GetDepthSRV();
+        }
+        else if (s_DiagnosticView == Motion)
+        {
+            source = &g_ReconstructionVelocity;
+            sourceSRV = g_ReconstructionVelocity.GetSRV();
+        }
+        else if (s_DiagnosticView == Exposure)
+        {
+            source = &PostEffects::GetExposureTexture();
+            sourceSRV = PostEffects::GetExposureTexture().GetSRV();
+        }
+        else if (s_DiagnosticView == OutputColor && g_ReconstructionOutput.GetResource())
+        {
+            source = &g_ReconstructionOutput;
+            sourceSRV = g_ReconstructionOutput.GetSRV();
+        }
+        auto& context = ComputeContext::Begin(L"Reconstruction Diagnostics");
+        context.SetRootSignature(s_DiagnosticsRoot);
+        context.SetPipelineState(s_DiagnosticsPSO);
+        const struct
+        {
+            uint32_t view, width, height;
+            float nearClip, farClip, motionRange, depthRange, padding;
+        } constants = {uint32_t(s_DiagnosticView), output.width, output.height,
+            nearClip, farClip, s_MotionRange, s_DepthRange, 0.0f};
+        static_assert(sizeof(constants) == 32);
+        context.SetConstantArray(0, 8, &constants);
+        context.TransitionResource(*source, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(PostEffects::GetExposureTexture(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        context.TransitionResource(s_DiagnosticsBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        const D3D12_CPU_DESCRIPTOR_HANDLE inputs[] = {sourceSRV, PostEffects::GetExposureTexture().GetSRV()};
+        context.SetDynamicDescriptors(1, 0, 2, inputs);
+        context.SetDynamicDescriptor(2, 0, s_DiagnosticsBuffer.GetUAV());
+        context.Dispatch2D(output.width, output.height);
+        context.Finish();
+        s_DiagnosticsFrame = GetFrameCount();
+    }
+
+    void PresentDiagnostics(CommandContext& context, ColorBuffer& frameColor)
+    {
+        if (s_DiagnosticsFrame == GetFrameCount())
+            context.CopyBuffer(frameColor, s_DiagnosticsBuffer);
+    }
+
     void DrawSettings()
     {
         if (!s_Backend)
@@ -179,6 +264,9 @@ namespace Reconstruction
             ImGui::EndCombo();
         }
         ImGui::Text("Active: %s", s_Status.spatialFallback ? "Spatial fallback" : ModeNames[int(s_Status.actualMode)]);
+        const auto& resolution = Display::GetFrameResolution();
+        ImGui::Text("Input: %u x %u   Output: %u x %u", resolution.renderSize.width,
+            resolution.renderSize.height, resolution.outputSize.width, resolution.outputSize.height);
         if (s_Status.nativeDebugView)
             ImGui::TextWrapped("Debug view uses native resolution with AA off. The selected mode resumes in Lit view.");
         if (s_Settings.mode >= Mode::DLAA)
@@ -195,6 +283,28 @@ namespace Reconstruction
         {
             s_Backend->Shutdown();
             s_Dirty = true;
+        }
+        if (ImGui::TreeNode("Reconstruction Diagnostics"))
+        {
+            ImGui::Combo("View", &s_DiagnosticView, DiagnosticNames, _countof(DiagnosticNames));
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("AA stays active. Magenta = non-finite input. Disable when profiling.");
+            if (s_DiagnosticView == Depth)
+                ImGui::SliderFloat("Depth range (world units)", &s_DepthRange, 0.1f, 10000.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
+            if (s_DiagnosticView == Motion)
+            {
+                ImGui::SliderFloat("Motion range (render pixels)", &s_MotionRange, 1.0f, 512.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
+                ImGui::TextDisabled("RG = XY motion; 0.5 = zero.");
+            }
+            if (s_DiagnosticView == Exposure)
+                ImGui::TextDisabled("Gray: -10 to +10 EV.");
+            if (s_DiagnosticView >= InputColor)
+                ImGui::TextDisabled("Same exposure + Reinhard mapping.");
+            if (s_DiagnosticView >= InputColor && s_Status.actualMode < Mode::DLAA)
+                ImGui::TextDisabled("Native mode: both colors use the scene result.");
+            if (s_Status.nativeDebugView)
+                ImGui::TextWrapped("Select Lit to use reconstruction diagnostics.");
+            ImGui::TreePop();
         }
     }
 }

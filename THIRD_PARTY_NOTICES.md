@@ -15,9 +15,12 @@ under their own licenses.
 | [cgltf](https://github.com/jkuhlmann/cgltf) | MIT | [LICENSE](MiniEngine/ThirdParty/cgltf/LICENSE) |
 | [nlohmann/json](https://github.com/nlohmann/json) | MIT; embedded notices retained | [json.hpp](MiniEngine/Model/json.hpp) |
 | [Slang](https://github.com/shader-slang/slang) | Apache-2.0 WITH LLVM-exception | [LICENSE](MiniEngine/ThirdParty/slang-2026.10/LICENSE) |
+| [NVIDIA DLSS / NGX SDK 310.9.16](https://github.com/NVIDIA/DLSS/tree/v310.9.16), optional | NVIDIA RTX SDKs License | [LICENSE.txt](MiniEngine/ThirdParty/DLSS/LICENSE.txt) |
 | [DXC](https://github.com/microsoft/DirectXShaderCompiler) | MIT, LLVM/NCSA, Microsoft terms | [MIT](MiniEngine/ThirdParty/dxc_2026_05_27/LICENSE-MIT.txt), [LLVM](MiniEngine/ThirdParty/dxc_2026_05_27/LICENSE-LLVM.txt), [Microsoft](MiniEngine/ThirdParty/dxc_2026_05_27/LICENSE-MS.txt) |
 
 ## SDK and NuGet Dependencies
+
+DLSS-enabled packages include the production `nvngx_dlss.dll` and its NVIDIA license listed above.
 
 Package versions are recorded in each project's `packages.config`. Local package
 notices are available under `Packages/` after NuGet restore.

@@ -784,5 +784,6 @@
     <ClCompile Include="DlssBackend.cpp" />
     <ClCompile Include="Reconstruction.cpp" />
     <FxCompile Include="Shaders\ReconstructionFallbackCS.hlsl"><Filter>Shaders</Filter></FxCompile>
+    <FxCompile Include="Shaders\ReconstructionDiagnosticsCS.hlsl"><Filter>Shaders</Filter></FxCompile>
   </ItemGroup>
 </Project>

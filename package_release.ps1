@@ -127,6 +127,28 @@ if (-not (Test-Path -LiteralPath $exePath)) {
   throw "SceneViewer.exe not found under SourceDir: $sourcePath"
 }
 
+# Use the build's feature setting, not a possibly stale DLL left in SourceDir.
+$dlssBuildPath = Join-Path $sourcePath "NyxDlssBuild.txt"
+if (-not (Test-Path -LiteralPath $dlssBuildPath -PathType Leaf)) {
+  throw "NyxDlssBuild.txt is missing. Rebuild SceneViewer before packaging."
+}
+$dlssBuild = Get-Content -LiteralPath $dlssBuildPath -Raw | ConvertFrom-StringData
+if ($dlssBuild.Enabled -notin @('true', 'false') -or $dlssBuild.Configuration -ne 'Release' -or $dlssBuild.Platform -ne 'x64') {
+  throw "SourceDir must contain a Release x64 build with valid DLSS build metadata."
+}
+$includeDlss = $dlssBuild.Enabled -eq 'true'
+if ($includeDlss) {
+  $dlssDll = Join-Path $sourcePath 'nvngx_dlss.dll'
+  if (-not (Test-Path -LiteralPath $dlssDll -PathType Leaf)) {
+    throw "DLSS-enabled release is missing nvngx_dlss.dll. Rebuild with the pinned SDK submodule."
+  }
+  $productionDll = Join-Path $repoRoot 'MiniEngine\ThirdParty\DLSS\lib\Windows_x86_64\rel\nvngx_dlss.dll'
+  if ((Get-FileHash -LiteralPath $dlssDll -Algorithm SHA256).Hash -ne
+      (Get-FileHash -LiteralPath $productionDll -Algorithm SHA256).Hash) {
+    throw "DLSS runtime differs from the pinned submodule's production DLL. Rebuild SceneViewer."
+  }
+}
+
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $nameParts = @($PackageName)
 if (-not [string]::IsNullOrWhiteSpace($Version)) {
@@ -155,6 +177,11 @@ Write-Host "Collecting release runtime from: $sourcePath"
 $runtimeFiles = @("SceneViewer.exe", "slang.dll", "slang-compiler.dll", "slang-rt.dll", "dxcompiler.dll", "dxil.dll", "WinPixEventRuntime.dll")
 foreach ($runtimeFile in $runtimeFiles) {
   Copy-PayloadFile -Source (Join-Path $sourcePath $runtimeFile) -RelativePath $runtimeFile
+}
+Copy-PayloadFile -Source $dlssBuildPath -RelativePath 'NyxDlssBuild.txt'
+if ($includeDlss) {
+  Copy-PayloadFile -Source $dlssDll -RelativePath 'nvngx_dlss.dll'
+  Copy-PayloadFile -Source (Join-Path $repoRoot 'MiniEngine\ThirdParty\DLSS\LICENSE.txt') -RelativePath 'MiniEngine\ThirdParty\DLSS\LICENSE.txt'
 }
 Copy-PayloadFile -Source (Join-Path $sourcePath "D3D12\D3D12Core.dll") -RelativePath "D3D12\D3D12Core.dll"
 if (Test-Path -LiteralPath (Join-Path $sourcePath "SceneViewer.exe.manifest")) {
@@ -310,8 +337,10 @@ Controls
   Application/Pause Animations: pause/resume all model animations.
   Application/GLTF: switch included scenes; Application/IBL: environment.
 
-The package preserves the renderer's defaults, including monitor-native resolution.
-Use Graphics/Display in the tuning UI to adjust rendering and window resolution.
+Display Resolution defaults to Monitor Native. Change it under Graphics/Display.
+Graphics/AA selects AA and diagnostic views. Default: DLSS Quality, with TAA fallback.
+DLAA/DLSS require a compatible NVIDIA RTX GPU and driver.
+DLSS derives render size; other modes render at display size. Disable diagnostics when profiling.
 
 Source and documentation: https://github.com/moonlovelj/Nyx
 Zorah demo: https://www.youtube.com/watch?v=4YmfQTLy4jc
@@ -323,10 +352,12 @@ See LICENSE, THIRD_PARTY_NOTICES.md, and the included component licenses.
 $bistroCommit = (& git -C (Join-Path $assetSourceRoot "bistro-metalrough") rev-parse HEAD).Trim()
 $exeHash = (Get-FileHash -LiteralPath $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
 $buildInfo = "Version: $Version`r`nSource commit: $sourceCommit`r`nBistro commit: $bistroCommit`r`nConfiguration: Release x64`r`nMINI cache version: $miniVersion`r`nSceneViewer.exe SHA256: $exeHash`r`n"
+$buildInfo += "DLSS enabled: $($dlssBuild.Enabled)`r`n"
 [IO.File]::WriteAllText((Join-Path $payloadRoot "BUILDINFO.txt"), $buildInfo, [Text.Encoding]::ASCII)
 
 $requiredPackagePaths = @(
   "SceneViewer.exe",
+  "NyxDlssBuild.txt",
   "slang.dll",
   "slang-compiler.dll",
   "slang-rt.dll",
@@ -352,6 +383,9 @@ $requiredPackagePaths = @(
   "Assets\bistro-metalrough\bistro-anim.bin",
   "Assets\bistro-metalrough\LICENSE"
 )
+if ($includeDlss) {
+  $requiredPackagePaths += @('nvngx_dlss.dll', 'MiniEngine\ThirdParty\DLSS\LICENSE.txt')
+}
 
 foreach ($relativePath in $requiredPackagePaths) {
   $requiredPath = Join-Path $payloadRoot $relativePath

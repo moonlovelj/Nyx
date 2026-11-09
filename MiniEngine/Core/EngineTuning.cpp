@@ -19,7 +19,6 @@
 #include "GameInput.h"
 #include "EngineProfiling.h"
 #include "ImGuiManager.h"
-#include "Display.h"
 #include "imgui.h"
 
 using namespace std;
@@ -269,9 +268,6 @@ void VariableGroup::DisplayImGui( void )
             {
                 if (this == sm_RootGroup.FindChild("Graphics") && iter->first == "AA")
                 {
-                    const FrameResolution& resolution = Display::GetFrameResolution();
-                    ImGui::Text("Actual render %u x %u   Output %u x %u", resolution.renderSize.width, resolution.renderSize.height,
-                        resolution.outputSize.width, resolution.outputSize.height);
                     Reconstruction::DrawSettings();
                 }
                 subGroup->DisplayImGui();
