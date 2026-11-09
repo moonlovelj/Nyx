@@ -83,7 +83,8 @@ bool AssimpModel::Save(const string& filename) const
         case format_mini:
         {
             Renderer::ModelData model;
-            if (BuildModel(model) && Renderer::SaveModel(Utility::UTF8ToWideString(filename), model))
+            Renderer::GlobalStreamingContext streamCtx;
+            if (BuildModel(model, streamCtx) && Renderer::SaveModel(Utility::UTF8ToWideString(filename), model, streamCtx))
                 return true;
         }
     }

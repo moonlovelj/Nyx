@@ -68,6 +68,15 @@ void GpuTimeManager::Initialize(uint32_t MaxNumTimers)
     sm_QueryHeap->SetName(L"GpuTimeStamp QueryHeap");
 
     sm_MaxNumTimers = (uint32_t)MaxNumTimers;
+
+    // CPU-only scopes and inactive passes may never write their query slots.
+    CommandContext& Context = CommandContext::Begin();
+    for (uint32_t i = 0; i < MaxNumTimers * 2; ++i)
+        Context.InsertTimeStamp(sm_QueryHeap, i);
+    // Keep unused slots outside the valid frame interval and initialize readback data.
+    Context.InsertTimeStamp(sm_QueryHeap, 0);
+    Context.ResolveTimeStamps(sm_ReadBackBuffer, sm_QueryHeap, MaxNumTimers * 2);
+    sm_Fence = Context.Finish();
 }
 
 void GpuTimeManager::Shutdown()
@@ -106,7 +115,7 @@ void GpuTimeManager::BeginReadBack(void)
     sm_ValidTimeStart = sm_TimeStampBuffer[0];
     sm_ValidTimeEnd = sm_TimeStampBuffer[1];
 
-    // On the first frame, with random values in the timestamp query heap, we can avoid a misstart.
+    // The initial readback has no completed frame interval.
     if (sm_ValidTimeEnd < sm_ValidTimeStart)
     {
         sm_ValidTimeStart = 0ull;

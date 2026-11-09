@@ -266,7 +266,8 @@ void Graphics::Initialize(bool RequireDXRSupport)
 			DXGI_ADAPTER_DESC1 desc;
             pAdapter->GetDesc1(&desc);
 
-			if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
+			if ((desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) ||
+                (desiredVendor && desc.VendorId != desiredVendor))
 				continue;
 
 			if (FAILED(D3D12CreateDevice(
@@ -353,9 +354,6 @@ void Graphics::Initialize(bool RequireDXRSupport)
 
             // RESOURCE_BARRIER_DUPLICATE_SUBRESOURCE_TRANSITIONS
             D3D12_MESSAGE_ID_RESOURCE_BARRIER_DUPLICATE_SUBRESOURCE_TRANSITIONS,
-
-            // Suppress errors from calling ResolveQueryData with timestamps that weren't requested on a given frame.
-            D3D12_MESSAGE_ID_RESOLVE_QUERY_INVALID_QUERY_STATE,
 
             // Ignoring InitialState D3D12_RESOURCE_STATE_COPY_DEST. Buffers are effectively created in state D3D12_RESOURCE_STATE_COMMON.
             D3D12_MESSAGE_ID_CREATERESOURCE_STATE_IGNORED,

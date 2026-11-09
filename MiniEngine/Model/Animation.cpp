@@ -167,13 +167,13 @@ void ModelInstance::PauseAnimation(uint32_t animIdx)
 
 void ModelInstance::ResetAnimation(uint32_t animIdx)
 {
-    if (animIdx >= m_AnimState.size())
+    if (animIdx < m_AnimState.size())
         m_AnimState[animIdx].time = 0.0f;
 }
 
 void ModelInstance::StopAnimation(uint32_t animIdx)
 {
-    if (animIdx >= m_AnimState.size())
+    if (animIdx < m_AnimState.size())
     {
         m_AnimState[animIdx].state = AnimationState::kStopped;
         m_AnimState[animIdx].time = 0.0f;

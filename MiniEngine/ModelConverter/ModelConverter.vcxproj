@@ -40,6 +40,7 @@
   <ItemDefinitionGroup>
     <ClCompile>
       <AdditionalIncludeDirectories>..\Model;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link Condition="'$(Configuration)'=='Debug'">
       <AdditionalOptions>/nodefaultlib:MSVCRT %(AdditionalOptions)</AdditionalOptions>
@@ -76,11 +77,14 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ItemDefinitionGroup>
     <Link>
-      <AdditionalLibraryDirectories>..\..\Packages\zlib-msvc-x64.1.2.11.8900\build\native\lib_release;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>zlibstatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\ThirdParty\slang-2026.10\lib;..\..\Packages\zlib-msvc-x64.1.2.11.8900\build\native\lib_release;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>slang.lib;zlibstatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalOptions>/nodefaultlib:LIBCMT %(AdditionalOptions)</AdditionalOptions>
       <SubSystem>Console</SubSystem>
     </Link>
+    <PostBuildEvent>
+      <Command>copy /Y "$(ProjectDir)..\ThirdParty\slang-2026.10\bin\slang.dll" "$(OutDir)"</Command>
+    </PostBuildEvent>
     <ClCompile>
       <RuntimeLibrary Condition="'$(Configuration)'=='Release'">MultiThreadedDLL</RuntimeLibrary>
     </ClCompile>
