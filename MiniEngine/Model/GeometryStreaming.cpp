@@ -48,6 +48,8 @@ namespace GeometryStreaming
 	ByteAddressBuffer m_GeometryStreamingRequestMaskGPU;
 	ReadbackBuffer m_ReadbackRequestMaskBuffer[kNumReadbackBuffers];
 	uint64_t m_FenceValues[kNumReadbackBuffers] = {};
+	bool m_HadFreshCull = false;
+	bool m_ReadbackAllowsEviction[kNumReadbackBuffers] = {};
 
 	struct LoadedPage {
 		uint32_t PageIndex;
@@ -188,6 +190,8 @@ uint32_t GeometryStreaming::GetUploadVersion()
 void GeometryStreaming::Initialize(const std::vector<Renderer::HierarchyNode>& nodes, uint32_t maxGroupSize, uint32_t numPages)
 {
 	m_GroupCount = maxGroupSize;
+	m_HadFreshCull = false;
+	std::fill_n(m_ReadbackAllowsEviction, kNumReadbackBuffers, false);
 
 	m_StopIOThread = false;
 	m_IOThread = std::thread(IOThreadFunc);
@@ -414,6 +418,8 @@ void GeometryStreaming::Shutdown()
 	m_PageTableCPU.clear();
 	m_FreePool.clear();
 	std::fill_n(m_FenceValues, kNumReadbackBuffers, 0ull);
+	m_HadFreshCull = false;
+	std::fill_n(m_ReadbackAllowsEviction, kNumReadbackBuffers, false);
 
 	m_HierarchyNodesGPU.Destroy();
     m_GroupNodeIndicesGPU.Destroy();
@@ -432,6 +438,11 @@ void GeometryStreaming::Shutdown()
 	}
 }
 
+void GeometryStreaming::NotifyCullFrame()
+{
+	m_HadFreshCull = true;
+}
+
 void GeometryStreaming::Update(uint32_t frameIndex)
 {
 	if (frameIndex < 1) return; // Avoid reading uninitialized data
@@ -439,13 +450,25 @@ void GeometryStreaming::Update(uint32_t frameIndex)
 	Model* sourceModel = ModelInstanceManager::GetSourceModel();
 	if (nullptr == sourceModel) return;
 
-	const uint32_t readbackBufferIndex = frameIndex % kNumReadbackBuffers;
-	const uint64_t currentFenceValue = m_FenceValues[readbackBufferIndex];
-	if (currentFenceValue > 0 && Graphics::g_CommandManager.IsFenceComplete(currentFenceValue))
-	{
-		m_FenceValues[readbackBufferIndex] = 0;
+	// A frozen/absent main-view cull cannot refresh the pages referenced by
+	// its cached visible list. On resume, wait for feedback from a new cull.
+	const bool canEvict = !Renderer::IsCullFrozen() && m_HadFreshCull;
+	m_HadFreshCull = false;
+	if (!canEvict)
+		std::fill_n(m_ReadbackAllowsEviction, kNumReadbackBuffers, false);
+	bool hasEvictionFeedback = false;
 
-		uint32_t* requestedGroupsMask = (uint32_t*)m_ReadbackRequestMaskBuffer[readbackBufferIndex].Map();
+	const uint32_t readbackBufferIndex = frameIndex % kNumReadbackBuffers;
+	for (uint32_t slot = 0; slot < kNumReadbackBuffers; ++slot)
+	{
+		const uint64_t currentFenceValue = m_FenceValues[slot];
+		if (currentFenceValue == 0 || !Graphics::g_CommandManager.IsFenceComplete(currentFenceValue))
+			continue;
+		m_FenceValues[slot] = 0;
+		hasEvictionFeedback |= m_ReadbackAllowsEviction[slot];
+		m_ReadbackAllowsEviction[slot] = false;
+
+		uint32_t* requestedGroupsMask = (uint32_t*)m_ReadbackRequestMaskBuffer[slot].Map();
 		const uint32_t numRequests = (m_GroupCount + 31) / 32;
 		for (uint32_t i = 0; i < numRequests; ++i)
 		{
@@ -466,18 +489,22 @@ void GeometryStreaming::Update(uint32_t frameIndex)
 			}
 		}
 
-		m_ReadbackRequestMaskBuffer[readbackBufferIndex].Unmap();
+		m_ReadbackRequestMaskBuffer[slot].Unmap();
+	}
 
-		for (auto it = m_PagesToLoad.begin(); it != m_PagesToLoad.end(); )
-		{
-			if (!EnsureFreeSlots(1))
-				break;
+	// Reclaim before checking capacity, even if no IO completed this frame.
+	if (canEvict && hasEvictionFeedback)
+		ImmediateEvict(frameIndex, m_GroupDataLocations.data());
 
-			uint32_t pageIdx = *it;
-			m_PageTableCPU[pageIdx].IsLoading = true;
-			EnqueueAsyncLoad(pageIdx);
-			it = m_PagesToLoad.erase(it);
-		}
+	for (auto it = m_PagesToLoad.begin(); it != m_PagesToLoad.end(); )
+	{
+		if (!EnsureFreeSlots(1))
+			break;
+
+		uint32_t pageIdx = *it;
+		m_PageTableCPU[pageIdx].IsLoading = true;
+		EnqueueAsyncLoad(pageIdx);
+		it = m_PagesToLoad.erase(it);
 	}
 
 	SyncMemoryAndAddressTable(frameIndex);
@@ -497,6 +524,7 @@ void GeometryStreaming::Update(uint32_t frameIndex)
 		gfxContext.ClearUAV(m_GeometryStreamingRequestMaskGPU,0);
 
 		m_FenceValues[readbackBufferIndex] = gfxContext.Finish();
+		m_ReadbackAllowsEviction[readbackBufferIndex] = canEvict;
 	}
 }
 
@@ -505,15 +533,16 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 	std::deque<LoadedPage> readyPages;
 	{
 		std::lock_guard<std::mutex> lock(m_CompletedPagesMutex);
-		if (m_CompletedPagesQueue.empty()) return;
 		readyPages.swap(m_CompletedPagesQueue);
 	}
+	if (readyPages.empty() && !m_NeedSyncAddressTable) return;
 
 	Model* sourceModel = ModelInstanceManager::GetSourceModel();
 	Renderer::GroupDataLocation* locations = m_GroupDataLocations.data();
-	GraphicsContext& gfx = GraphicsContext::Begin(L"Streaming Upload");
-
-	ImmediateEvict(frameIndex, locations);
+	// Previous draws, slot overwrites and address-table publication all run
+	// on the graphics queue, before the next render. WriteBuffer supplies the
+	// COPY_DEST barriers; slots can be reused without a CPU fence wait.
+	GraphicsContext& gfx = GraphicsContext::Begin(L"Streaming Residency Update");
 
 	bool uploadedPages = false;
 	auto it = readyPages.begin();
@@ -618,13 +647,14 @@ void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDat
 	std::vector<Candidate> candidates;
 	candidates.reserve(m_PageTableCPU.size());
 
-	const uint32_t kEvictionGraceFrames = 512;
+	const uint32_t kEvictionGraceFrames = 16;
 	for (uint32_t i = 0; i < (uint32_t)m_PageTableCPU.size(); ++i)
 	{
 		const auto& info = m_PageTableCPU[i];
 		if (info.ChunkIndex != INVALID_CHUNK_INDEX && !info.IsPinned && !info.IsLoading)
 		{
-			if (info.LastUsedFrame + kEvictionGraceFrames < currentFrame)
+			if (currentFrame >= info.LastUsedFrame &&
+				currentFrame - info.LastUsedFrame >= kEvictionGraceFrames)
 			{
 				candidates.push_back({ i, info.LastUsedFrame });
 			}

@@ -42,6 +42,8 @@ namespace Renderer
 {
     using namespace Math;
 
+    bool IsCullFrozen();
+
     struct ViewConstants
     {
         ViewConstants()

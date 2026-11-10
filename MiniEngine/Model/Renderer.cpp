@@ -150,6 +150,11 @@ namespace Renderer
 {
 	NumVar PixelErrorThreshold("Renderer/Pixel Error Threshold", 1.0f, 0.5f, 10.0f, 0.25f);
 	BoolVar FreezeCull("Renderer/Freeze Cull", false);
+
+    bool IsCullFrozen()
+    {
+        return FreezeCull;
+    }
     
     const char* ViewModeLabels[] = {
         "Lit", "MeshletLOD", "MeshletID", "MeshletTriangle", "MeshID", "InstanceID", "MaterialID", "VSMPageState",
@@ -912,6 +917,7 @@ void Renderer::RenderVisibility(
 
     if (!FreezeCull || !view.HasHistory())
     {
+        GeometryStreaming::NotifyCullFrame();
         const HZBResources hzbResources = GetSceneHZBResources();
 
         gfxContext.GetComputeContext().ClearBufferUAV(DrawCommandManager::GetTaskQueueStateGPU(),
