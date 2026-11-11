@@ -13,6 +13,7 @@
 #include <condition_variable>
 #include <intrin.h>
 #include <cstring>
+#include <fstream>
 
 namespace GeometryStreaming
 {
@@ -54,6 +55,7 @@ namespace GeometryStreaming
 	struct LoadedPage {
 		uint32_t PageIndex;
 		std::vector<uint8_t> Data;
+		bool Success;
 	};
 	std::mutex m_CompletedPagesMutex;
 	std::deque<LoadedPage> m_CompletedPagesQueue;
@@ -62,7 +64,6 @@ namespace GeometryStreaming
 
 	struct IORequest {
 		uint32_t PageIdx;
-		std::wstring FilePath;
 		uint64_t FileOffset;
 		uint32_t CompressedSize;
 		uint32_t CompressionType;
@@ -72,6 +73,9 @@ namespace GeometryStreaming
 	std::mutex m_IOQueueMutex;
 	std::condition_variable m_IOCV;
 	std::atomic<bool> m_StopIOThread{ false };
+	static std::ifstream s_StreamingFile;
+	static std::wstring s_StreamingFilePath;
+	static std::mutex s_StreamingFileMutex;
 
 	static void LogChunkStats(const wchar_t* tag)
 	{
@@ -132,7 +136,6 @@ namespace GeometryStreaming
     {
         IORequest req{};
         req.PageIdx = pageIndex;
-        req.FilePath = model.m_StreamingFilePath;
         req.CompressionType = model.m_GeometryCompressionType;
         req.FileOffset = model.m_GeometryBlobOffsetInFile;
         if (req.CompressionType == Renderer::kGeometryCompressionLZ4)
@@ -150,27 +153,24 @@ namespace GeometryStreaming
     }
 	static bool ReadPageFromFile(const IORequest& req, std::vector<uint8_t>& pageData)
 	{
-		std::ifstream fs(req.FilePath, std::ios::in | std::ios::binary);
-		if (!fs) return false;
-
-		if (req.CompressionType == Renderer::kGeometryCompressionLZ4)
+		const bool isCompressed = req.CompressionType == Renderer::kGeometryCompressionLZ4;
+		std::vector<char> compressed(isCompressed ? req.CompressedSize : 0);
+		char* destination = isCompressed ? compressed.data() : reinterpret_cast<char*>(pageData.data());
+		const size_t size = isCompressed ? compressed.size() : pageData.size();
 		{
-			std::vector<char> compressed(req.CompressedSize);
-			fs.seekg(req.FileOffset, std::ios::beg);
-			fs.read(compressed.data(), compressed.size());
-			if (!fs) return false;
-
-			const int decoded = LZ4_decompress_safe(
-				compressed.data(),
-				reinterpret_cast<char*>(pageData.data()),
-				(int)compressed.size(),
-				(int)pageData.size());
-			return decoded == (int)pageData.size();
+			// Root uploads and the IO worker share the stream's cursor and error state.
+			std::lock_guard<std::mutex> lock(s_StreamingFileMutex);
+			s_StreamingFile.clear();
+			s_StreamingFile.seekg(static_cast<std::streamoff>(req.FileOffset), std::ios::beg);
+			s_StreamingFile.read(destination, static_cast<std::streamsize>(size));
+			if (!s_StreamingFile) return false;
 		}
 
-		fs.seekg(req.FileOffset, std::ios::beg);
-		fs.read(reinterpret_cast<char*>(pageData.data()), pageData.size());
-		return !!fs;
+		if (!isCompressed) return true;
+		const int decoded = LZ4_decompress_safe(
+			compressed.data(), reinterpret_cast<char*>(pageData.data()),
+			static_cast<int>(compressed.size()), static_cast<int>(pageData.size()));
+		return decoded == static_cast<int>(pageData.size());
 	}
 
 	void IOThreadFunc()
@@ -190,14 +190,10 @@ namespace GeometryStreaming
 			}
 
 			std::vector<uint8_t> pageData(Renderer::kPageSizeInBytes, 0);
-			if (ReadPageFromFile(req, pageData))
-			{
-				OnPageIOComplete(req.PageIdx, std::move(pageData));
-			}
-			else
-			{
-				OnPageIOComplete(req.PageIdx, std::move(pageData));
-			}
+			const bool success = ReadPageFromFile(req, pageData);
+			if (!success)
+				Utility::Printf(L"GeometryStreaming: read/decode failed: %ls page %u\n", s_StreamingFilePath.c_str(), req.PageIdx);
+			OnPageIOComplete(req.PageIdx, std::move(pageData), success);
 		}
 	}
 }
@@ -207,14 +203,23 @@ uint32_t GeometryStreaming::GetUploadVersion()
 	return s_UploadVersion;
 }
 
-void GeometryStreaming::Initialize(const std::vector<Renderer::HierarchyNode>& nodes, uint32_t maxGroupSize, uint32_t numPages)
+bool GeometryStreaming::Initialize(const Model& model)
 {
+	s_StreamingFilePath = model.m_StreamingFilePath;
+	s_StreamingFile.clear();
+	s_StreamingFile.open(s_StreamingFilePath, std::ios::in | std::ios::binary);
+	if (!s_StreamingFile)
+	{
+		Utility::Printf(L"GeometryStreaming: cannot open %ls\n", s_StreamingFilePath.c_str());
+		return false;
+	}
+
+	const auto& nodes = model.m_Nodes;
+	const uint32_t maxGroupSize = static_cast<uint32_t>(model.m_GroupMetadatas.size());
+	const uint32_t numPages = static_cast<uint32_t>(model.m_PageMetadatas.size());
 	m_GroupCount = maxGroupSize;
 	m_HadFreshCull = false;
 	std::fill_n(m_ReadbackAllowsEviction, kNumReadbackBuffers, false);
-
-	m_StopIOThread = false;
-	m_IOThread = std::thread(IOThreadFunc);
 
 	m_PageTableCPU.assign(numPages, PageResidency{});
 
@@ -271,6 +276,9 @@ void GeometryStreaming::Initialize(const std::vector<Renderer::HierarchyNode>& n
 		SRV_GROUP_DATA_LOCATION_BUFFER,
 		m_GroupDataLocationGPU.GetSRV()
 	);
+	m_StopIOThread = false;
+	m_IOThread = std::thread(IOThreadFunc);
+	return true;
 }
 
 bool GeometryStreaming::PinRootPages(Model* model)
@@ -309,7 +317,7 @@ bool GeometryStreaming::PinRootPages(Model* model)
             const auto req = MakePageReadRequest(*model, page);
             if (!ReadPageFromFile(req, bytes))
             {
-                Utility::Printf(L"Root initialization: read/decode failed: %ls page %u\n", req.FilePath.c_str(), page);
+                Utility::Printf(L"Root initialization: read/decode failed: %ls page %u\n", s_StreamingFilePath.c_str(), page);
                 success = false;
                 break;
             }
@@ -353,6 +361,12 @@ void GeometryStreaming::Shutdown()
 
 	if (m_IOThread.joinable())
 		m_IOThread.join();
+
+	// Initialization, root pinning and shutdown run on the main thread.
+	if (s_StreamingFile.is_open())
+		s_StreamingFile.close();
+	s_StreamingFile.clear();
+	s_StreamingFilePath.clear();
 
 	m_IOQueue.clear();
 	// The worker can finish an old page while Shutdown waits for it. Discard
@@ -497,10 +511,15 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 	auto it = readyPages.begin();
 	for (; it != readyPages.end(); ++it)
 	{
+		auto& item = *it;
+		if (!item.Success)
+		{
+			m_PageTableCPU[item.PageIndex].IsLoading = false;
+			continue; // Leave nonresident; fresh GPU feedback can request it again.
+		}
 		if (m_FreePool.empty() && !AllocateChunk())
 			break;
 
-		auto& item = *it;
 		PhysicalSlot slot = m_FreePool.back();
 		m_FreePool.pop_back();
 
@@ -560,10 +579,10 @@ void GeometryStreaming::EnqueueAsyncLoad(uint32_t pageIdx)
 	m_IOCV.notify_one();
 }
 
-void GeometryStreaming::OnPageIOComplete(uint32_t pageIdx, std::vector<uint8_t>&& pageData)
+void GeometryStreaming::OnPageIOComplete(uint32_t pageIdx, std::vector<uint8_t>&& pageData, bool success)
 {
 	std::lock_guard<std::mutex> lock(m_CompletedPagesMutex);
-	m_CompletedPagesQueue.push_back({ pageIdx, std::move(pageData) });
+	m_CompletedPagesQueue.push_back({ pageIdx, std::move(pageData), success });
 }
 
 void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDataLocation* pLocationTable)

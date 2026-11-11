@@ -174,12 +174,8 @@ namespace ModelInstanceManager
 
 		DrawCommandManager::FinalizeIndirectCommands();
 
-		GeometryStreaming::Initialize(
-			sourceModel->m_Nodes,
-			static_cast<uint32_t>(sourceModel->m_GroupMetadatas.size()),
-			static_cast<uint32_t>(sourceModel->m_PageMetadatas.size()));
-
-		if (!GeometryStreaming::PinRootPages(sourceModel.get()))
+		if (!GeometryStreaming::Initialize(*sourceModel) ||
+			!GeometryStreaming::PinRootPages(sourceModel.get()))
         {
             Cleanup();
             return false;

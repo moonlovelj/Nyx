@@ -13,7 +13,7 @@ namespace GeometryStreaming
 	extern std::vector<Renderer::GroupDataLocation> m_GroupDataLocations;
 	extern ByteAddressBuffer m_GeometryStreamingRequestMaskGPU;
 
-	void Initialize(const std::vector<Renderer::HierarchyNode>& nodes, uint32_t maxGroupSize, uint32_t numPages);
+	bool Initialize(const Model& model);
 	bool PinRootPages(Model* model);
 	void Shutdown();
 
@@ -22,7 +22,7 @@ namespace GeometryStreaming
 	void NotifyCullFrame();
 	uint32_t GetUploadVersion();
 	void EnqueueAsyncLoad(uint32_t pageIdx);
-	void OnPageIOComplete(uint32_t pageIdx, std::vector<uint8_t>&& pageData);
+	void OnPageIOComplete(uint32_t pageIdx, std::vector<uint8_t>&& pageData, bool success);
 	void SyncMemoryAndAddressTable(uint32_t frameIndex);
 	void ImmediateEvict(uint32_t currentFrame, Renderer::GroupDataLocation* pLocationTable);
 }

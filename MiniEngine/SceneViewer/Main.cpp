@@ -334,6 +334,16 @@ void LoadGltfFiles()
 
 void SceneViewer::ReloadModel(const std::wstring& filePath, bool useOrbit, uint32_t instanceCount)
 {
+    GraphicsContext& resetContext = GraphicsContext::Begin(L"Reset VSM");
+    Renderer::VirtualShadowMap::Reset(resetContext);
+    resetContext.Finish(true);
+
+    // Release the streaming handle before LoadModel can rebuild the same cache.
+    if (ModelInstanceManager::GetNumModelInstances() > 0)
+        ModelInstanceManager::Cleanup();
+
+    m_HasPreviousFrame = false;
+    TemporalEffects::InvalidateHistory(TemporalEffects::ResetReason::SceneReloaded);
     auto model = Renderer::LoadModel(filePath, g_ForceRebuild);
     if (model == nullptr)
     {
@@ -341,22 +351,11 @@ void SceneViewer::ReloadModel(const std::wstring& filePath, bool useOrbit, uint3
         return;
     }
 
-    GraphicsContext& resetContext = GraphicsContext::Begin(L"Reset VSM");
-    Renderer::VirtualShadowMap::Reset(resetContext);
-    resetContext.Finish(true);
-
-    if (ModelInstanceManager::GetNumModelInstances() > 0)
-        ModelInstanceManager::Cleanup();
-
     if (!ModelInstanceManager::Initialize(model, instanceCount))
     {
         Utility::Printf(L"Error: model initialization failed: %ls\n", filePath.c_str());
-        m_HasPreviousFrame = false;
-        TemporalEffects::InvalidateHistory(TemporalEffects::ResetReason::SceneReloaded);
         return;
     }
-    m_HasPreviousFrame = false;
-    TemporalEffects::InvalidateHistory(TemporalEffects::ResetReason::SceneReloaded);
     const Vector3 sceneCenter = ModelInstanceManager::GetInstanceDistributionCenter();
     const Vector3 sceneHalfExtents = ModelInstanceManager::GetInstanceDistributionHalfExtents();
     const float sceneRadius = std::max(ModelInstanceManager::GetInstanceDistributionRadius() * 0.1f, 0.01f);
