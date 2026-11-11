@@ -108,6 +108,7 @@
     <ClInclude Include="Animation.h" />
     <ClInclude Include="ConstantBuffers.h" />
     <ClInclude Include="GeometryStreaming.h" />
+    <ClInclude Include="GeometryPageLayout.h" />
     <ClInclude Include="glTF.h" />
     <ClInclude Include="CommandBucketer.h" />
     <ClInclude Include="glTFLoader.h" />
@@ -152,6 +153,9 @@
     <ClCompile Include="Animation.cpp" />
     <ClCompile Include="BuildH3D.cpp" />
     <ClCompile Include="GeometryStreaming.cpp" />
+    <ClCompile Include="GeometryPageLayout.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="glTF.cpp" />
     <ClCompile Include="CommandBucketer.cpp" />
     <ClCompile Include="glTFLoader.cpp" />

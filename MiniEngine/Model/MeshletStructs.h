@@ -2,6 +2,10 @@
 #define MESHLET_STRUCTS_H
 
 #ifdef __cplusplus
+#include <cstdint>
+#endif
+
+#ifdef __cplusplus
 namespace Renderer
 {
 #endif // __cplusplus
@@ -228,9 +232,10 @@ namespace Renderer
 
 	struct PageMetadata
 	{
-		uint32_t StartGroupIndex;
+		uint32_t FirstGroupRef;
 		uint32_t GroupCount;
 	};
+	static_assert(sizeof(PageMetadata) == 8);
 
 	struct PageCompressionInfo
 	{

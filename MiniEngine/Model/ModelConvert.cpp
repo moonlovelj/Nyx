@@ -15,6 +15,7 @@
 //
 
 #include "ModelLoader.h"
+#include "GeometryPageLayout.h"
 #include "Renderer.h"
 #include "glTFLoader.h"
 #include "TextureConvert.h"
@@ -257,47 +258,20 @@ static void ParallelCompileMeshes(
 			for (auto& group : products.Groups)
 			{
 				const uint32_t groupSize = group.Metadata.SizeBytes;
-				if (streamCtx.CurrentOffsetInPage + groupSize > Renderer::kPageSizeInBytes)
-				{
-					uint32_t paddingSize = Renderer::kPageSizeInBytes - streamCtx.CurrentOffsetInPage;
-					if (paddingSize > 0 && paddingSize < Renderer::kPageSizeInBytes)
-					{
-						PendingGroupWrite padJob = {};
-						padJob.TempSourcePath = L""; // Empty means padding
-						padJob.SizeBytes = paddingSize;
-						streamCtx.PendingWrites.push_back(padJob);
-
-						streamCtx.TotalGeometrySize += paddingSize;
-					}
-
-					PageMetadata page = { static_cast<uint32_t>(modelData.m_GroupInfos.size()), 0 };
-					modelData.m_Pages.push_back(page);
-					streamCtx.CurrentPageIndex = static_cast<uint32_t>(modelData.m_Pages.size() - 1);
-					streamCtx.CurrentOffsetInPage = 0;
-				}
-				else if (modelData.m_Pages.empty())
-				{
-					modelData.m_Pages.push_back({ 0, 0 });
-				}
-
-				modelData.m_Pages.back().GroupCount++;
 
 				GroupMetadata metadata = group.Metadata;
-				metadata.PageIndex = streamCtx.CurrentPageIndex;
-				metadata.OffsetInPage = streamCtx.CurrentOffsetInPage;
+				metadata.PageIndex = UINT32_MAX;
+				metadata.OffsetInPage = 0;
 				modelData.m_GroupInfos.push_back(metadata);
 
 				// Record the actual write to perform later
-				PendingGroupWrite job;
+				PendingGroupWrite job{};
+				job.GroupId = static_cast<uint32_t>(modelData.m_GroupInfos.size() - 1);
 				job.TempSourcePath = result.tempFilePath; // Which file holds the data
 				job.SourceOffset = group.TempFileOffset;  // Offset within the file
 				job.SizeBytes = groupSize;                // Size
 				job.BaseGroupIndexPatchValue = baseGroupIndex; // Patch value
 				streamCtx.PendingWrites.push_back(job);
-
-
-				streamCtx.CurrentOffsetInPage += groupSize;
-				streamCtx.TotalGeometrySize += groupSize;
 			}
 
 			// Process and patch BVH nodes
@@ -816,11 +790,73 @@ bool Renderer::BuildModel(ModelData& model, const glTF::GltfAsset& asset, Global
     return true;
 }
 
+bool Renderer::FinalizeGeometryPacking(ModelData& data, GlobalStreamingContext& streamCtx)
+{
+    std::string error;
+    std::vector<uint8_t> roots;
+    auto fail = [&](const std::string& message) {
+        Utility::Printf("Geometry packing failed: %s\n", message.c_str());
+        return false;
+    };
+    // The existing hierarchy POD encodes GroupId in 24 bits and child indices in 27 bits.
+    if (data.m_GroupInfos.size() > (1u << 24) || data.m_Nodes.size() > (1u << 27))
+        return fail("Geometry exceeds the existing hierarchy index limits");
+    if (!BuildRootGroupMask(data.m_Nodes, static_cast<uint32_t>(data.m_GroupInfos.size()), roots, error))
+        return fail(error);
+    if (streamCtx.PendingWrites.size() != data.m_GroupInfos.size())
+        return fail("Source job count differs from group count");
+    std::vector<GeometryPackingGroup> groups;
+    groups.reserve(streamCtx.PendingWrites.size());
+    uint64_t rootPayload = 0, ordinaryPayload = 0;
+    uint32_t rootGroups = 0;
+    for (const auto& job : streamCtx.PendingWrites)
+    {
+        if (job.GroupId >= roots.size() || job.TempSourcePath.empty() ||
+            job.SizeBytes != data.m_GroupInfos[job.GroupId].SizeBytes ||
+            job.SourceOffset > uint64_t(INT64_MAX) - job.SizeBytes)
+            return fail("Invalid source job for GroupId " + std::to_string(job.GroupId));
+        const bool root = roots[job.GroupId] != 0;
+        groups.push_back({job.GroupId, job.SizeBytes, root});
+        if (root) { rootPayload += job.SizeBytes; ++rootGroups; }
+        else ordinaryPayload += job.SizeBytes;
+    }
+    if (!groups.empty() && !rootGroups)
+        return fail("Nonempty geometry has no root groups");
+    GeometryPageLayout layout;
+    if (!BuildGeometryPageLayout(groups, kPageSizeInBytes, layout, error)) return fail(error);
+    for (size_t id = 0; id < layout.Groups.size(); ++id)
+    {
+        data.m_GroupInfos[id].PageIndex = layout.Groups[id].PageIndex;
+        data.m_GroupInfos[id].OffsetInPage = layout.Groups[id].OffsetInPage;
+    }
+    data.m_Pages = std::move(layout.Pages);
+    data.m_PageGroupIndices = std::move(layout.PageGroupIndices);
+    data.m_RootPageCount = layout.RootPageCount;
+    const uint64_t rootAllocated = uint64_t(data.m_RootPageCount) * kPageSizeInBytes;
+    const size_t ordinaryPages = data.m_Pages.size() - data.m_RootPageCount;
+    Utility::Printf("Geometry packing: groups=%zu rootGroups=%u rootPages=%u rootPayloadBytes=%llu "
+        "rootAllocatedPageBytes=%llu rootPaddingBytes=%llu rootCollateralBytes=0 ordinaryPages=%zu ordinaryFill=%.2f%%\n",
+        groups.size(), rootGroups, data.m_RootPageCount, rootPayload, rootAllocated,
+        rootAllocated - rootPayload, ordinaryPages,
+        ordinaryPages ? 100.0 * ordinaryPayload / (uint64_t(ordinaryPages) * kPageSizeInBytes) : 0.0);
+    return true;
+}
+
 bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, GlobalStreamingContext& streamCtx)
 {
-    FileHeader header;
+    // The directory is produced by FinalizeGeometryPacking before saving.
+    FileHeader header{};
+    if (data.m_MaterialTextures.size() != data.m_MaterialConstants.size() ||
+        data.m_TextureOptions.size() != data.m_TextureNames.size() ||
+        data.m_JointIBMs.size() != data.m_JointIndices.size())
+    {
+        Utility::Printf("Invalid model metadata array lengths\n");
+        return false;
+    }
     std::memcpy(header.id, "MINI", 4);
     header.version = CURRENT_MINI_FILE_VERSION;
+    header.pageSizeInBytes = kPageSizeInBytes;
+    header.rootPageCount = data.m_RootPageCount;
 	auto CleanupTempFiles = [&]()
 		{
 			if (streamCtx.TempFilesToClean.empty()) return;
@@ -858,7 +894,7 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	for (const std::string& str : data.m_TextureNames)
 	{
 		const uint64_t add = static_cast<uint64_t>(str.size()) + 1u;
-		if (stringTableSize > std::numeric_limits<uint32_t>::max() - add)
+		if (add > UINT32_MAX || stringTableSize > UINT32_MAX - add)
 		{
 			Utility::Printf("Error: Texture string table size overflow.\n");
 			CleanupTempFiles();
@@ -931,24 +967,13 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	if (header.groupCount > 0 && !AddSize(static_cast<uint64_t>(header.groupCount) * sizeof(GroupMetadata), "Group metadata")) { CleanupTempFiles(); return false; }
 	if (header.hierarchyNodeCount > 0 && !AddSize(static_cast<uint64_t>(header.hierarchyNodeCount) * sizeof(HierarchyNode), "Hierarchy nodes")) { CleanupTempFiles(); return false; }
 	if (header.pageCount > 0 && !AddSize(static_cast<uint64_t>(header.pageCount) * sizeof(PageMetadata), "Page metadata")) { CleanupTempFiles(); return false; }
+	if (!AddSize(uint64_t(header.groupCount) * sizeof(uint32_t), "Page group references")) { CleanupTempFiles(); return false; }
 	if (header.pageCount > 0 && !AddSize(static_cast<uint64_t>(header.pageCount) * sizeof(PageCompressionInfo), "Page compression info")) { CleanupTempFiles(); return false; }
 
 	// Compute geometry blob offset
 	const uint32_t pageSize = Renderer::kPageSizeInBytes;
 	const uint64_t geometryBlobOffset = metadataSize;
-	if (streamCtx.TotalGeometrySize > std::numeric_limits<uint64_t>::max() - (pageSize - 1))
-	{
-		Utility::Printf("Error: Geometry size alignment overflow.\n");
-		CleanupTempFiles();
-		return false;
-	}
-	const uint64_t uncompressedSize = Math::AlignUp(streamCtx.TotalGeometrySize, (size_t)pageSize);
-	if (streamCtx.TotalGeometrySize > 0 && header.pageCount == 0)
-	{
-		Utility::Printf("Error: Geometry data exists but page count is zero.\n");
-		CleanupTempFiles();
-		return false;
-	}
+	const uint64_t uncompressedSize = uint64_t(header.pageCount) * pageSize;
 
 	header.geometryBlobOffset = geometryBlobOffset;
 	header.geometryBlobSize = 0;
@@ -978,6 +1003,7 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	HANDLE hFile = INVALID_HANDLE_VALUE;
 	HANDLE hMapping = NULL;
 	uint8_t* pMappedData = nullptr;
+    bool saveSucceeded = false;
 
 	auto CleanupFileHandles = [&]()
 		{
@@ -987,6 +1013,7 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 			pMappedData = nullptr;
 			hMapping = NULL;
 			hFile = INVALID_HANDLE_VALUE;
+            if (!saveSucceeded) _wremove(filePath.c_str());
 		};
 
 	hFile = CreateFileW(filePath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -1001,6 +1028,10 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 		return false;
 	}
 	const uint64_t finalFileSize = geometryBlobOffset + maxCompressedSize; // allocate worst-case size
+    if (finalFileSize > INT64_MAX)
+    {
+        CleanupFileHandles(); CleanupTempFiles(); return false;
+    }
 	LARGE_INTEGER liSize;
 	liSize.QuadPart = finalFileSize;
 	if (!SetFilePointerEx(hFile, liSize, NULL, FILE_BEGIN) || !SetEndOfFile(hFile))
@@ -1030,7 +1061,7 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	uint8_t* pCursor = pMappedData;
 	auto Write = [&](const void* src, size_t size) 
 		{
-			std::memcpy(pCursor, src, size);
+			if (size) std::memcpy(pCursor, src, size);
 			pCursor += size;
 		};
 
@@ -1046,6 +1077,7 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 		};
 
 	Write(&header, sizeof(FileHeader));
+    std::memset(pMappedData, 0, 4);
 	Write(data.m_SceneGraph.data(), header.numNodes * sizeof(GraphNode));
 	for (const Mesh* mesh : data.m_Meshes) {
 		const size_t meshSize = sizeof(Mesh) + sizeof(Mesh::Draw) * (mesh->numDraws - 1);
@@ -1075,6 +1107,8 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	if (header.hierarchyNodeCount > 0) Write(data.m_Nodes.data(), header.hierarchyNodeCount * sizeof(HierarchyNode));
 	if (header.pageCount > 0) Write(data.m_Pages.data(), header.pageCount * sizeof(PageMetadata));
 
+	Write(data.m_PageGroupIndices.data(), uint64_t(header.groupCount) * sizeof(uint32_t));
+
 	uint64_t pageCompressionInfoOffset = 0;
 	if (header.pageCount > 0)
 	{
@@ -1096,51 +1130,24 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	// Compress geometry pages in parallel (low memory, write directly to disk)
 	// -------------------------------------------------------------
 	std::atomic<uint64_t> compressedWriteOffset{ 0 };
-	if (streamCtx.TotalGeometrySize > 0)
+	if (header.pageCount > 0)
 	{
 		std::atomic<bool> hadError{ false };
 		uint8_t* pBlobBase = pMappedData + geometryBlobOffset;
 
-		struct PageJobSpan
-		{
-			uint32_t JobIndex;
-			uint32_t OffsetInPage;
-		};
-
-		const uint32_t pageCount = header.pageCount;
-		std::vector<std::vector<PageJobSpan>> pageJobs(pageCount);
-
-		uint64_t runningOffset = 0;
-		bool jobMapError = false;
-		for (uint32_t jobIndex = 0; jobIndex < streamCtx.PendingWrites.size(); ++jobIndex)
-		{
-			const auto& job = streamCtx.PendingWrites[jobIndex];
-			const uint32_t pageIdx = static_cast<uint32_t>(runningOffset / pageSize);
-			const uint32_t offsetInPage = static_cast<uint32_t>(runningOffset % pageSize);
-			if (pageIdx < pageCount && offsetInPage + job.SizeBytes <= pageSize)
-			{
-				pageJobs[pageIdx].push_back({ jobIndex, offsetInPage });
-			}
-			else
-			{
-				Utility::Printf("Error: Pending write %u exceeds page bounds.\n", jobIndex);
-				jobMapError = true;
-				break;
-			}
-			runningOffset += job.SizeBytes;
-		}
-		if (jobMapError || runningOffset != streamCtx.TotalGeometrySize)
-		{
-			Utility::Printf("Error: Pending write size mismatch.\n");
-			CleanupFileHandles();
-			CleanupTempFiles();
-			return false;
-		}
+        const uint32_t pageCount = header.pageCount;
+        // FinalizeGeometryPacking guarantees one source job per GroupId.
+        std::vector<uint32_t> jobIndices(header.groupCount);
+        for (uint32_t index = 0; index < streamCtx.PendingWrites.size(); ++index)
+        {
+            const auto& job = streamCtx.PendingWrites[index];
+            jobIndices[job.GroupId] = index;
+        }
 
 		std::atomic<uint32_t> completedPages = 0;
 		const uint32_t reportStep = std::max(1u, pageCount / 20);
 
-		Utility::Printf("Compressing geometry pages (Total: %llu MB)...\n", streamCtx.TotalGeometrySize / (1024 * 1024));
+		Utility::Printf("Compressing geometry pages (Total: %llu MB)...\n", uncompressedSize / (1024 * 1024));
 		#pragma omp parallel for schedule(dynamic)
 		for (int pageIdx = 0; pageIdx < (int)pageCount; ++pageIdx)
 		{
@@ -1148,18 +1155,25 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 			std::vector<uint8_t> pageBuffer(pageSize, 0);
 
 			bool pageError = false;
-			for (const auto& span : pageJobs[pageIdx])
+            std::ifstream localStream;
+            const std::wstring* currentSource = nullptr;
+			for (uint32_t ref = data.m_Pages[pageIdx].FirstGroupRef;
+                ref < data.m_Pages[pageIdx].FirstGroupRef + data.m_Pages[pageIdx].GroupCount; ++ref)
 			{
-				const auto& job = streamCtx.PendingWrites[span.JobIndex];
-				uint8_t* pDest = pageBuffer.data() + span.OffsetInPage;
+				const uint32_t groupId = data.m_PageGroupIndices[ref];
+                const auto& job = streamCtx.PendingWrites[jobIndices[groupId]];
+                uint8_t* pDest = pageBuffer.data() + data.m_GroupInfos[groupId].OffsetInPage;
 
-				if (job.TempSourcePath.empty())
 				{
-					std::memset(pDest, 0, job.SizeBytes);
-				}
-				else
-				{
-					std::ifstream localStream(job.TempSourcePath, std::ios::in | std::ios::binary);
+                    // Adjacent groups usually share a primitive source file. Reuse its handle
+                    // within this page without keeping an unbounded per-worker handle cache.
+                    if (!currentSource || *currentSource != job.TempSourcePath)
+                    {
+                        localStream.close();
+                        localStream.clear();
+                        localStream.open(job.TempSourcePath, std::ios::in | std::ios::binary);
+                        currentSource = &job.TempSourcePath;
+                    }
 					if (!localStream) 
 					{ 
 						Utility::Printf("Error: Failed to open temp file %s for reading.\n", Utility::WideStringToUTF8(job.TempSourcePath).c_str());
@@ -1176,23 +1190,29 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 						break; 
 					}
 
-					if (job.BaseGroupIndexPatchValue > 0)
+					if (job.SizeBytes >= sizeof(GroupHeader))
 					{
 						auto* gHeader = reinterpret_cast<GroupHeader*>(pDest);
-						auto* mHeaders = reinterpret_cast<MeshletHeader*>(pDest + sizeof(GroupHeader));
+						if (uint64_t(gHeader->MeshletCount) * sizeof(MeshletHeader) > job.SizeBytes - sizeof(GroupHeader))
+                        { pageError = true; break; }
+                        auto* mHeaders = reinterpret_cast<MeshletHeader*>(pDest + sizeof(GroupHeader));
 						for (uint32_t m = 0; m < gHeader->MeshletCount; ++m)
 						{
 							if (mHeaders[m].RefineGroupIndex != 0xFFFFFFFF)
 							{
-								mHeaders[m].RefineGroupIndex += job.BaseGroupIndexPatchValue;
+								const uint64_t patched = uint64_t(mHeaders[m].RefineGroupIndex) + job.BaseGroupIndexPatchValue;
+                                if (patched >= header.groupCount) { pageError = true; break; }
+                                mHeaders[m].RefineGroupIndex = static_cast<uint32_t>(patched);
 							}
 						}
 					}
+                    else { pageError = true; }
 				}
 			}
 
 			if (pageError)
 			{
+                Utility::Printf("Error: Invalid source data or refinement reference on page %d\n", pageIdx);
 				hadError.store(true, std::memory_order_relaxed);
 				continue;
 			}
@@ -1255,6 +1275,7 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	if (!FlushViewOfFile(pMappedData, 0))
 	{
 		Utility::Printf("Failed to flush view of file: %d\n", GetLastError());
+        CleanupFileHandles(); CleanupTempFiles(); return false;
 	}
 
 	UnmapViewOfFile(pMappedData);
@@ -1266,12 +1287,18 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data, Gl
 	finalliSize.QuadPart = geometryBlobOffset + compressedWriteOffset.load();
 	if (!SetFilePointerEx(hFile, finalliSize, NULL, FILE_BEGIN)) {
 		Utility::Printf("SetFilePointerEx failed: %lu\n", GetLastError());
+        CleanupFileHandles(); CleanupTempFiles(); return false;
 	}
 	if (!SetEndOfFile(hFile)) {
 		Utility::Printf("SetEndOfFile failed: %lu\n", GetLastError());
+        CleanupFileHandles(); CleanupTempFiles(); return false;
 	}
 
-	FlushFileBuffers(hFile);
+    if (!FlushFileBuffers(hFile))
+    {
+        CleanupFileHandles(); CleanupTempFiles(); return false;
+    }
+    saveSucceeded = true;
 
 	CleanupFileHandles();
 

@@ -1,4 +1,6 @@
 #include "ModelInstanceManager.h"
+#include "../Core/GraphicsCore.h"
+#include "../Core/CommandListManager.h"
 #include "Model.h"
 #include "InstanceResourceManager.h"
 #include "ConstantBuffers.h"
@@ -46,10 +48,14 @@ namespace ModelInstanceManager
         return Math::AxisAlignedBox(center - worldExtent, center + worldExtent);
     }
 
-	void Initialize(std::shared_ptr<Model> sourceModel, uint32_t instanceCount)
+	bool Initialize(std::shared_ptr<Model> sourceModel, uint32_t instanceCount)
 	{
-		ASSERT(sourceModel != nullptr, "Source model is null");
-		ASSERT(instanceCount > 0, "Instance count must be greater than zero");
+        if (!sourceModel || !instanceCount || sourceModel->m_GroupMetadatas.empty() ||
+            sourceModel->m_Nodes.empty() || sourceModel->m_Meshes.empty() || !sourceModel->GetNumTotalDraws())
+        {
+            Utility::Printf("Model initialization: no renderable streaming geometry\n");
+            return false;
+        }
 
 		s_SourceModel = sourceModel;
         s_MeshLocalBounds.clear();
@@ -173,12 +179,18 @@ namespace ModelInstanceManager
 			static_cast<uint32_t>(sourceModel->m_GroupMetadatas.size()),
 			static_cast<uint32_t>(sourceModel->m_PageMetadatas.size()));
 
-		GeometryStreaming::PinRootPages(sourceModel.get());
+		if (!GeometryStreaming::PinRootPages(sourceModel.get()))
+        {
+            Cleanup();
+            return false;
+        }
+        return true;
 	}
 
 	void Update(GraphicsContext& gfxContext, float deltaTime)
 	{
         s_SceneObjectUpdates.clear();
+        if (!s_SourceModel || s_ModelInstances.empty()) return;
 		MeshConstants* meshConstantsCPU = (MeshConstants*)InstanceResourceManager::GetMeshConstantsCPU().Map();
 		Joint* jointCPU = (Joint*)InstanceResourceManager::GetJointsCPU().Map();
 
@@ -247,6 +259,7 @@ namespace ModelInstanceManager
 
 	void Cleanup()
 	{
+        Graphics::g_CommandManager.IdleGPU();
         s_RenderedMeshTransforms.clear();
         s_ObjectMotionCPU.clear();
         s_ObjectMotionGPU.Destroy();

@@ -1,3 +1,4 @@
+#include "GeometryPageLayout.h"
 #include "GeometryStreaming.h"
 #include "../Core/GpuBuffer.h"
 #include "../Core/ReadbackBuffer.h"
@@ -17,7 +18,6 @@ namespace GeometryStreaming
 {
 	const uint32_t kMaxChunks = 32;
 	const uint32_t kInitialChunks = 1;
-	const uint32_t kMaxPinnedRootPages = 4096 + 2048;
 	constexpr uint32_t kNumReadbackBuffers = 3;
 	uint32_t m_SlotsPerChunk = 0;
 	StructuredBuffer m_HierarchyNodesGPU;
@@ -128,6 +128,26 @@ namespace GeometryStreaming
 		return true;
 	}
 
+    static IORequest MakePageReadRequest(const Model& model, uint32_t pageIndex)
+    {
+        IORequest req{};
+        req.PageIdx = pageIndex;
+        req.FilePath = model.m_StreamingFilePath;
+        req.CompressionType = model.m_GeometryCompressionType;
+        req.FileOffset = model.m_GeometryBlobOffsetInFile;
+        if (req.CompressionType == Renderer::kGeometryCompressionLZ4)
+        {
+            const auto& info = model.m_PageCompressionInfos[pageIndex];
+            req.FileOffset += info.CompressedOffset;
+            req.CompressedSize = info.CompressedSize;
+        }
+        else
+        {
+            req.FileOffset += uint64_t(pageIndex) * Renderer::kPageSizeInBytes;
+            req.CompressedSize = Renderer::kPageSizeInBytes;
+        }
+        return req;
+    }
 	static bool ReadPageFromFile(const IORequest& req, std::vector<uint8_t>& pageData)
 	{
 		std::ifstream fs(req.FilePath, std::ios::in | std::ios::binary);
@@ -253,145 +273,73 @@ void GeometryStreaming::Initialize(const std::vector<Renderer::HierarchyNode>& n
 	);
 }
 
-void GeometryStreaming::PinRootPages(Model* model)
+bool GeometryStreaming::PinRootPages(Model* model)
 {
-	if (!model) return;
+    if (!model) return false;
+    // LoadModel validates the directory; only check streaming state here.
+    if (model->m_PageMetadatas.size() != m_PageTableCPU.size())
+    {
+        Utility::Printf("Root initialization: invalid page counts\n");
+        return false;
+    }
+    const uint32_t count = model->m_RootPageCount;
+    if (!count) return true;
+    uint32_t needed = 0;
+    for (uint32_t page = 0; page < count; ++page)
+        if (!m_PageTableCPU[page].IsPinned) ++needed;
+    const uint64_t available = m_FreePool.size() +
+        uint64_t(kMaxChunks - m_GeometryChunksGPU.size()) * m_SlotsPerChunk;
+    if (needed > available || !EnsureFreeSlots(needed))
+    {
+        Utility::Printf("Root initialization: need %u slots, available %llu\n", needed, available);
+        return false;
+    }
+    if (!needed) return true;
 
-	std::vector<uint32_t> rootPageCounts(m_PageTableCPU.size(), 0);
-	for (const auto& node : model->m_Nodes)
-	{
-		if (node.Internal.IsGroup && node.MaxParrentError == std::numeric_limits<float>::infinity())
-		{
-			uint32_t groupIdx = node.Leaf.GroupIndex;
-			if (groupIdx < model->m_GroupMetadatas.size())
-			{
-				uint32_t pageIdx = model->m_GroupMetadatas[groupIdx].PageIndex;
-				if (pageIdx < rootPageCounts.size())
-					rootPageCounts[pageIdx] += 1;
-			}
-		}
-	}
-
-	std::vector<uint32_t> rootPages;
-	rootPages.reserve(rootPageCounts.size());
-	for (uint32_t i = 0; i < (uint32_t)rootPageCounts.size(); ++i)
-	{
-		if (rootPageCounts[i] > 0)
-			rootPages.push_back(i);
-	}
-
-	if (rootPages.empty()) return;
-
-	std::sort(rootPages.begin(), rootPages.end(), [&](uint32_t a, uint32_t b) {
-		if (rootPageCounts[a] != rootPageCounts[b]) return rootPageCounts[a] > rootPageCounts[b];
-		return a < b;
-		});
-
-	size_t pinBudget = rootPages.size();
-	pinBudget = std::min(pinBudget, static_cast<size_t>(kMaxPinnedRootPages));
-
-	if (!EnsureFreeSlots((uint32_t)pinBudget))
-	{
-		pinBudget = std::min(pinBudget, m_FreePool.size());
-	}
-
-	if (pinBudget == 0)
-	{
-		Utility::Printf(L"GeometryStreaming: No free slots to pin root pages (budget=%zu).\n", pinBudget);
-		return;
-	}
-
-	const uint64_t requiredMemory = static_cast<uint64_t>(pinBudget) * static_cast<uint64_t>(Renderer::kPageSizeInBytes);
-	const uint64_t availableMemory = static_cast<uint64_t>(m_FreePool.size()) * static_cast<uint64_t>(Renderer::kPageSizeInBytes);
-	if (requiredMemory > availableMemory)
-	{
-		Utility::Printf(L"GeometryStreaming: Not enough VRAM to pin root pages! Required: %llu MB, Available: %llu MB\n",
-			requiredMemory / (1024 * 1024),
-			availableMemory / (1024 * 1024));
-	}
-
-	Renderer::GroupDataLocation* locations = m_GroupDataLocations.data();
-	GraphicsContext& gfx = GraphicsContext::Begin(L"Pin Root Pages Upload");
-
-	size_t pinnedCount = 0;
-	for (uint32_t pageIdx : rootPages)
-	{
-		if (pinnedCount >= pinBudget)
-			break;
-
-		if (m_PageTableCPU[pageIdx].ChunkIndex != INVALID_CHUNK_INDEX) continue;
-
-		if (m_FreePool.empty() && !AllocateChunk())
-			break;
-
-		PhysicalSlot slot = m_FreePool.back();
-		m_FreePool.pop_back();
-
-		std::vector<uint8_t> pageData(Renderer::kPageSizeInBytes, 0);
-		IORequest req = {};
-		req.PageIdx = pageIdx;
-		req.FilePath = model->m_StreamingFilePath;
-		req.CompressionType = model->m_GeometryCompressionType;
-
-		if (req.CompressionType == Renderer::kGeometryCompressionLZ4 &&
-			pageIdx < model->m_PageCompressionInfos.size())
-		{
-			const auto& info = model->m_PageCompressionInfos[pageIdx];
-			req.FileOffset = model->m_GeometryBlobOffsetInFile + info.CompressedOffset;
-			req.CompressedSize = info.CompressedSize;
-		}
-		else
-		{
-			req.CompressionType = Renderer::kGeometryCompressionNone;
-			req.FileOffset = model->m_GeometryBlobOffsetInFile +
-				(static_cast<uint64_t>(pageIdx) * static_cast<uint64_t>(Renderer::kPageSizeInBytes));
-			req.CompressedSize = Renderer::kPageSizeInBytes;
-		}
-
-		if (!ReadPageFromFile(req, pageData))
-		{
-			std::memset(pageData.data(), 0, pageData.size());
-		}
-
-		uint32_t byteOffset = slot.SlotIndex * Renderer::kPageSizeInBytes;
-		gfx.WriteBuffer(m_GeometryChunksGPU[slot.ChunkIndex], byteOffset, pageData.data(), pageData.size());
-
-		const auto& pageMeta = model->m_PageMetadatas[pageIdx];
-		for (uint32_t i = 0; i < pageMeta.GroupCount; ++i)
-		{
-			uint32_t gIdx = pageMeta.StartGroupIndex + i;
-			locations[gIdx].ChunkIndex = slot.ChunkIndex;
-			locations[gIdx].ByteOffset = byteOffset + model->m_GroupMetadatas[gIdx].OffsetInPage;
-		}
-
-		m_PageTableCPU[pageIdx].ChunkIndex = slot.ChunkIndex;
-		m_PageTableCPU[pageIdx].SlotIndex = slot.SlotIndex;
-		m_PageTableCPU[pageIdx].IsPinned = true;
-		m_PageTableCPU[pageIdx].IsLoading = false;
-		pinnedCount++;
-	}
-
-	for (auto& chunk : m_GeometryChunksGPU)
-		gfx.TransitionResource(chunk, D3D12_RESOURCE_STATE_GENERIC_READ);
-
-	gfx.WriteBuffer(m_GroupDataLocationGPU, 0, m_GroupDataLocations.data(), m_GroupDataLocations.size() * sizeof(Renderer::GroupDataLocation));
-	gfx.TransitionResource(m_GroupDataLocationGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
-
-	gfx.Finish(true);
-	if (pinnedCount > 0)
-		++s_UploadVersion;
-
-	if (pinnedCount < rootPages.size())
-	{
-		Utility::Printf(L"GeometryStreaming: Pinned %zu/%zu root pages (budget=%u, maxChunks=%u).\n",
-			pinnedCount, rootPages.size(), kMaxPinnedRootPages, kMaxChunks);
-	}
-	else
-	{
-		Utility::Printf(L"GeometryStreaming: Pinned %zu root pages.\n", pinnedCount);
-	}
-
+    // Bounded upload batches. Never publish the address table until every root is valid.
+    constexpr uint32_t batchSize = 16;
+    std::vector<uint8_t> bytes(Renderer::kPageSizeInBytes);
+    bool success = true;
+    for (uint32_t begin = 0; begin < count && success; begin += batchSize)
+    {
+        GraphicsContext& gfx = GraphicsContext::Begin(L"Pin Root Pages Upload");
+        for (uint32_t page = begin; page < std::min(count, begin + batchSize); ++page)
+        {
+            if (m_PageTableCPU[page].IsPinned) continue;
+            const auto req = MakePageReadRequest(*model, page);
+            if (!ReadPageFromFile(req, bytes))
+            {
+                Utility::Printf(L"Root initialization: read/decode failed: %ls page %u\n", req.FilePath.c_str(), page);
+                success = false;
+                break;
+            }
+            const auto slot = m_FreePool.back();
+            m_FreePool.pop_back();
+            const uint32_t offset = slot.SlotIndex * Renderer::kPageSizeInBytes;
+            gfx.WriteBuffer(m_GeometryChunksGPU[slot.ChunkIndex], offset, bytes.data(), bytes.size());
+            for (uint32_t id : model->GetPageGroups(page))
+                m_GroupDataLocations[id] = {slot.ChunkIndex, offset + model->m_GroupMetadatas[id].OffsetInPage};
+            auto& residency = m_PageTableCPU[page];
+            residency.ChunkIndex = slot.ChunkIndex;
+            residency.SlotIndex = slot.SlotIndex;
+            residency.IsPinned = true;
+            residency.IsLoading = false;
+        }
+        for (auto& chunk : m_GeometryChunksGPU)
+            gfx.TransitionResource(chunk, D3D12_RESOURCE_STATE_GENERIC_READ);
+        gfx.Finish(true); // Also finish and wait on failure before any resource cleanup.
+    }
+    if (!success) return false; // Initialize tears down the unpublished model after the waits above.
+    GraphicsContext& gfx = GraphicsContext::Begin(L"Publish Root Geometry");
+    gfx.WriteBuffer(m_GroupDataLocationGPU, 0, m_GroupDataLocations.data(),
+        m_GroupDataLocations.size() * sizeof(Renderer::GroupDataLocation));
+    gfx.TransitionResource(m_GroupDataLocationGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
+    gfx.Finish(true);
+    ++s_UploadVersion;
+    Utility::Printf("GeometryStreaming: pinnedRootPages=%u chunkAllocatedBytes=%llu\n", count,
+        uint64_t(m_GeometryChunksGPU.size()) * Renderer::kChunkSizeInBytes);
     LogChunkStats(L"after pinning root pages");
+    return true;
 }
 
 void GeometryStreaming::Shutdown()
@@ -399,6 +347,7 @@ void GeometryStreaming::Shutdown()
 	{
 		std::lock_guard<std::mutex> lock(m_IOQueueMutex);
 		m_StopIOThread = true;
+        m_IOQueue.clear();
 	}
 	m_IOCV.notify_all();
 
@@ -560,10 +509,8 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 		uploadedPages = true;
 
 		// Update mappings for all groups in the page
-		const auto& pageMeta = sourceModel->m_PageMetadatas[item.PageIndex];
-		for (uint32_t i = 0; i < pageMeta.GroupCount; ++i)
+		for (uint32_t gIdx : sourceModel->GetPageGroups(item.PageIndex))
 		{
-			uint32_t gIdx = pageMeta.StartGroupIndex + i;
 			locations[gIdx].ChunkIndex = slot.ChunkIndex;
 			locations[gIdx].ByteOffset = byteOffset + sourceModel->m_GroupMetadatas[gIdx].OffsetInPage;
 			m_NeedSyncAddressTable = true;
@@ -605,28 +552,9 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 void GeometryStreaming::EnqueueAsyncLoad(uint32_t pageIdx)
 {
 	Model* sourceModel = ModelInstanceManager::GetSourceModel();
+	auto req = MakePageReadRequest(*sourceModel, pageIdx);
 	{
 		std::lock_guard<std::mutex> lock(m_IOQueueMutex);
-		IORequest req = {};
-		req.PageIdx = pageIdx;
-		req.FilePath = sourceModel->m_StreamingFilePath;
-		req.CompressionType = sourceModel->m_GeometryCompressionType;
-
-		if (req.CompressionType == Renderer::kGeometryCompressionLZ4 &&
-			pageIdx < sourceModel->m_PageCompressionInfos.size())
-		{
-			const auto& info = sourceModel->m_PageCompressionInfos[pageIdx];
-			req.FileOffset = sourceModel->m_GeometryBlobOffsetInFile + info.CompressedOffset;
-			req.CompressedSize = info.CompressedSize;
-		}
-		else
-		{
-			req.CompressionType = Renderer::kGeometryCompressionNone;
-			req.FileOffset = sourceModel->m_GeometryBlobOffsetInFile +
-				(static_cast<uint64_t>(pageIdx) * static_cast<uint64_t>(Renderer::kPageSizeInBytes));
-			req.CompressedSize = Renderer::kPageSizeInBytes;
-		}
-
 		m_IOQueue.push_back(std::move(req));
 	}
 	m_IOCV.notify_one();
@@ -673,10 +601,8 @@ void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDat
 	{
 		uint32_t pIdx = cand.pageIdx;
 		PageResidency& page = m_PageTableCPU[pIdx];
-		const auto& pageMeta = sourceModel->m_PageMetadatas[pIdx];
-		for (uint32_t j = 0; j < pageMeta.GroupCount; ++j)
+		for (uint32_t gIdx : sourceModel->GetPageGroups(pIdx))
 		{
-			uint32_t gIdx = pageMeta.StartGroupIndex + j;
 			pLocationTable[gIdx].ChunkIndex = INVALID_CHUNK_INDEX;
 			pLocationTable[gIdx].ByteOffset = 0;
 		}

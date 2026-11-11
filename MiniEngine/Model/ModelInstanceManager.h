@@ -8,7 +8,7 @@
 
 namespace ModelInstanceManager
 {
-	void Initialize(std::shared_ptr<Model> sourceModel, uint32_t instanceCount = 1);
+	bool Initialize(std::shared_ptr<Model> sourceModel, uint32_t instanceCount = 1);
 
 	void Update(GraphicsContext& gfxContext, float deltaTime);
     const std::vector<SceneObjectUpdate>& GetSceneObjectUpdates();

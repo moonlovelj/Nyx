@@ -14,7 +14,7 @@ namespace GeometryStreaming
 	extern ByteAddressBuffer m_GeometryStreamingRequestMaskGPU;
 
 	void Initialize(const std::vector<Renderer::HierarchyNode>& nodes, uint32_t maxGroupSize, uint32_t numPages);
-	void PinRootPages(Model* model);
+	bool PinRootPages(Model* model);
 	void Shutdown();
 
 	void Update(uint32_t frameIndex); 

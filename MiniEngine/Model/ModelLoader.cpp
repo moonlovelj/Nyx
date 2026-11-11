@@ -1,4 +1,4 @@
-﻿//
+//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -15,6 +15,7 @@
 //
 
 #include "ModelLoader.h"
+#include "GeometryPageLayout.h"
 #include "Renderer.h"
 #include "Model.h"
 #include "glTFLoader.h"
@@ -22,8 +23,10 @@
 #include "TextureManager.h"
 #include "TextureConvert.h"
 #include "GraphicsCommon.h"
+#include "lz4.h"
 
 #include <fstream>
+#include <limits>
 #include <unordered_map>
 
 using namespace Renderer;
@@ -146,7 +149,7 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
     struct _stat64 sourceFileStat;
     struct _stat64 miniFileStat;
     std::ifstream inFile;
-    FileHeader header;
+    FileHeader header{};
 
     bool sourceFileMissing = _wstat64(filePath.c_str(), &sourceFileStat) == -1;
     bool miniFileMissing = _wstat64(miniFileName.c_str(), &miniFileStat) == -1;
@@ -170,8 +173,10 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
     if (!needBuild)
     {
         inFile = std::ifstream(miniFileName, std::ios::in | std::ios::binary);
-        inFile.read((char*)&header, sizeof(FileHeader));
-        if (strncmp(header.id, "MINI", 4) != 0 || header.version != CURRENT_MINI_FILE_VERSION)
+        inFile.read((char*)&header, 8);
+        if (inFile && !std::memcmp(header.id, "MINI", 4) && header.version == CURRENT_MINI_FILE_VERSION)
+            inFile.read((char*)&header + 8, sizeof(FileHeader) - 8);
+        if (!inFile || header.pageSizeInBytes != kPageSizeInBytes || strncmp(header.id, "MINI", 4) != 0 || header.version != CURRENT_MINI_FILE_VERSION)
         {
             Utility::Printf("Model version deprecated.  Rebuilding %ws...\n", fileName.c_str());
             needBuild = true;
@@ -211,7 +216,7 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
             return nullptr;
         }
 
-        if (!SaveModel(miniFileName, modelData, streamCtx))
+        if (!FinalizeGeometryPacking(modelData, streamCtx) || !SaveModel(miniFileName, modelData, streamCtx))
             return nullptr;
 
         inFile = std::ifstream(miniFileName, std::ios::in | std::ios::binary);
@@ -221,13 +226,39 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
     if (!inFile)
         return nullptr;
 
-    ASSERT(strncmp(header.id, "MINI", 4) == 0 && header.version == CURRENT_MINI_FILE_VERSION);
+    auto invalid = [&](const char* reason) -> std::shared_ptr<Model> {
+        Utility::Printf(L"Invalid model cache %ls: %hs\n", miniFileName.c_str(), reason);
+        return nullptr;
+    };
+    if (std::memcmp(header.id, "MINI", 4) || header.version != CURRENT_MINI_FILE_VERSION ||
+        header.pageSizeInBytes != kPageSizeInBytes ||
+        (header.geometryCompressionType != kGeometryCompressionNone && header.geometryCompressionType != kGeometryCompressionLZ4))
+        return invalid("invalid header");
+    inFile.seekg(0, std::ios::end);
+    const auto endPosition = inFile.tellg();
+    if (endPosition < 0) return invalid("cannot determine file length");
+    const uint64_t fileSize = static_cast<uint64_t>(endPosition);
+    if (header.geometryBlobOffset > fileSize || header.geometryBlobSize > fileSize - header.geometryBlobOffset)
+        return invalid("geometry blob exceeds actual file length");
+    uint64_t minimumMetadata = sizeof(FileHeader) + uint64_t(header.numNodes) * sizeof(GraphNode) +
+        uint64_t(header.numMeshes) * sizeof(Mesh) + uint64_t(header.numMaterials) * (sizeof(MaterialConstantData) + sizeof(MaterialTextureData)) +
+        header.stringTableSize + uint64_t(header.numTextures) + uint64_t(header.numJoints) * (sizeof(uint16_t) + sizeof(Matrix4)) +
+        uint64_t(header.numCameras) * sizeof(CameraData) + uint64_t(header.groupCount) * (sizeof(GroupMetadata) + sizeof(uint32_t)) +
+        uint64_t(header.hierarchyNodeCount) * sizeof(HierarchyNode) + uint64_t(header.pageCount) * sizeof(PageMetadata);
+    if (header.numAnimations)
+        minimumMetadata += header.keyFrameDataSize + uint64_t(header.numAnimationCurves) * sizeof(AnimationCurve) + uint64_t(header.numAnimations) * sizeof(AnimationSet);
+    if (header.geometryCompressionType != kGeometryCompressionNone)
+        minimumMetadata += uint64_t(header.pageCount) * sizeof(PageCompressionInfo);
+    if (minimumMetadata > header.geometryBlobOffset || header.numTextures > header.stringTableSize)
+        return invalid("directory counts exceed actual metadata region");
+    inFile.seekg(sizeof(FileHeader));
 
     std::wstring basePath = Utility::GetBasePath(filePath);
 
     std::shared_ptr<Model> model(new Model);
 
 	model->m_StreamingFilePath = miniFileName;
+    model->m_RootPageCount = header.rootPageCount;
 	model->m_GeometryBlobOffsetInFile = header.geometryBlobOffset;
 	model->m_GeometryUncompressedSize = header.geometryUncompressedSize;
 	model->m_GeometryCompressionType = header.geometryCompressionType;
@@ -244,9 +275,11 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
 		// Read the fixed header first to get numDraws
 		Mesh tempHead{};
 		inFile.read(reinterpret_cast<char*>(&tempHead), sizeof(Mesh));
-		if (!inFile) return nullptr;
+		if (!inFile || !tempHead.numDraws || uint64_t(inFile.tellg()) > header.geometryBlobOffset ||
+            uint64_t(tempHead.numDraws - 1) * sizeof(Mesh::Draw) > header.geometryBlobOffset - uint64_t(inFile.tellg()))
+            return invalid("invalid mesh draw range");
 
-		// Compute actual byte size and allocate
+        // Compute actual byte size and allocate
 		const size_t meshSize = sizeof(Mesh) + sizeof(Mesh::Draw) * (tempHead.numDraws - 1);
 		Mesh* mesh = static_cast<Mesh*>(std::malloc(meshSize));
 		if (!mesh) return nullptr;
@@ -283,30 +316,24 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
     inFile.read((char*)materialTextures.data(), header.numMaterials * sizeof(MaterialTextureData));
 
     std::vector<std::wstring> textureNames(header.numTextures);
+    std::vector<char> strings(header.stringTableSize);
+    inFile.read(strings.data(), strings.size());
+    if (!inFile) return invalid("truncated texture string table");
+    size_t stringOffset = 0;
     for (uint32_t i = 0; i < header.numTextures; ++i)
     {
-        std::string utf8TextureName;
-        std::getline(inFile, utf8TextureName, '\0');
-        textureNames[i] = Utility::UTF8ToWideString(utf8TextureName);
+        if (stringOffset >= strings.size()) return invalid("missing texture name");
+        const char* begin = strings.data() + stringOffset;
+        const char* end = static_cast<const char*>(std::memchr(begin, 0, strings.size() - stringOffset));
+        if (!end) return invalid("unterminated texture name");
+        textureNames[i] = Utility::UTF8ToWideString(std::string(begin, end));
+        stringOffset += size_t(end - begin) + 1;
     }
 
+    if (stringOffset != strings.size())
+        return invalid("invalid texture string table");
     std::vector<uint8_t> textureOptions(header.numTextures);
     inFile.read((char*)textureOptions.data(), header.numTextures * sizeof(uint8_t));
-
-    std::vector<uint32_t> tableOffsets = LoadMaterials(*model, materialTextures, textureNames, textureOptions, basePath);
-    if (header.numMaterials > 0)
-    {
-        MaterialConstants* materialCBV = (MaterialConstants*)materialConstants.Map();
-        for (uint32_t i = 0; i < header.numMaterials; ++i)
-        {
-			const uint32_t offsetPair = tableOffsets[i];
-            materialCBV[i].TextureStartIndex = offsetPair & 0xFFFF;
-            materialCBV[i].SamplerStartIndex = offsetPair >> 16;
-        }
-
-        materialConstants.Unmap();
-        model->m_MaterialConstants.Create(L"Material Constants", header.numMaterials, sizeof(MaterialConstants), materialConstants);
-    }
 
     model->m_BoundingSphere = BoundingSphere(*(XMFLOAT4*)header.boundingSphere);
     model->m_BoundingBox = AxisAlignedBox(Vector3(*(XMFLOAT3*)header.minPos), Vector3(*(XMFLOAT3*)header.maxPos));
@@ -316,7 +343,7 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
 
     if (header.numAnimations > 0)
     {
-        ASSERT(header.keyFrameDataSize > 0 && header.numAnimationCurves > 0);
+        if (!header.keyFrameDataSize || !header.numAnimationCurves) return invalid("invalid animation counts");
         model->m_KeyFrameData.reset(new uint8_t[header.keyFrameDataSize]);
         inFile.read((char*)model->m_KeyFrameData.get(), header.keyFrameDataSize);
         model->m_CurveData.reset(new AnimationCurve[header.numAnimationCurves]);
@@ -363,12 +390,59 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
         model->m_PageMetadatas.resize(header.pageCount);
         inFile.read((char*)model->m_PageMetadatas.data(), header.pageCount * sizeof(PageMetadata));
 
-		if (header.geometryCompressionType != kGeometryCompressionNone)
+    }
+    model->m_PageGroupIndices.resize(header.groupCount);
+    inFile.read((char*)model->m_PageGroupIndices.data(), uint64_t(header.groupCount) * sizeof(uint32_t));
+    if (header.pageCount > 0)
+    {
+        if (header.geometryCompressionType != kGeometryCompressionNone)
 		{
 			model->m_PageCompressionInfos.resize(header.pageCount);
 			inFile.read((char*)model->m_PageCompressionInfos.data(), header.pageCount * sizeof(PageCompressionInfo));
 		}
 	}
+
+    if (!inFile || uint64_t(inFile.tellg()) != header.geometryBlobOffset)
+        return invalid("truncated or inconsistent directory");
+    std::vector<uint8_t> roots;
+    std::string layoutError;
+    if (!BuildRootGroupMask(model->m_Nodes, header.groupCount, roots, layoutError) ||
+        (header.groupCount && !header.rootPageCount) ||
+        !ValidateGeometryPageLayout(model->m_GroupMetadatas, model->m_PageMetadatas,
+            model->m_PageGroupIndices, roots, header.rootPageCount, header.pageSizeInBytes,
+            header.geometryUncompressedSize, layoutError))
+        return invalid(layoutError.empty() ? "nonempty geometry has no roots" : layoutError.c_str());
+    if (header.geometryCompressionType == kGeometryCompressionNone)
+    {
+        if (header.geometryBlobSize != header.geometryUncompressedSize) return invalid("invalid uncompressed blob size");
+    }
+    else for (uint32_t page = 0; page < header.pageCount; ++page)
+    {
+        const auto& info = model->m_PageCompressionInfos[page];
+        if (!info.CompressedSize || info.CompressedSize > uint32_t(LZ4_compressBound(kPageSizeInBytes)) ||
+            info.CompressedOffset > header.geometryBlobSize || info.CompressedSize > header.geometryBlobSize - info.CompressedOffset)
+        {
+            Utility::Printf("Invalid compression range for page %u\n", page);
+            return invalid("compressed page exceeds blob");
+        }
+    }
+    for (const auto& material : materialTextures)
+        for (uint16_t texture : material.stringIdx)
+            if (texture != 0xffff && texture >= header.numTextures) return invalid("invalid material texture reference");
+    std::vector<uint32_t> tableOffsets = LoadMaterials(*model, materialTextures, textureNames, textureOptions, basePath);
+    if (header.numMaterials > 0)
+    {
+        MaterialConstants* materialCBV = (MaterialConstants*)materialConstants.Map();
+        for (uint32_t i = 0; i < header.numMaterials; ++i)
+        {
+			const uint32_t offsetPair = tableOffsets[i];
+            materialCBV[i].TextureStartIndex = offsetPair & 0xFFFF;
+            materialCBV[i].SamplerStartIndex = offsetPair >> 16;
+        }
+
+        materialConstants.Unmap();
+        model->m_MaterialConstants.Create(L"Material Constants", header.numMaterials, sizeof(MaterialConstants), materialConstants);
+    }
 
     return model;
 }

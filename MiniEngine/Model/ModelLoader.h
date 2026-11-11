@@ -21,11 +21,13 @@
 #include "glTFLoader.h"
 
 #include <cstdint>
+#include <cstddef>
+#include <cstdlib>
 #include <vector>
 
 namespace glTF { class Asset; struct Mesh; }
 
-#define CURRENT_MINI_FILE_VERSION 29
+#define CURRENT_MINI_FILE_VERSION 30
 
 namespace Renderer
 {
@@ -38,28 +40,20 @@ namespace Renderer
 		uint64_t SizeBytes;
 
 		uint32_t BaseGroupIndexPatchValue; // Value to add to RefineGroupIndex
+		uint32_t GroupId;
 	};
 
 	struct GlobalStreamingContext {
 		//const std::string FileName = "geometry_build_temp.bin";
 		//std::ofstream TempGeoFile;          // Temporary file stream
 
-		uint64_t TotalGeometrySize = 0;     // Total bytes written
-		uint32_t CurrentPageIndex = 0;      // Current page index
-		uint32_t CurrentOffsetInPage = 0;   // Offset within current page
-
-		std::vector<char> ZeroBuffer;
-
 		// Deferred write queue
 		std::vector<PendingGroupWrite> PendingWrites;
 		// Temporary files to keep alive (for final cleanup)
 		std::vector<std::wstring> TempFilesToClean;
 
-		GlobalStreamingContext() {
-			ZeroBuffer.assign(Renderer::kPageSizeInBytes, 0);
-			// Create temporary file
-			//TempGeoFile.open(FileName, std::ios::binary | std::ios::out | std::ios::trunc);
-		}
+        // Create temporary file
+        //TempGeoFile.open(FileName, std::ios::binary | std::ios::out | std::ios::trunc);
 
 		~GlobalStreamingContext() {
 			//if (TempGeoFile.is_open()) TempGeoFile.close();
@@ -111,12 +105,18 @@ namespace Renderer
     // All of the information that needs to be written to a .mini data file
     struct ModelData
     {
+        ModelData() = default;
+        ModelData(const ModelData&) = delete;
+        ModelData& operator=(const ModelData&) = delete;
+        ~ModelData() { for (Mesh* mesh : m_Meshes) std::free(mesh); }
         BoundingSphere m_BoundingSphere;
         AxisAlignedBox m_BoundingBox;
 
 		std::vector<GroupMetadata> m_GroupInfos;
 		std::vector<HierarchyNode> m_Nodes;
 		std::vector<PageMetadata> m_Pages;
+		std::vector<uint32_t> m_PageGroupIndices;
+		uint32_t m_RootPageCount = 0;
 
         std::vector<unsigned char> m_AnimationKeyFrameData;
         std::vector<AnimationCurve> m_AnimationCurves;
@@ -150,6 +150,8 @@ namespace Renderer
 		uint32_t groupCount;
 		uint32_t hierarchyNodeCount;
         uint32_t pageCount;
+        uint32_t pageSizeInBytes;
+        uint32_t rootPageCount;
 
         uint32_t stringTableSize;
         uint32_t keyFrameDataSize;      // Animation data
@@ -161,6 +163,13 @@ namespace Renderer
         float    minPos[3];
         float    maxPos[3];
     };
+
+    static_assert(sizeof(FileHeader) == 136);
+    static_assert(offsetof(FileHeader, pageSizeInBytes) == 64);
+    static_assert(offsetof(FileHeader, rootPageCount) == 68);
+    static_assert(offsetof(FileHeader, stringTableSize) == 72);
+
+    bool FinalizeGeometryPacking(ModelData& data, GlobalStreamingContext& streamCtx);
 
     void CompileMesh(
 		ModelData& modelData,

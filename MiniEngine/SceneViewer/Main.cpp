@@ -348,7 +348,13 @@ void SceneViewer::ReloadModel(const std::wstring& filePath, bool useOrbit, uint3
     if (ModelInstanceManager::GetNumModelInstances() > 0)
         ModelInstanceManager::Cleanup();
 
-    ModelInstanceManager::Initialize(model, instanceCount);
+    if (!ModelInstanceManager::Initialize(model, instanceCount))
+    {
+        Utility::Printf(L"Error: model initialization failed: %ls\n", filePath.c_str());
+        m_HasPreviousFrame = false;
+        TemporalEffects::InvalidateHistory(TemporalEffects::ResetReason::SceneReloaded);
+        return;
+    }
     m_HasPreviousFrame = false;
     TemporalEffects::InvalidateHistory(TemporalEffects::ResetReason::SceneReloaded);
     const Vector3 sceneCenter = ModelInstanceManager::GetInstanceDistributionCenter();
@@ -499,10 +505,10 @@ void SceneViewer::Update( float deltaT )
     m_Camera.SetAspectRatio(static_cast<float>(resolution.outputSize.height) / resolution.outputSize.width);
     if (g_LockCamera)
     {
-        m_CameraController->ResetMomentum();
+        if (m_CameraController) m_CameraController->ResetMomentum();
         m_Camera.Update();
     }
-    else if (!bUseglTFCamera)
+    else if (!bUseglTFCamera && m_CameraController)
         m_CameraController->Update(deltaT);
 
     GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Update");

@@ -25,6 +25,8 @@ using namespace Renderer;
 
 void Model::Destroy()
 {
+    for (Mesh* mesh : m_Meshes) std::free(mesh);
+    m_Meshes.clear();
     m_BoundingSphere = BoundingSphere(kZero);
     m_MaterialConstants.Destroy();
     m_NumNodes = 0;

@@ -84,7 +84,8 @@ bool AssimpModel::Save(const string& filename) const
         {
             Renderer::ModelData model;
             Renderer::GlobalStreamingContext streamCtx;
-            if (BuildModel(model, streamCtx) && Renderer::SaveModel(Utility::UTF8ToWideString(filename), model, streamCtx))
+            if (BuildModel(model, streamCtx) && Renderer::FinalizeGeometryPacking(model, streamCtx) &&
+                Renderer::SaveModel(Utility::UTF8ToWideString(filename), model, streamCtx))
                 return true;
         }
     }

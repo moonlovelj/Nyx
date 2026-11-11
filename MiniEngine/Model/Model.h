@@ -30,6 +30,7 @@
 #include <map>
 #include <vector>
 #include <string>
+#include <span>
 
 
 namespace Renderer
@@ -162,6 +163,13 @@ public:
 	std::vector<Renderer::GroupMetadata> m_GroupMetadatas;
 
 	std::vector<Renderer::PageMetadata> m_PageMetadatas;
+	std::vector<uint32_t> m_PageGroupIndices;
+	uint32_t m_RootPageCount = 0;
+	std::span<const uint32_t> GetPageGroups(uint32_t pageIndex) const
+	{
+		const auto& page = m_PageMetadatas[pageIndex];
+		return {m_PageGroupIndices.data() + page.FirstGroupRef, page.GroupCount};
+	}
 	std::vector<Renderer::PageCompressionInfo> m_PageCompressionInfos;
 
 	// BVH tree (needs to be uploaded to GPU, stored on CPU here)
