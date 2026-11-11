@@ -19,7 +19,6 @@
 #include "Renderer.h"
 #include "Model.h"
 #include "glTFLoader.h"
-#include "ModelH3D.h"
 #include "TextureManager.h"
 #include "TextureConvert.h"
 #include "GraphicsCommon.h"
@@ -143,6 +142,14 @@ std::vector<uint32_t> LoadMaterials(Model& model,
 
 std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool forceRebuild)
 {
+    // Validate the requested format before looking up a same-name cache.
+    const std::wstring fileExt = Utility::ToLower(Utility::GetFileExtension(filePath));
+    if (fileExt != L"gltf" && fileExt != L"glb" && fileExt != L"mini")
+    {
+        Utility::Printf(L"Unsupported model file extension: %ws\n", fileExt.c_str());
+        return nullptr;
+    }
+
     const std::wstring miniFileName = Utility::RemoveExtension(filePath) + L".mini";
     const std::wstring fileName = Utility::RemoveBasePath(filePath);
 
@@ -195,19 +202,10 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
         ModelData modelData;
         GlobalStreamingContext streamCtx;
 
-        const std::wstring fileExt = Utility::ToLower(Utility::GetFileExtension(filePath));
-
         if (fileExt == L"gltf" || fileExt == L"glb")
         {
             glTF::GltfAsset asset(filePath);
             if (!BuildModel(modelData, asset, streamCtx))
-                return nullptr;
-        }
-        else if (fileExt == L"h3d")
-        {
-            ModelH3D modelh3d;
-            const std::wstring basePath = Utility::GetBasePath(filePath);
-            if (!modelh3d.Load(filePath) || !modelh3d.BuildModel(modelData, streamCtx, basePath))
                 return nullptr;
         }
         else

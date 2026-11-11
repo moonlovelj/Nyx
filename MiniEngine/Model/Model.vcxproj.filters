@@ -4,9 +4,6 @@
     <ClCompile Include="GeometryPageLayout.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ModelH3D.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="Renderer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -32,9 +29,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Model.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="BuildH3D.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="LightManager.cpp">
@@ -150,9 +144,6 @@
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="IndexOptimizePostTransform.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ModelH3D.h">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="Model.h">

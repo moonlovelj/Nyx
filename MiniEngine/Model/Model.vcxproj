@@ -124,7 +124,6 @@
     <ClInclude Include="ObjectMotion.h" />
     <ClInclude Include="SceneObjectUpdate.h" />
     <ClInclude Include="ModelLoader.h" />
-    <ClInclude Include="ModelH3D.h" />
     <ClInclude Include="ParticleEffects.h" />
     <ClInclude Include="Renderer.h" />
     <ClInclude Include="StructsIO.h" />
@@ -151,7 +150,6 @@
     <ClCompile Include="..\ThirdParty\meshoptimizer\vertexfilter.cpp" />
     <ClCompile Include="..\ThirdParty\meshoptimizer\vfetchoptimizer.cpp" />
     <ClCompile Include="Animation.cpp" />
-    <ClCompile Include="BuildH3D.cpp" />
     <ClCompile Include="GeometryStreaming.cpp" />
     <ClCompile Include="GeometryPageLayout.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
@@ -167,7 +165,6 @@
     <ClCompile Include="MeshletBuilder.cpp" />
     <ClCompile Include="Model.cpp" />
     <ClCompile Include="ModelConvert.cpp" />
-    <ClCompile Include="ModelH3D.cpp" />
     <ClCompile Include="ModelInstanceManager.cpp" />
     <ClCompile Include="ModelLoader.cpp" />
     <ClCompile Include="ParticleEffects.cpp" />

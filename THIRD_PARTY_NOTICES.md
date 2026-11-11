@@ -47,7 +47,6 @@ These are used by separate utilities, rather than SceneViewer.
 
 | Component | License | Tool |
 | --- | --- | --- |
-| [Assimp](https://github.com/assimp/assimp) | [BSD-3-Clause](https://github.com/assimp/assimp/blob/v5.4.3/LICENSE) | [ModelConverter](MiniEngine/ModelConverter/) |
 | [FreeType](https://freetype.org/) | [FTL or GPLv2](https://freetype.org/license) | [SDFFontCreator](MiniEngine/Tools/SDFFontCreator/) |
 
 ## Assets
