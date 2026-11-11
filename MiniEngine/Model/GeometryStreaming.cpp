@@ -60,7 +60,38 @@ namespace GeometryStreaming
 	std::mutex m_CompletedPagesMutex;
 	std::deque<LoadedPage> m_CompletedPagesQueue;
 
-	bool m_NeedSyncAddressTable = false;
+	std::vector<uint32_t> m_DirtyGroupIndices;
+
+	static void UploadAddressRange(GraphicsContext& gfx, const DynAlloc& upload,
+		size_t firstGroup, size_t groupCount, size_t uploadOffset)
+	{
+		const size_t byteCount = groupCount * sizeof(Renderer::GroupDataLocation);
+		// Entries are 8 bytes; WriteBuffer's aligned SIMD copy can overread a range.
+		std::memcpy(static_cast<uint8_t*>(upload.DataPtr) + uploadOffset,
+			m_GroupDataLocations.data() + firstGroup, byteCount);
+		gfx.CopyBufferRegion(m_GroupDataLocationGPU, firstGroup * sizeof(Renderer::GroupDataLocation),
+			upload.Buffer, upload.Offset + uploadOffset, byteCount);
+	}
+
+	static void UploadDirtyAddressTable(GraphicsContext& gfx)
+	{
+		if (m_DirtyGroupIndices.empty()) return;
+		std::sort(m_DirtyGroupIndices.begin(), m_DirtyGroupIndices.end());
+		m_DirtyGroupIndices.erase(std::unique(m_DirtyGroupIndices.begin(), m_DirtyGroupIndices.end()),
+			m_DirtyGroupIndices.end());
+		const auto upload = gfx.ReserveUploadMemory(m_DirtyGroupIndices.size() * sizeof(Renderer::GroupDataLocation));
+		for (size_t begin = 0; begin < m_DirtyGroupIndices.size(); )
+		{
+			size_t end = begin + 1;
+			while (end < m_DirtyGroupIndices.size() &&
+				m_DirtyGroupIndices[end] == m_DirtyGroupIndices[end - 1] + 1)
+				++end;
+			UploadAddressRange(gfx, upload, m_DirtyGroupIndices[begin], end - begin,
+				begin * sizeof(Renderer::GroupDataLocation));
+			begin = end;
+		}
+		gfx.TransitionResource(m_GroupDataLocationGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
+	}
 
 	struct IORequest {
 		uint32_t PageIdx;
@@ -271,7 +302,13 @@ bool GeometryStreaming::Initialize(const Model& model)
 	// Every model starts nonresident. resize() would preserve addresses from the
 	// previous model when switching to a model with the same or fewer groups.
 	m_GroupDataLocations.assign(groupCount, { INVALID_CHUNK_INDEX, 0 });
-	m_GroupDataLocationGPU.Create(L"Group Data Location GPU", groupCount, sizeof(Renderer::GroupDataLocation), m_GroupDataLocations.data());
+	m_DirtyGroupIndices.clear();
+	m_GroupDataLocationGPU.Create(L"Group Data Location GPU", groupCount, sizeof(Renderer::GroupDataLocation));
+	GraphicsContext& gfx = GraphicsContext::Begin(L"Initialize Geometry Addresses");
+	const auto upload = gfx.ReserveUploadMemory(m_GroupDataLocations.size() * sizeof(Renderer::GroupDataLocation));
+	UploadAddressRange(gfx, upload, 0, groupCount, 0);
+	gfx.TransitionResource(m_GroupDataLocationGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
+	gfx.Finish(true);
 	Renderer::SetBindlessResourceDescriptor(
 		SRV_GROUP_DATA_LOCATION_BUFFER,
 		m_GroupDataLocationGPU.GetSRV()
@@ -326,7 +363,10 @@ bool GeometryStreaming::PinRootPages(Model* model)
             const uint32_t offset = slot.SlotIndex * Renderer::kPageSizeInBytes;
             gfx.WriteBuffer(m_GeometryChunksGPU[slot.ChunkIndex], offset, bytes.data(), bytes.size());
             for (uint32_t id : model->GetPageGroups(page))
+            {
                 m_GroupDataLocations[id] = {slot.ChunkIndex, offset + model->m_GroupMetadatas[id].OffsetInPage};
+                m_DirtyGroupIndices.push_back(id);
+            }
             auto& residency = m_PageTableCPU[page];
             residency.ChunkIndex = slot.ChunkIndex;
             residency.SlotIndex = slot.SlotIndex;
@@ -339,10 +379,9 @@ bool GeometryStreaming::PinRootPages(Model* model)
     }
     if (!success) return false; // Initialize tears down the unpublished model after the waits above.
     GraphicsContext& gfx = GraphicsContext::Begin(L"Publish Root Geometry");
-    gfx.WriteBuffer(m_GroupDataLocationGPU, 0, m_GroupDataLocations.data(),
-        m_GroupDataLocations.size() * sizeof(Renderer::GroupDataLocation));
-    gfx.TransitionResource(m_GroupDataLocationGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
+    UploadDirtyAddressTable(gfx);
     gfx.Finish(true);
+    m_DirtyGroupIndices.clear();
     ++s_UploadVersion;
     Utility::Printf("GeometryStreaming: pinnedRootPages=%u chunkAllocatedBytes=%llu\n", count,
         uint64_t(m_GeometryChunksGPU.size()) * Renderer::kChunkSizeInBytes);
@@ -376,7 +415,7 @@ void GeometryStreaming::Shutdown()
 		m_CompletedPagesQueue.clear();
 	}
 	m_PagesToLoad.clear();
-	m_NeedSyncAddressTable = false;
+	m_DirtyGroupIndices.clear();
 	m_GroupDataLocations.clear();
 	m_PageTableCPU.clear();
 	m_FreePool.clear();
@@ -498,12 +537,12 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 		std::lock_guard<std::mutex> lock(m_CompletedPagesMutex);
 		readyPages.swap(m_CompletedPagesQueue);
 	}
-	if (readyPages.empty() && !m_NeedSyncAddressTable) return;
+	if (readyPages.empty() && m_DirtyGroupIndices.empty()) return;
 
 	Model* sourceModel = ModelInstanceManager::GetSourceModel();
 	Renderer::GroupDataLocation* locations = m_GroupDataLocations.data();
 	// Previous draws, slot overwrites and address-table publication all run
-	// on the graphics queue, before the next render. WriteBuffer supplies the
+	// on the graphics queue, before the next render. Copy helpers supply the
 	// COPY_DEST barriers; slots can be reused without a CPU fence wait.
 	GraphicsContext& gfx = GraphicsContext::Begin(L"Streaming Residency Update");
 
@@ -532,7 +571,7 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 		{
 			locations[gIdx].ChunkIndex = slot.ChunkIndex;
 			locations[gIdx].ByteOffset = byteOffset + sourceModel->m_GroupMetadatas[gIdx].OffsetInPage;
-			m_NeedSyncAddressTable = true;
+			m_DirtyGroupIndices.push_back(gIdx);
 		}
 
 		m_PageTableCPU[item.PageIndex].ChunkIndex = slot.ChunkIndex;
@@ -552,18 +591,14 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 		);
 	}
 
-	if (m_NeedSyncAddressTable)
-	{
-		m_NeedSyncAddressTable = false;
-		gfx.WriteBuffer(m_GroupDataLocationGPU, 0, m_GroupDataLocations.data(), m_GroupDataLocations.size() * sizeof(Renderer::GroupDataLocation));
-		gfx.TransitionResource(m_GroupDataLocationGPU, D3D12_RESOURCE_STATE_GENERIC_READ);
-	}
+	UploadDirtyAddressTable(gfx);
 
 	for (auto& chunk : m_GeometryChunksGPU)
 	{
 		gfx.TransitionResource(chunk, D3D12_RESOURCE_STATE_GENERIC_READ);
 	}
 	gfx.Finish();
+	m_DirtyGroupIndices.clear();
 	if (uploadedPages)
 		++s_UploadVersion;
 }
@@ -612,8 +647,6 @@ void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDat
 		return a.lastFrame < b.lastFrame;
 		});
 
-	uint32_t evictedCount = 0;
-
 	Model* sourceModel = ModelInstanceManager::GetSourceModel();
 
 	for (const auto& cand : candidates)
@@ -624,24 +657,11 @@ void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDat
 		{
 			pLocationTable[gIdx].ChunkIndex = INVALID_CHUNK_INDEX;
 			pLocationTable[gIdx].ByteOffset = 0;
+			m_DirtyGroupIndices.push_back(gIdx);
 		}
 
 		m_FreePool.push_back({ page.ChunkIndex, page.SlotIndex });
 		page.ChunkIndex = INVALID_CHUNK_INDEX;
 		page.SlotIndex = 0;
-		evictedCount++;
-	}
-
-	if (evictedCount > 0)
-	{
-		m_NeedSyncAddressTable = true;
-	}
-	else
-	{
-		//static uint64_t lastWarnFrame = 0;
-		//if (currentFrame > lastWarnFrame + 100) {
-		//	Utility::Printf("WARNING: Geometry Cache Pool is full and no pages can be evicted! Increase kMaxChunks.\n");
-		//	lastWarnFrame = currentFrame;
-		//}
 	}
 }
