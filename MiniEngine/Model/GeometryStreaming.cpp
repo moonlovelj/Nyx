@@ -14,6 +14,10 @@
 #include <intrin.h>
 #include <cstring>
 #include <fstream>
+#include <thread>
+#include <mutex>
+#include <cassert>
+#include <system_error>
 
 namespace GeometryStreaming
 {
@@ -57,8 +61,12 @@ namespace GeometryStreaming
 		std::vector<uint8_t> Data;
 		bool Success;
 	};
-	std::mutex m_CompletedPagesMutex;
-	std::deque<LoadedPage> m_CompletedPagesQueue;
+	constexpr uint32_t kMaxPendingPages = 128;
+	constexpr uint32_t kMaxUploadPagesPerFrame = 64;
+	uint32_t m_PendingPageCount = 0;
+
+	static void SyncMemoryAndAddressTable(uint32_t frameIndex);
+	static void ImmediateEvict(uint32_t currentFrame, Renderer::GroupDataLocation* locations);
 
 	std::vector<uint32_t> m_DirtyGroupIndices;
 
@@ -99,14 +107,6 @@ namespace GeometryStreaming
 		uint32_t CompressedSize;
 		uint32_t CompressionType;
 	};
-	std::thread m_IOThread;
-	std::deque<IORequest> m_IOQueue;
-	std::mutex m_IOQueueMutex;
-	std::condition_variable m_IOCV;
-	std::atomic<bool> m_StopIOThread{ false };
-	static std::ifstream s_StreamingFile;
-	static std::wstring s_StreamingFilePath;
-	static std::mutex s_StreamingFileMutex;
 
 	static void LogChunkStats(const wchar_t* tag)
 	{
@@ -182,51 +182,166 @@ namespace GeometryStreaming
         }
         return req;
     }
-	static bool ReadPageFromFile(const IORequest& req, std::vector<uint8_t>& pageData)
-	{
-		const bool isCompressed = req.CompressionType == Renderer::kGeometryCompressionLZ4;
-		std::vector<char> compressed(isCompressed ? req.CompressedSize : 0);
-		char* destination = isCompressed ? compressed.data() : reinterpret_cast<char*>(pageData.data());
-		const size_t size = isCompressed ? compressed.size() : pageData.size();
-		{
-			// Root uploads and the IO worker share the stream's cursor and error state.
-			std::lock_guard<std::mutex> lock(s_StreamingFileMutex);
-			s_StreamingFile.clear();
-			s_StreamingFile.seekg(static_cast<std::streamoff>(req.FileOffset), std::ios::beg);
-			s_StreamingFile.read(destination, static_cast<std::streamsize>(size));
-			if (!s_StreamingFile) return false;
-		}
+    // Each reader owns its cursor and scratch; requests contain validated metadata.
+    struct PageReader
+    {
+        std::ifstream File;
+        std::vector<char> CompressedScratch;
 
-		if (!isCompressed) return true;
-		const int decoded = LZ4_decompress_safe(
-			compressed.data(), reinterpret_cast<char*>(pageData.data()),
-			static_cast<int>(compressed.size()), static_cast<int>(pageData.size()));
-		return decoded == static_cast<int>(pageData.size());
-	}
+        bool Open(const std::wstring& path)
+        {
+            File.open(path, std::ios::binary);
+            return File.is_open();
+        }
 
-	void IOThreadFunc()
-	{
-		while (true)
-		{
-			IORequest req;
-			{
-				std::unique_lock<std::mutex> lock(m_IOQueueMutex);
-				m_IOCV.wait(lock, [] { return !m_IOQueue.empty() || m_StopIOThread; });
+        bool Read(const IORequest& req, std::vector<uint8_t>& data)
+        {
+            data.resize(Renderer::kPageSizeInBytes);
+            const bool compressed = req.CompressionType == Renderer::kGeometryCompressionLZ4;
+            if (compressed) CompressedScratch.resize(req.CompressedSize);
+            char* destination = compressed ? CompressedScratch.data() : reinterpret_cast<char*>(data.data());
+            File.clear();
+            File.seekg(static_cast<std::streamoff>(req.FileOffset));
+            File.read(destination, req.CompressedSize);
+            if (!File) return false;
+            return !compressed || LZ4_decompress_safe(CompressedScratch.data(),
+                reinterpret_cast<char*>(data.data()), static_cast<int>(req.CompressedSize),
+                static_cast<int>(data.size())) == static_cast<int>(data.size());
+        }
+    };
 
-				if (m_IOQueue.empty() && m_StopIOThread)
-					break;
+    // Lifecycle and submissions belong to the main thread. Workers only exchange values.
+    class PageIO
+    {
+    public:
+        ~PageIO() { Stop(); }
 
-				req = m_IOQueue.front();
-				m_IOQueue.pop_front();
-			}
+        bool Start(const std::wstring& path, uint32_t count)
+        {
+            assert(m_Workers.empty());
+            m_Workers.resize(count); // Stable addresses before any thread starts.
+            for (auto& worker : m_Workers)
+                if (!worker.Reader.Open(path))
+                {
+                    Utility::Printf(L"GeometryStreaming: cannot open %ls\n", path.c_str());
+                    Stop();
+                    return false;
+                }
+            m_Stopping = false;
+            try
+            {
+                for (auto& worker : m_Workers)
+                    worker.Thread = std::thread([this, ptr = &worker] { WorkerLoop(*ptr); });
+            }
+            catch (const std::system_error& error)
+            {
+                Utility::Printf("GeometryStreaming: cannot start IO workers: %s\n", error.what());
+                Stop();
+                return false;
+            }
+            return true;
+        }
 
-			std::vector<uint8_t> pageData(Renderer::kPageSizeInBytes, 0);
-			const bool success = ReadPageFromFile(req, pageData);
-			if (!success)
-				Utility::Printf(L"GeometryStreaming: read/decode failed: %ls page %u\n", s_StreamingFilePath.c_str(), req.PageIdx);
-			OnPageIOComplete(req.PageIdx, std::move(pageData), success);
-		}
-	}
+        void Stop()
+        {
+            {
+                std::lock_guard<std::mutex> lock(m_RequestMutex);
+                m_Stopping = true;
+                m_Requests.clear();
+            }
+            m_WorkAvailable.notify_all();
+            for (auto& worker : m_Workers)
+                if (worker.Thread.joinable()) worker.Thread.join();
+            m_Workers.clear();
+            m_Completed.clear(); // No producers remain; discard old-model results.
+        }
+
+        void Enqueue(IORequest request)
+        {
+            {
+                std::lock_guard<std::mutex> lock(m_RequestMutex);
+                assert(!m_Stopping);
+                m_Requests.push_back(request);
+            }
+            m_WorkAvailable.notify_one();
+        }
+
+        bool TryPopCompleted(LoadedPage& result)
+        {
+            std::lock_guard<std::mutex> lock(m_CompletedMutex);
+            if (m_Completed.empty()) return false;
+            result = std::move(m_Completed.front());
+            m_Completed.pop_front();
+            return true;
+        }
+
+    private:
+        struct Worker
+        {
+            PageReader Reader;
+            std::thread Thread;
+        };
+
+        void WorkerLoop(Worker& worker)
+        {
+            for (;;)
+            {
+                IORequest request;
+                {
+                    std::unique_lock<std::mutex> lock(m_RequestMutex);
+                    m_WorkAvailable.wait(lock, [this] { return m_Stopping || !m_Requests.empty(); });
+                    if (m_Stopping) return;
+                    request = m_Requests.front();
+                    m_Requests.pop_front();
+                }
+                LoadedPage result{request.PageIdx, {}, false};
+                result.Success = worker.Reader.Read(request, result.Data);
+                if (!result.Success)
+                    Utility::Printf("GeometryStreaming: read/decode failed: page %u\n", request.PageIdx);
+                std::lock_guard<std::mutex> lock(m_CompletedMutex);
+                m_Completed.push_back(std::move(result));
+            }
+        }
+
+        std::vector<Worker> m_Workers;
+        std::deque<IORequest> m_Requests;
+        std::deque<LoadedPage> m_Completed;
+        std::mutex m_RequestMutex, m_CompletedMutex;
+        std::condition_variable m_WorkAvailable;
+        bool m_Stopping = true;
+    };
+
+    static PageIO s_IO;
+
+    static bool TrySchedulePage(const Model& model, uint32_t pageIndex)
+    {
+        // Reserve capacity by count, including completed pages awaiting upload.
+        if (m_PendingPageCount >= kMaxPendingPages || !EnsureFreeSlots(m_PendingPageCount + 1))
+            return false;
+        s_IO.Enqueue(MakePageReadRequest(model, pageIndex));
+        m_PageTableCPU[pageIndex].IsLoading = true;
+        ++m_PendingPageCount;
+        return true;
+    }
+
+    static void InstallPage(GraphicsContext& gfx, const Model& model,
+        uint32_t pageIndex, const std::vector<uint8_t>& data)
+    {
+        assert(!m_FreePool.empty());
+        const auto slot = m_FreePool.back();
+        m_FreePool.pop_back();
+        const uint32_t offset = slot.SlotIndex * Renderer::kPageSizeInBytes;
+        gfx.WriteBuffer(m_GeometryChunksGPU[slot.ChunkIndex], offset, data.data(), data.size());
+        for (uint32_t id : model.GetPageGroups(pageIndex))
+        {
+            m_GroupDataLocations[id] = {slot.ChunkIndex, offset + model.m_GroupMetadatas[id].OffsetInPage};
+            m_DirtyGroupIndices.push_back(id);
+        }
+        auto& residency = m_PageTableCPU[pageIndex];
+        residency.ChunkIndex = slot.ChunkIndex;
+        residency.SlotIndex = slot.SlotIndex;
+    }
+
 }
 
 uint32_t GeometryStreaming::GetUploadVersion()
@@ -236,14 +351,6 @@ uint32_t GeometryStreaming::GetUploadVersion()
 
 bool GeometryStreaming::Initialize(const Model& model)
 {
-	s_StreamingFilePath = model.m_StreamingFilePath;
-	s_StreamingFile.clear();
-	s_StreamingFile.open(s_StreamingFilePath, std::ios::in | std::ios::binary);
-	if (!s_StreamingFile)
-	{
-		Utility::Printf(L"GeometryStreaming: cannot open %ls\n", s_StreamingFilePath.c_str());
-		return false;
-	}
 
 	const auto& nodes = model.m_Nodes;
 	const uint32_t maxGroupSize = static_cast<uint32_t>(model.m_GroupMetadatas.size());
@@ -313,9 +420,9 @@ bool GeometryStreaming::Initialize(const Model& model)
 		SRV_GROUP_DATA_LOCATION_BUFFER,
 		m_GroupDataLocationGPU.GetSRV()
 	);
-	m_StopIOThread = false;
-	m_IOThread = std::thread(IOThreadFunc);
-	return true;
+    const uint32_t workerCount = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 16u);
+    Utility::Printf("GeometryStreaming: IO workers=%u\n", workerCount);
+    return s_IO.Start(model.m_StreamingFilePath, workerCount);
 }
 
 bool GeometryStreaming::PinRootPages(Model* model)
@@ -340,6 +447,9 @@ bool GeometryStreaming::PinRootPages(Model* model)
         return false;
     }
     if (!needed) return true;
+    assert(m_PendingPageCount == 0);
+    PageReader reader;
+    if (!reader.Open(model->m_StreamingFilePath)) return false;
 
     // Bounded upload batches. Never publish the address table until every root is valid.
     constexpr uint32_t batchSize = 16;
@@ -352,26 +462,14 @@ bool GeometryStreaming::PinRootPages(Model* model)
         {
             if (m_PageTableCPU[page].IsPinned) continue;
             const auto req = MakePageReadRequest(*model, page);
-            if (!ReadPageFromFile(req, bytes))
+            if (!reader.Read(req, bytes))
             {
-                Utility::Printf(L"Root initialization: read/decode failed: %ls page %u\n", s_StreamingFilePath.c_str(), page);
+                Utility::Printf(L"Root initialization: read/decode failed: %ls page %u\n", model->m_StreamingFilePath.c_str(), page);
                 success = false;
                 break;
             }
-            const auto slot = m_FreePool.back();
-            m_FreePool.pop_back();
-            const uint32_t offset = slot.SlotIndex * Renderer::kPageSizeInBytes;
-            gfx.WriteBuffer(m_GeometryChunksGPU[slot.ChunkIndex], offset, bytes.data(), bytes.size());
-            for (uint32_t id : model->GetPageGroups(page))
-            {
-                m_GroupDataLocations[id] = {slot.ChunkIndex, offset + model->m_GroupMetadatas[id].OffsetInPage};
-                m_DirtyGroupIndices.push_back(id);
-            }
-            auto& residency = m_PageTableCPU[page];
-            residency.ChunkIndex = slot.ChunkIndex;
-            residency.SlotIndex = slot.SlotIndex;
-            residency.IsPinned = true;
-            residency.IsLoading = false;
+            InstallPage(gfx, *model, page, bytes);
+            m_PageTableCPU[page].IsPinned = true;
         }
         for (auto& chunk : m_GeometryChunksGPU)
             gfx.TransitionResource(chunk, D3D12_RESOURCE_STATE_GENERIC_READ);
@@ -391,29 +489,8 @@ bool GeometryStreaming::PinRootPages(Model* model)
 
 void GeometryStreaming::Shutdown()
 {
-	{
-		std::lock_guard<std::mutex> lock(m_IOQueueMutex);
-		m_StopIOThread = true;
-        m_IOQueue.clear();
-	}
-	m_IOCV.notify_all();
-
-	if (m_IOThread.joinable())
-		m_IOThread.join();
-
-	// Initialization, root pinning and shutdown run on the main thread.
-	if (s_StreamingFile.is_open())
-		s_StreamingFile.close();
-	s_StreamingFile.clear();
-	s_StreamingFilePath.clear();
-
-	m_IOQueue.clear();
-	// The worker can finish an old page while Shutdown waits for it. Discard
-	// those completions before another model reuses page and group indices.
-	{
-		std::lock_guard<std::mutex> lock(m_CompletedPagesMutex);
-		m_CompletedPagesQueue.clear();
-	}
+    s_IO.Stop();
+    m_PendingPageCount = 0;
 	m_PagesToLoad.clear();
 	m_DirtyGroupIndices.clear();
 	m_GroupDataLocations.clear();
@@ -498,19 +575,13 @@ void GeometryStreaming::Update(uint32_t frameIndex)
 	if (canEvict && hasEvictionFeedback)
 		ImmediateEvict(frameIndex, m_GroupDataLocations.data());
 
-	for (auto it = m_PagesToLoad.begin(); it != m_PagesToLoad.end(); )
-	{
-		if (!EnsureFreeSlots(1))
-			break;
+    SyncMemoryAndAddressTable(frameIndex);
+    for (auto it = m_PagesToLoad.begin(); it != m_PagesToLoad.end(); )
+    {
+        if (!TrySchedulePage(*sourceModel, *it)) break;
+        it = m_PagesToLoad.erase(it);
+    }
 
-		uint32_t pageIdx = *it;
-		m_PageTableCPU[pageIdx].IsLoading = true;
-		EnqueueAsyncLoad(pageIdx);
-		it = m_PagesToLoad.erase(it);
-	}
-
-	SyncMemoryAndAddressTable(frameIndex);
-	
 	if (m_FenceValues[readbackBufferIndex] == 0)
 	{
 		// Read requests
@@ -532,64 +603,30 @@ void GeometryStreaming::Update(uint32_t frameIndex)
 
 void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 {
-	std::deque<LoadedPage> readyPages;
-	{
-		std::lock_guard<std::mutex> lock(m_CompletedPagesMutex);
-		readyPages.swap(m_CompletedPagesQueue);
-	}
-	if (readyPages.empty() && m_DirtyGroupIndices.empty()) return;
+    LoadedPage page;
+    bool hasPage = s_IO.TryPopCompleted(page);
+    if (!hasPage && m_DirtyGroupIndices.empty()) return;
 
-	Model* sourceModel = ModelInstanceManager::GetSourceModel();
-	Renderer::GroupDataLocation* locations = m_GroupDataLocations.data();
-	// Previous draws, slot overwrites and address-table publication all run
-	// on the graphics queue, before the next render. Copy helpers supply the
-	// COPY_DEST barriers; slots can be reused without a CPU fence wait.
-	GraphicsContext& gfx = GraphicsContext::Begin(L"Streaming Residency Update");
-
-	bool uploadedPages = false;
-	auto it = readyPages.begin();
-	for (; it != readyPages.end(); ++it)
-	{
-		auto& item = *it;
-		if (!item.Success)
-		{
-			m_PageTableCPU[item.PageIndex].IsLoading = false;
-			continue; // Leave nonresident; fresh GPU feedback can request it again.
-		}
-		if (m_FreePool.empty() && !AllocateChunk())
-			break;
-
-		PhysicalSlot slot = m_FreePool.back();
-		m_FreePool.pop_back();
-
-		uint32_t byteOffset = slot.SlotIndex * Renderer::kPageSizeInBytes;
-		gfx.WriteBuffer(m_GeometryChunksGPU[slot.ChunkIndex], byteOffset, item.Data.data(), item.Data.size());
-		uploadedPages = true;
-
-		// Update mappings for all groups in the page
-		for (uint32_t gIdx : sourceModel->GetPageGroups(item.PageIndex))
-		{
-			locations[gIdx].ChunkIndex = slot.ChunkIndex;
-			locations[gIdx].ByteOffset = byteOffset + sourceModel->m_GroupMetadatas[gIdx].OffsetInPage;
-			m_DirtyGroupIndices.push_back(gIdx);
-		}
-
-		m_PageTableCPU[item.PageIndex].ChunkIndex = slot.ChunkIndex;
-		m_PageTableCPU[item.PageIndex].SlotIndex = slot.SlotIndex;
-		m_PageTableCPU[item.PageIndex].LastUsedFrame = frameIndex;
-		m_PageTableCPU[item.PageIndex].IsLoading = false;
-	}
-
-	if (it != readyPages.end())
-	{
-		std::lock_guard<std::mutex> lock(m_CompletedPagesMutex);
-		// Push unprocessed ones back to the front of the queue
-		m_CompletedPagesQueue.insert(
-			m_CompletedPagesQueue.begin(),
-			std::make_move_iterator(it),
-			std::make_move_iterator(readyPages.end())
-		);
-	}
+    Model* sourceModel = ModelInstanceManager::GetSourceModel();
+    // Slot reuse and address publication precede the next draw on the graphics queue.
+    GraphicsContext& gfx = GraphicsContext::Begin(L"Streaming Residency Update");
+    uint32_t uploadedPages = 0;
+    while (hasPage)
+    {
+        assert(m_PendingPageCount > 0 && m_PageTableCPU[page.PageIndex].IsLoading);
+        if (page.Success)
+        {
+            InstallPage(gfx, *sourceModel, page.PageIndex, page.Data);
+            m_PageTableCPU[page.PageIndex].LastUsedFrame = frameIndex;
+            ++uploadedPages;
+        }
+        // Failed pages remain nonresident; fresh GPU feedback may request them again.
+        m_PageTableCPU[page.PageIndex].IsLoading = false;
+        --m_PendingPageCount;
+        if (uploadedPages == kMaxUploadPagesPerFrame) break;
+        hasPage = s_IO.TryPopCompleted(page);
+    }
+    assert(m_FreePool.size() >= m_PendingPageCount);
 
 	UploadDirtyAddressTable(gfx);
 
@@ -601,23 +638,6 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
 	m_DirtyGroupIndices.clear();
 	if (uploadedPages)
 		++s_UploadVersion;
-}
-
-void GeometryStreaming::EnqueueAsyncLoad(uint32_t pageIdx)
-{
-	Model* sourceModel = ModelInstanceManager::GetSourceModel();
-	auto req = MakePageReadRequest(*sourceModel, pageIdx);
-	{
-		std::lock_guard<std::mutex> lock(m_IOQueueMutex);
-		m_IOQueue.push_back(std::move(req));
-	}
-	m_IOCV.notify_one();
-}
-
-void GeometryStreaming::OnPageIOComplete(uint32_t pageIdx, std::vector<uint8_t>&& pageData, bool success)
-{
-	std::lock_guard<std::mutex> lock(m_CompletedPagesMutex);
-	m_CompletedPagesQueue.push_back({ pageIdx, std::move(pageData), success });
 }
 
 void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDataLocation* pLocationTable)

@@ -21,8 +21,4 @@ namespace GeometryStreaming
 	// Called when the main view records a fresh visibility cull.
 	void NotifyCullFrame();
 	uint32_t GetUploadVersion();
-	void EnqueueAsyncLoad(uint32_t pageIdx);
-	void OnPageIOComplete(uint32_t pageIdx, std::vector<uint8_t>&& pageData, bool success);
-	void SyncMemoryAndAddressTable(uint32_t frameIndex);
-	void ImmediateEvict(uint32_t currentFrame, Renderer::GroupDataLocation* pLocationTable);
 }
