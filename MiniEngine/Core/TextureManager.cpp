@@ -41,7 +41,7 @@ public:
     ManagedTexture( const wstring& FileName );
 
     void WaitForLoad(void) const;
-    void CreateFromMemory(ByteArray memory, eDefaultTexture fallback, bool sRGB);
+    void CreateFromMemory(ByteArray memory, eDefaultTexture fallback, bool sRGB, size_t maxSize);
 
 private:
 
@@ -71,7 +71,7 @@ namespace TextureManager
 
     mutex s_Mutex;
 
-    ManagedTexture* FindOrLoadTexture( const wstring& fileName, eDefaultTexture fallback, bool forceSRGB )
+    ManagedTexture* FindOrLoadTexture( const wstring& fileName, eDefaultTexture fallback, bool forceSRGB, size_t maxSize )
     {
         ManagedTexture* tex = nullptr;
 
@@ -81,6 +81,8 @@ namespace TextureManager
             wstring key = fileName;
             if (forceSRGB)
                 key += L"_sRGB";
+            if (maxSize != 0)
+                key += L"_maxSize_" + std::to_wstring(maxSize);
 
             // Search for an existing managed texture
             auto iter = s_TextureCache.find(key);
@@ -101,7 +103,7 @@ namespace TextureManager
         }
 
         Utility::ByteArray ba = Utility::ReadFileSync( s_RootPath + fileName );
-        tex->CreateFromMemory(ba, fallback, forceSRGB);
+        tex->CreateFromMemory(ba, fallback, forceSRGB, maxSize);
 
         // This was the first time it was requested, so indicate that the caller must read the file
         return tex;
@@ -124,7 +126,7 @@ ManagedTexture::ManagedTexture( const wstring& FileName )
     m_hCpuDescriptorHandle.ptr = D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN;
 }
 
-void ManagedTexture::CreateFromMemory(ByteArray ba, eDefaultTexture fallback, bool forceSRGB)
+void ManagedTexture::CreateFromMemory(ByteArray ba, eDefaultTexture fallback, bool forceSRGB, size_t maxSize)
 {
     if (ba->size() == 0)
     {
@@ -136,7 +138,7 @@ void ManagedTexture::CreateFromMemory(ByteArray ba, eDefaultTexture fallback, bo
         m_hCpuDescriptorHandle = AllocateDescriptor(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
         if ( SUCCEEDED( CreateDDSTextureFromMemory( g_Device, (const uint8_t*)ba->data(), ba->size(),
-            0, forceSRGB, m_pResource.GetAddressOf(), m_hCpuDescriptorHandle) ) )
+            maxSize, forceSRGB, m_pResource.GetAddressOf(), m_hCpuDescriptorHandle) ) )
         {
             m_UsageState = D3D12_RESOURCE_STATE_GENERIC_READ;
             m_IsValid = true;
@@ -239,12 +241,12 @@ D3D12_CPU_DESCRIPTOR_HANDLE TextureRef::GetSRV() const
 }
 
 
-TextureRef TextureManager::LoadDDSFromFile( const wstring& filePath, eDefaultTexture fallback, bool forceSRGB )
+TextureRef TextureManager::LoadDDSFromFile( const wstring& filePath, eDefaultTexture fallback, bool forceSRGB, size_t maxSize )
 {
-    return FindOrLoadTexture(filePath, fallback, forceSRGB);
+    return FindOrLoadTexture(filePath, fallback, forceSRGB, maxSize);
 }
 
-TextureRef TextureManager::LoadDDSFromFile( const string& filePath, eDefaultTexture fallback, bool forceSRGB )
+TextureRef TextureManager::LoadDDSFromFile( const string& filePath, eDefaultTexture fallback, bool forceSRGB, size_t maxSize )
 {
-    return LoadDDSFromFile(Utility::UTF8ToWideString(filePath), fallback, forceSRGB);
+    return LoadDDSFromFile(Utility::UTF8ToWideString(filePath), fallback, forceSRGB, maxSize);
 }

@@ -1185,7 +1185,8 @@ static HRESULT CreateTextureFromDDS( _In_ ID3D12Device* d3dDevice,
         if (SUCCEEDED(hr))
         {
             GpuResource DestTexture(*texture, D3D12_RESOURCE_STATE_COPY_DEST);
-            CommandContext::InitializeTexture(DestTexture, subresourceCount, initData.get());
+            const UINT uploadSubresourceCount = static_cast<UINT>(mipCount - skipMip) * arraySize;
+            CommandContext::InitializeTexture(DestTexture, uploadSubresourceCount, initData.get());
         }
     }
 

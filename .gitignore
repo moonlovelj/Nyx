@@ -19,3 +19,33 @@
 *.vcxproj.user
 *.opendb
 *.dds.nyxcache
+
+# Local experiments, packaging output, and scratch files.
+/.codex_build/
+/tmp/
+/dist/
+
+# External scene resources. Existing tracked assets remain tracked.
+/MiniEngine/SceneViewer/Assets/
+/MiniEngine/SceneViewer/Textures/
+*.ktx2
+*.dds
+*.DDS
+
+# Generated geometry caches.
+*.mini
+*.nvsngeo
+_nvsngeocache/
+
+# Compiler intermediates and captured diagnostics.
+*.pdb
+*.pch
+*.ipch
+*.ilk
+*.idb
+*.tlog
+*.lastbuildstate
+*.dmp
+*.ngfx-capture
+*.ngfx-gputrace
+*.perfetto-trace

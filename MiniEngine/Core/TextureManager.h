@@ -38,8 +38,9 @@ namespace TextureManager
 
     // Load a texture from a DDS file.  Never returns null references, but if a 
     // texture cannot be found, ref->IsValid() will return false.
-    TextureRef LoadDDSFromFile( const std::wstring& filePath, eDefaultTexture fallback = kMagenta2D, bool sRGB = false );
-    TextureRef LoadDDSFromFile( const std::string& filePath, eDefaultTexture fallback = kMagenta2D, bool sRGB = false );
+    // maxSize skips existing top mip levels; 0 preserves the original resolution.
+    TextureRef LoadDDSFromFile( const std::wstring& filePath, eDefaultTexture fallback = kMagenta2D, bool sRGB = false, size_t maxSize = 0 );
+    TextureRef LoadDDSFromFile( const std::string& filePath, eDefaultTexture fallback = kMagenta2D, bool sRGB = false, size_t maxSize = 0 );
 }
 
 // Forward declaration; private implementation

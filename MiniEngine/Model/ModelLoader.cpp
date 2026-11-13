@@ -22,6 +22,7 @@
 #include "TextureManager.h"
 #include "TextureConvert.h"
 #include "GraphicsCommon.h"
+#include "Util/CommandLineArg.h"
 #include "lz4.h"
 
 #include <fstream>
@@ -50,6 +51,14 @@ std::vector<uint32_t> LoadMaterials(Model& model,
     //static_assert((_alignof(MaterialConstants) & 255) == 0, "CBVs need 256 byte alignment");
 
     // Load textures
+    uint32_t maxTextureSize = 0;
+    CommandLineArgs::GetInteger(L"textureMaxSize", maxTextureSize);
+    if (maxTextureSize > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION)
+    {
+        Utility::Printf("Invalid textureMaxSize; using %d.\n", D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION);
+        maxTextureSize = D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION;
+    }
+    Utility::Printf("Model texture maximum dimension: %u (0 = original).\n", maxTextureSize);
     const uint32_t numTextures = (uint32_t)textureNames.size();
     model.textures.resize(numTextures);
     for (size_t ti = 0; ti < numTextures; ++ti)
@@ -63,7 +72,7 @@ std::vector<uint32_t> LoadMaterials(Model& model,
         CompileTextureOnDemand(originalFile, conversionFlags);
 
         std::wstring ddsFile = Utility::RemoveExtension(originalFile) + L".dds";
-        model.textures[ti] = TextureManager::LoadDDSFromFile(ddsFile);
+        model.textures[ti] = TextureManager::LoadDDSFromFile(ddsFile, kMagenta2D, false, maxTextureSize);
     }
 
     // Generate descriptor tables and record offsets for each material
