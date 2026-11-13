@@ -1,5 +1,6 @@
 #include "GeometryPageLayout.h"
 #include "GeometryStreaming.h"
+#include "GeometryStreamingShared.h"
 #include "../Core/GpuBuffer.h"
 #include "../Core/ReadbackBuffer.h"
 #include "../Core/GraphicsCore.h"
@@ -48,13 +49,24 @@ namespace GeometryStreaming
 	};
 	std::vector<PhysicalSlot> m_FreePool;
 
-	std::set<uint32_t> m_PagesToLoad;
+    std::deque<uint32_t> m_PagesToLoad;
+    // Main bits describe the latest main cull; shadow bits persist until installation.
+    std::vector<uint8_t> m_GroupRequests;
+    std::vector<uint8_t> m_PagePriorities;
+
+    static uint32_t RequestWordCount(uint32_t groupCount)
+    {
+        return std::max(1u, (groupCount + GEOMETRY_REQUEST_GROUPS_PER_WORD - 1u) /
+            GEOMETRY_REQUEST_GROUPS_PER_WORD);
+    }
 
 	ByteAddressBuffer m_GeometryStreamingRequestMaskGPU;
 	ReadbackBuffer m_ReadbackRequestMaskBuffer[kNumReadbackBuffers];
 	uint64_t m_FenceValues[kNumReadbackBuffers] = {};
 	bool m_HadFreshCull = false;
 	bool m_ReadbackAllowsEviction[kNumReadbackBuffers] = {};
+    bool m_ReadbackHasMainCull[kNumReadbackBuffers] = {};
+    bool m_RequestMaskHasMainCull = false;
 
 	struct LoadedPage {
 		uint32_t PageIndex;
@@ -275,6 +287,15 @@ namespace GeometryStreaming
             return true;
         }
 
+        // The same lock guards worker dequeue: returned requests have not started IO.
+        std::deque<IORequest> TakeQueued()
+        {
+            std::lock_guard<std::mutex> lock(m_RequestMutex);
+            std::deque<IORequest> queued;
+            queued.swap(m_Requests);
+            return queued;
+        }
+
     private:
         struct Worker
         {
@@ -313,6 +334,56 @@ namespace GeometryStreaming
 
     static PageIO s_IO;
 
+    static void ApplyRequestFeedback(const Model& model, const uint32_t* words,
+        bool hasMainCull, uint32_t frameIndex)
+    {
+        if (hasMainCull)
+            for (auto& mask : m_GroupRequests) mask &= GEOMETRY_REQUEST_SHADOW;
+
+        for (uint32_t wordIndex = 0; wordIndex < RequestWordCount(m_GroupCount); ++wordIndex)
+        {
+            uint32_t word = words[wordIndex];
+            unsigned long bit;
+            while (_BitScanForward(&bit, word))
+            {
+                const uint32_t shift = bit & ~1u;
+                const uint32_t group = wordIndex * GEOMETRY_REQUEST_GROUPS_PER_WORD + shift / 2u;
+                const uint8_t mask = uint8_t((word >> shift) & GEOMETRY_REQUEST_MASK);
+                word &= ~(GEOMETRY_REQUEST_MASK << shift);
+                if (group >= m_GroupCount) continue; // Padding in the last word.
+                const uint32_t page = model.m_GroupMetadatas[group].PageIndex;
+                m_PageTableCPU[page].LastUsedFrame = frameIndex;
+                m_GroupRequests[group] |= mask;
+                if (m_PageTableCPU[page].ChunkIndex != INVALID_CHUNK_INDEX)
+                    m_GroupRequests[group] &= GEOMETRY_REQUEST_MAIN;
+            }
+        }
+    }
+
+    static void RebuildPendingPages(const Model& model)
+    {
+        for (const auto& request : s_IO.TakeQueued())
+        {
+            m_PageTableCPU[request.PageIdx].IsLoading = false;
+            --m_PendingPageCount;
+        }
+        std::fill(m_PagePriorities.begin(), m_PagePriorities.end(), uint8_t(0));
+        for (uint32_t group = 0; group < m_GroupCount; ++group)
+        {
+            const uint32_t page = model.m_GroupMetadatas[group].PageIndex;
+            m_PagePriorities[page] = std::max(m_PagePriorities[page], m_GroupRequests[group]);
+        }
+        m_PagesToLoad.clear();
+        for (uint32_t page = 0; page < m_PageTableCPU.size(); ++page)
+            if (m_PagePriorities[page] && !m_PageTableCPU[page].IsLoading &&
+                m_PageTableCPU[page].ChunkIndex == INVALID_CHUNK_INDEX)
+                m_PagesToLoad.push_back(page);
+        std::sort(m_PagesToLoad.begin(), m_PagesToLoad.end(), [](uint32_t a, uint32_t b) {
+            return m_PagePriorities[a] != m_PagePriorities[b]
+                ? m_PagePriorities[a] > m_PagePriorities[b] : a < b;
+        });
+    }
+
     static bool TrySchedulePage(const Model& model, uint32_t pageIndex)
     {
         // Reserve capacity by count, including completed pages awaiting upload.
@@ -334,6 +405,7 @@ namespace GeometryStreaming
         gfx.WriteBuffer(m_GeometryChunksGPU[slot.ChunkIndex], offset, data.data(), data.size());
         for (uint32_t id : model.GetPageGroups(pageIndex))
         {
+            m_GroupRequests[id] &= GEOMETRY_REQUEST_MAIN;
             m_GroupDataLocations[id] = {slot.ChunkIndex, offset + model.m_GroupMetadatas[id].OffsetInPage};
             m_DirtyGroupIndices.push_back(id);
         }
@@ -360,15 +432,20 @@ bool GeometryStreaming::Initialize(const Model& model)
 	std::fill_n(m_ReadbackAllowsEviction, kNumReadbackBuffers, false);
 
 	m_PageTableCPU.assign(numPages, PageResidency{});
+    m_GroupRequests.assign(m_GroupCount, 0);
+    m_RequestMaskHasMainCull = false;
+    m_PagePriorities.assign(numPages, 0);
+    m_PagesToLoad.clear();
+    std::fill_n(m_ReadbackHasMainCull, kNumReadbackBuffers, false);
 
-    const uint32_t requestWordCount = (m_GroupCount + 31) / 32;
+    const uint32_t requestWordCount = RequestWordCount(m_GroupCount);
     std::vector<uint32_t> initialRequestMask(requestWordCount, 0u);
 	m_GeometryStreamingRequestMaskGPU.Create(L"Geometry Streaming Request Mask", requestWordCount, sizeof(uint32_t), initialRequestMask.data());
 	Renderer::SetBindlessResourceDescriptor(UAV_GEOMETRY_STREAMING_REQUEST_MASK_BUFFER, m_GeometryStreamingRequestMaskGPU.GetUAV());
 
 	for (int i = 0; i < kNumReadbackBuffers; ++i)
 	{
-		m_ReadbackRequestMaskBuffer[i].Create(L"Readback Request Mask Buffer", (m_GroupCount + 31) / 32, sizeof(uint32_t));
+		m_ReadbackRequestMaskBuffer[i].Create(L"Readback Request Mask Buffer", requestWordCount, sizeof(uint32_t));
 		m_FenceValues[i] = 0;
 	}
 
@@ -492,6 +569,10 @@ void GeometryStreaming::Shutdown()
     s_IO.Stop();
     m_PendingPageCount = 0;
 	m_PagesToLoad.clear();
+    m_GroupRequests.clear();
+    m_RequestMaskHasMainCull = false;
+    m_PagePriorities.clear();
+    std::fill_n(m_ReadbackHasMainCull, kNumReadbackBuffers, false);
 	m_DirtyGroupIndices.clear();
 	m_GroupDataLocations.clear();
 	m_PageTableCPU.clear();
@@ -531,42 +612,31 @@ void GeometryStreaming::Update(uint32_t frameIndex)
 
 	// A frozen/absent main-view cull cannot refresh the pages referenced by
 	// its cached visible list. On resume, wait for feedback from a new cull.
-	const bool canEvict = !Renderer::IsCullFrozen() && m_HadFreshCull;
+    const bool hadMainCull = m_HadFreshCull;
+    m_RequestMaskHasMainCull |= hadMainCull;
+	const bool canEvict = !Renderer::IsCullFrozen() && hadMainCull;
 	m_HadFreshCull = false;
 	if (!canEvict)
 		std::fill_n(m_ReadbackAllowsEviction, kNumReadbackBuffers, false);
 	bool hasEvictionFeedback = false;
 
 	const uint32_t readbackBufferIndex = frameIndex % kNumReadbackBuffers;
-	for (uint32_t slot = 0; slot < kNumReadbackBuffers; ++slot)
+    // Ring indices are not chronological when multiple readbacks complete together.
+    std::vector<uint32_t> readySlots;
+    for (uint32_t slot = 0; slot < kNumReadbackBuffers; ++slot)
+        if (m_FenceValues[slot] && Graphics::g_CommandManager.IsFenceComplete(m_FenceValues[slot]))
+            readySlots.push_back(slot);
+    std::sort(readySlots.begin(), readySlots.end(), [](uint32_t a, uint32_t b) {
+        return m_FenceValues[a] < m_FenceValues[b];
+    });
+	for (uint32_t slot : readySlots)
 	{
-		const uint64_t currentFenceValue = m_FenceValues[slot];
-		if (currentFenceValue == 0 || !Graphics::g_CommandManager.IsFenceComplete(currentFenceValue))
-			continue;
 		m_FenceValues[slot] = 0;
 		hasEvictionFeedback |= m_ReadbackAllowsEviction[slot];
 		m_ReadbackAllowsEviction[slot] = false;
 
 		uint32_t* requestedGroupsMask = (uint32_t*)m_ReadbackRequestMaskBuffer[slot].Map();
-		const uint32_t numRequests = (m_GroupCount + 31) / 32;
-		for (uint32_t i = 0; i < numRequests; ++i)
-		{
-			uint32_t mask = requestedGroupsMask[i];
-			unsigned long bitIndex;
-			while (_BitScanForward(&bitIndex, mask))
-			{
-				uint32_t groupIndex = (i * 32) + bitIndex;
-				mask &= ~(1u << bitIndex);
-				if (groupIndex >= sourceModel->m_GroupMetadatas.size()) continue;
-				const auto& groupMeta = sourceModel->m_GroupMetadatas[groupIndex];
-				const uint32_t pageIdx = groupMeta.PageIndex;
-				m_PageTableCPU[pageIdx].LastUsedFrame = frameIndex;
-				if (m_PageTableCPU[pageIdx].ChunkIndex == INVALID_CHUNK_INDEX && !m_PageTableCPU[pageIdx].IsLoading)
-				{
-					m_PagesToLoad.insert(pageIdx);
-				}
-			}
-		}
+        ApplyRequestFeedback(*sourceModel, requestedGroupsMask, m_ReadbackHasMainCull[slot], frameIndex);
 
 		m_ReadbackRequestMaskBuffer[slot].Unmap();
 	}
@@ -576,10 +646,11 @@ void GeometryStreaming::Update(uint32_t frameIndex)
 		ImmediateEvict(frameIndex, m_GroupDataLocations.data());
 
     SyncMemoryAndAddressTable(frameIndex);
-    for (auto it = m_PagesToLoad.begin(); it != m_PagesToLoad.end(); )
+    if (!readySlots.empty()) RebuildPendingPages(*sourceModel);
+    while (!m_PagesToLoad.empty())
     {
-        if (!TrySchedulePage(*sourceModel, *it)) break;
-        it = m_PagesToLoad.erase(it);
+        if (!TrySchedulePage(*sourceModel, m_PagesToLoad.front())) break;
+        m_PagesToLoad.pop_front();
     }
 
 	if (m_FenceValues[readbackBufferIndex] == 0)
@@ -591,13 +662,15 @@ void GeometryStreaming::Update(uint32_t frameIndex)
 		//gfxContext.TransitionResource(m_GPURequestBuffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
 		gfxContext.CopyBufferRegion(
 			m_ReadbackRequestMaskBuffer[readbackBufferIndex], 0,
-			m_GeometryStreamingRequestMaskGPU, 0, (m_GroupCount + 31) / 32 * 4);
+			m_GeometryStreamingRequestMaskGPU, 0, RequestWordCount(m_GroupCount) * sizeof(uint32_t));
 
 		gfxContext.TransitionResource(m_GeometryStreamingRequestMaskGPU, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 		gfxContext.ClearUAV(m_GeometryStreamingRequestMaskGPU,0);
 
 		m_FenceValues[readbackBufferIndex] = gfxContext.Finish();
 		m_ReadbackAllowsEviction[readbackBufferIndex] = canEvict;
+        m_ReadbackHasMainCull[readbackBufferIndex] = m_RequestMaskHasMainCull;
+        m_RequestMaskHasMainCull = false;
 	}
 }
 

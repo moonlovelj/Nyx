@@ -167,6 +167,9 @@
     <ClInclude Include="GeometryStreaming.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="GeometryStreamingShared.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
     <ClInclude Include="GeometryPageLayout.h">
       <Filter>Source Files</Filter>
     </ClInclude>

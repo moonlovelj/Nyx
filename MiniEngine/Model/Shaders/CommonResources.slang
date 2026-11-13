@@ -13,6 +13,7 @@
 #include "BindlessIndices.h.slang"
 #include "../StructsIO.h"
 #include "../MeshletStructs.h"
+#include "../GeometryStreamingShared.h"
 
 #define PSO_HAS_POSITION      0x0001
 #define PSO_HAS_NORMAL        0x0002
@@ -339,6 +340,15 @@ RWTexture2D<uint64_t> GetVBufferUAV()
 RWByteAddressBuffer GetGeometryStreamingRequestMaskBufferUAV()
 {
     return GetBindlessResourceHandle<RWByteAddressBuffer>(UAV_GEOMETRY_STREAMING_REQUEST_MASK_BUFFER);
+}
+
+void RequestGeometryGroup(uint groupID, uint source)
+{
+    uint address = (groupID / GEOMETRY_REQUEST_GROUPS_PER_WORD) * sizeof(uint);
+    uint shift = (groupID % GEOMETRY_REQUEST_GROUPS_PER_WORD) * 2u;
+    uint original;
+    RWByteAddressBuffer requests = GetGeometryStreamingRequestMaskBufferUAV();
+    requests.InterlockedOr(address, source << shift, original);
 }
 
 InstanceConstant LoadInstanceConstant(ByteAddressBuffer instanceConstantBuffer, uint index)

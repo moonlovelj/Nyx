@@ -108,6 +108,7 @@
     <ClInclude Include="Animation.h" />
     <ClInclude Include="ConstantBuffers.h" />
     <ClInclude Include="GeometryStreaming.h" />
+    <ClInclude Include="GeometryStreamingShared.h" />
     <ClInclude Include="GeometryPageLayout.h" />
     <ClInclude Include="glTF.h" />
     <ClInclude Include="CommandBucketer.h" />

@@ -374,11 +374,7 @@ void ProcessNodeBatch(uint batchSize, uint groupIndex, uint passIndex)
     {
         const uint groupID = childNode.GetGroupIndex();
 
-        const uint requestMaskAddress = (groupID >> 5) << 2;
-        const uint requestBitMask = 1u << (groupID & 31);
-        uint originalTemp;
-        RWByteAddressBuffer requestMaskUAV = GetGeometryStreamingRequestMaskBufferUAV();
-        requestMaskUAV.InterlockedOr(requestMaskAddress, requestBitMask, originalTemp);
+        RequestGeometryGroup(groupID, GEOMETRY_REQUEST_SHADOW);
 
         StructuredBuffer<GroupDataLocation> groupDataLocationSRV = GetGroupDataLocationBufferSRV();
         GroupDataLocation groupDataLocation = groupDataLocationSRV[groupID];
