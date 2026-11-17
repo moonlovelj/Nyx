@@ -25,6 +25,9 @@ class GpuBuffer : public GpuResource
 public:
     virtual ~GpuBuffer() { Destroy(); }
 
+    HRESULT TryCreate(const std::wstring& name, uint32_t NumElements, uint32_t ElementSize,
+        const void* initialData = nullptr);
+
     // Create a buffer.  If initial data is provided, it will be copied into the buffer using the default command context.
     void Create( const std::wstring& name, uint32_t NumElements, uint32_t ElementSize,
         const void* initialData = nullptr );

@@ -187,6 +187,7 @@ namespace Renderer
     GraphicsPSO m_DefaultPSO(L"Renderer: Default PSO"); // Not finalized.  Used as a template.
 
     DescriptorHandle m_BindlessResources;
+    static std::vector<uint32_t> s_FreeGeometryDescriptors;
 
 	ComputePSO m_MeshBufferGenPSO(L"Renderer: Mesh Buffer Gen PSO");
     std::shared_ptr<Program> m_MeshBufferGenProgram;
@@ -613,6 +614,7 @@ void Renderer::Shutdown(void)
     s_RadianceCubeMap = nullptr;
     s_IrradianceCubeMap = nullptr;
     TextureManager::Shutdown();
+    s_FreeGeometryDescriptors.clear();
     s_TextureHeap.Destroy();
     s_SamplerHeap.Destroy();
 
@@ -910,7 +912,7 @@ void Renderer::RenderVisibility(
 
     for (auto& chunksGPU : GeometryStreaming::m_GeometryChunksGPU)
     {
-        gfxContext.TransitionResource(chunksGPU, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+        if (chunksGPU.GetResource()) gfxContext.TransitionResource(chunksGPU, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
     }
 
     gfxContext.TransitionResource(GeometryStreaming::m_GroupDataLocationGPU, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
@@ -1156,7 +1158,7 @@ void Renderer::RenderSceneDepth(
 
     for (auto& chunksGPU : GeometryStreaming::m_GeometryChunksGPU)
     {
-        gfxContext.TransitionResource(chunksGPU, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+        if (chunksGPU.GetResource()) gfxContext.TransitionResource(chunksGPU, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
     }
 
     gfxContext.TransitionResource(GeometryStreaming::m_GroupDataLocationGPU, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
@@ -1252,6 +1254,23 @@ void Renderer::RenderSceneDepth(
         hzbResources->Current->GenerateHZB(gfxContext, depthTarget);
     }
 
+}
+
+uint32_t Renderer::AllocateGeometryDescriptor()
+{
+    if (!s_FreeGeometryDescriptors.empty())
+    {
+        const uint32_t index = s_FreeGeometryDescriptors.back();
+        s_FreeGeometryDescriptors.pop_back();
+        return index;
+    }
+    if (!s_TextureHeap.HasAvailableSpace(1)) return INVALID_CHUNK_INDEX;
+    return s_TextureHeap.GetOffsetOfHandle(s_TextureHeap.Alloc());
+}
+
+void Renderer::FreeGeometryDescriptor(uint32_t index)
+{
+    s_FreeGeometryDescriptors.push_back(index);
 }
 
 uint32_t Renderer::GetBindlessResourcesBaseOffset()

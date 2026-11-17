@@ -32,6 +32,7 @@
 #include "GraphRenderer.h"
 #include "TemporalEffects.h"
 #include "Display.h"
+#include <dxgi1_4.h>
 
 #pragma comment(lib, "d3d12.lib") 
 
@@ -51,6 +52,20 @@ namespace Graphics
     bool g_bTypedUAVLoadSupport_R16G16B16A16_FLOAT = false;
 
     ID3D12Device2* g_Device = nullptr;
+    static ComPtr<IDXGIAdapter3> s_MemoryAdapter;
+    static uint64_t s_DedicatedVideoMemory = 0;
+
+    bool QueryVideoMemoryInfo(VideoMemoryInfo& info)
+    {
+        info = {};
+        DXGI_QUERY_VIDEO_MEMORY_INFO memory{};
+        if (!s_MemoryAdapter || FAILED(s_MemoryAdapter->QueryVideoMemoryInfo(
+            0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &memory)))
+            return false;
+        info = {s_DedicatedVideoMemory, memory.Budget, memory.CurrentUsage};
+        return true;
+    }
+
     CommandListManager g_CommandManager;
     ContextManager g_ContextManager;
 
@@ -322,6 +337,13 @@ void Graphics::Initialize(bool RequireDXRSupport)
     }
 #endif	
 
+    // Retain the adapter selected for the device, including the WARP fallback.
+    if (FAILED(pAdapter.As(&s_MemoryAdapter)))
+        Utility::Print("Video memory budget queries are unavailable.\n");
+    DXGI_ADAPTER_DESC1 adapterDesc{};
+    pAdapter->GetDesc1(&adapterDesc);
+    s_DedicatedVideoMemory = adapterDesc.DedicatedVideoMemory;
+
 #if _DEBUG
     ID3D12InfoQueue* pInfoQueue = nullptr;
     if (SUCCEEDED(g_Device->QueryInterface(MY_IID_PPV_ARGS(&pInfoQueue))))
@@ -448,6 +470,8 @@ void Graphics::Shutdown( void )
     }
 #endif
 
+    s_MemoryAdapter.Reset();
+    s_DedicatedVideoMemory = 0;
     if (g_Device != nullptr)
     {
         g_Device->Release();

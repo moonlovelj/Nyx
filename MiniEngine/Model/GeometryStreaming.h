@@ -8,6 +8,7 @@ namespace GeometryStreaming
 {
 	extern StructuredBuffer m_HierarchyNodesGPU;
     extern StructuredBuffer m_GroupNodeIndicesGPU;
+	// Stable CPU chunk slots; released/retiring entries have no resource.
 	extern std::vector<ByteAddressBuffer> m_GeometryChunksGPU;
 	extern StructuredBuffer m_GroupDataLocationGPU;
 	extern std::vector<Renderer::GroupDataLocation> m_GroupDataLocations;

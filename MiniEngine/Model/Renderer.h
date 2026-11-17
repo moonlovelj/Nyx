@@ -370,6 +370,8 @@ namespace Renderer
     float GetPixelErrorThreshold();
 
     uint32_t GetBindlessResourcesBaseOffset();
+    uint32_t AllocateGeometryDescriptor();
+    void FreeGeometryDescriptor(uint32_t index); // Caller has waited for GPU use.
 	void SetBindlessResourceDescriptor(uint32_t bindlessIndex, const D3D12_CPU_DESCRIPTOR_HANDLE& handle);
 
     void ExportDepth(

@@ -2310,7 +2310,7 @@ namespace Renderer::VirtualShadowMap
         {
             ComputeContext& context = gfxContext.GetComputeContext();
             for (GpuBuffer& geometryChunk : GeometryStreaming::m_GeometryChunksGPU)
-                context.TransitionResource(geometryChunk, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+                if (geometryChunk.GetResource()) context.TransitionResource(geometryChunk, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
 
             context.TransitionResource(
                 GeometryStreaming::m_GroupDataLocationGPU,

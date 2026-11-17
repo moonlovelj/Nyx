@@ -229,7 +229,7 @@ StructuredBuffer<HierarchyNode> GetHierarchyNodesBufferSRV()
 
 ByteAddressBuffer GetGeometryChunksBufferSRV(uint chunkOffset)
 {
-    return GetBindlessResourceHandle<ByteAddressBuffer>(SRV_GEOMETRY_CHUNK_DATA_BUFFER + chunkOffset);
+    return GetResourceDescriptorHandle<ByteAddressBuffer>(chunkOffset);
 }
 
 StructuredBuffer<GroupDataLocation> GetGroupDataLocationBufferSRV()

@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include "PipelineState.h"
 #include "DescriptorHeap.h"
 #include "RootSignature.h"
@@ -31,6 +32,15 @@ namespace Graphics
 
     void Initialize(bool RequireDXRSupport=false);
     void Shutdown(void);
+
+    struct VideoMemoryInfo
+    {
+        uint64_t DedicatedVideoMemory = 0; // Adapter capacity; may be zero on UMA.
+        uint64_t Budget = 0;               // OS budget for this process, local segment.
+        uint64_t CurrentUsage = 0;         // Process usage in the same segment.
+    };
+    // All values are bytes. Returns false and clears info when unavailable.
+    bool QueryVideoMemoryInfo(VideoMemoryInfo& info);
 
     bool IsDeviceNvidia(ID3D12Device* pDevice);
     bool IsDeviceAMD(ID3D12Device* pDevice);

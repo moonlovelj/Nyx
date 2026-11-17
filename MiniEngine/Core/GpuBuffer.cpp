@@ -23,6 +23,11 @@ using namespace Graphics;
 
 void GpuBuffer::Create( const std::wstring& name, uint32_t NumElements, uint32_t ElementSize, const void* initialData )
 {
+    ASSERT_SUCCEEDED(TryCreate(name, NumElements, ElementSize, initialData));
+}
+
+HRESULT GpuBuffer::TryCreate(const std::wstring& name, uint32_t NumElements, uint32_t ElementSize, const void* initialData)
+{
     Destroy();
 
     m_ElementCount = NumElements;
@@ -40,8 +45,9 @@ void GpuBuffer::Create( const std::wstring& name, uint32_t NumElements, uint32_t
     HeapProps.CreationNodeMask = 1;
     HeapProps.VisibleNodeMask = 1;
 
-    ASSERT_SUCCEEDED( g_Device->CreateCommittedResource( &HeapProps, D3D12_HEAP_FLAG_NONE,
-        &ResourceDesc, m_UsageState, nullptr, MY_IID_PPV_ARGS(&m_pResource)) );
+    const HRESULT result = g_Device->CreateCommittedResource(&HeapProps, D3D12_HEAP_FLAG_NONE,
+        &ResourceDesc, m_UsageState, nullptr, MY_IID_PPV_ARGS(&m_pResource));
+    if (FAILED(result)) return result;
 
     m_GpuVirtualAddress = m_pResource->GetGPUVirtualAddress();
 
@@ -55,6 +61,7 @@ void GpuBuffer::Create( const std::wstring& name, uint32_t NumElements, uint32_t
 #endif
 
     CreateDerivedViews();
+    return S_OK;
 }
 
 void GpuBuffer::Create( const std::wstring& name, uint32_t NumElements, uint32_t ElementSize, const UploadBuffer& srcData, uint32_t srcOffset )

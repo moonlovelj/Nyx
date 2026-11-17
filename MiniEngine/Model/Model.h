@@ -36,7 +36,7 @@
 namespace Renderer
 {
 	inline constexpr uint32_t kPageSizeInBytes = 256u * 1024u;             // 256 KB
-	inline constexpr uint32_t kChunkSizeInBytes = kPageSizeInBytes * 1024u; // 256 MB
+	inline constexpr uint32_t kChunkSizeInBytes = kPageSizeInBytes * 512u; // 128 MB
 
 	enum GeometryCompressionType : uint32_t
 	{
