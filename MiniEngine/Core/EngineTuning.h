@@ -66,6 +66,19 @@ private:
     ActionCallback m_ActionCallback;
 };
 
+// Live diagnostics displayed in the tuning UI, excluded from saved settings.
+class ReadOnlyVar : public EngineVar
+{
+public:
+    ReadOnlyVar(const std::string& path, std::function<std::string()> getValue);
+    void DisplayValue(TextContext& text) const override;
+    std::string ToString() const override { return m_GetValue(); }
+    void SetValue(FILE*, const std::string&) override {}
+
+private:
+    std::function<std::string()> m_GetValue;
+};
+
 class BoolVar : public EngineVar
 {
 public:

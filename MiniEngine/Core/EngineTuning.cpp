@@ -162,6 +162,11 @@ namespace
         if (Reconstruction::IsInitialized() &&
             (&var == &TemporalEffects::EnableTAA || &var == &FXAA::Enable))
             return;
+        if (auto* readOnlyVar = dynamic_cast<ReadOnlyVar*>(&var))
+        {
+            ImGui::Text("%s: %s", name.c_str(), readOnlyVar->ToString().c_str());
+            return;
+        }
         if (auto* boolVar = dynamic_cast<BoolVar*>(&var))
         {
             bool value = *boolVar;
@@ -295,7 +300,8 @@ void VariableGroup::SaveToFile( FILE* file, int fileMargin )
             fprintf(file, "%*c + %s ...\r\n", fileMargin, ' ', buffer);
             subGroup->SaveToFile(file, fileMargin + 5);
         }
-        else if (dynamic_cast<CallbackTrigger*>(iter->second) == nullptr)
+        else if (dynamic_cast<CallbackTrigger*>(iter->second) == nullptr &&
+            dynamic_cast<ReadOnlyVar*>(iter->second) == nullptr)
         {
             fprintf(file, "%*c %s:  %s\r\n", fileMargin, ' ', buffer, iter->second->ToString().c_str());
         }		
@@ -420,6 +426,16 @@ EngineVar* EngineVar::PrevVar( void )
             prev = isGroup->LastVariable();
     }
     return prev != nullptr ? prev : this;
+}
+
+ReadOnlyVar::ReadOnlyVar(const std::string& path, std::function<std::string()> getValue)
+    : EngineVar(path), m_GetValue(std::move(getValue))
+{
+}
+
+void ReadOnlyVar::DisplayValue(TextContext& text) const
+{
+    text.DrawString(ToString());
 }
 
 BoolVar::BoolVar( const std::string& path, bool val, ActionCallback pfnCallback )

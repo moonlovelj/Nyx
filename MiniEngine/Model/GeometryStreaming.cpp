@@ -4,6 +4,7 @@
 #include "../Core/GpuBuffer.h"
 #include "../Core/ReadbackBuffer.h"
 #include "../Core/GraphicsCore.h"
+#include "../Core/EngineTuning.h"
 #include "Model.h"
 #include "Renderer.h"
 #include "ModelInstanceManager.h"
@@ -28,38 +29,15 @@ namespace GeometryStreaming
     {
         uint32_t Descriptor = INVALID_CHUNK_INDEX;
         std::vector<uint32_t> FreeSlots;
-        bool Draining = false;
+        uint64_t LastUsedFrame = 0; // Most recent use among the current resident pages.
         Clock::time_point EmptySince{};
         uint64_t Fence = 0;
         Microsoft::WRL::ComPtr<ID3D12Resource> RetiredResource;
     };
     static std::vector<ChunkLifetime> s_ChunkLifetimes;
-    static bool s_MemoryPressure = false;
     static uint64_t s_AllocatedBytes = 0;
-    static size_t s_FreeSlotCount = 0; // Allocatable slots only; excludes draining chunks.
-    // Nonzero records failed growth until allocation succeeds; expiry only permits another attempt.
-    static Clock::time_point s_RetryAllocationAfter{};
-
-    static uint64_t AllocationHeadroom()
-    {
-        Graphics::VideoMemoryInfo info{};
-        return Graphics::QueryVideoMemoryInfo(info) && info.Budget > info.CurrentUsage
-            ? info.Budget - info.CurrentUsage : 0;
-    }
-
-    // Raw process budget: enter below 10% headroom, leave at 15%.
-    static uint64_t UpdateMemoryBudget(const Graphics::VideoMemoryInfo& info)
-    {
-        if (!info.Budget) return s_AllocatedBytes; // No reliable sample; do not start new budget eviction.
-        const uint64_t stopUsage = info.Budget - info.Budget * 15 / 100;
-        if (info.CurrentUsage <= stopUsage)
-            s_MemoryPressure = false;
-        else if (info.CurrentUsage > info.Budget - info.Budget / 10)
-            s_MemoryPressure = true;
-        if (!s_MemoryPressure) return s_AllocatedBytes;
-        const uint64_t reclaimBytes = info.CurrentUsage - stopUsage;
-        return s_AllocatedBytes > reclaimBytes ? s_AllocatedBytes - reclaimBytes : 0;
-    }
+    static size_t s_FreeSlotCount = 0;
+    static HRESULT s_LastAllocationResult = S_OK; // Deduplicate errors without delaying retries.
 
 	constexpr uint32_t kNumReadbackBuffers = 3;
 	uint32_t m_SlotsPerChunk = 0;
@@ -79,6 +57,16 @@ namespace GeometryStreaming
 		bool IsLoading = false;
 	};
 	std::vector<PageResidency> m_PageTableCPU;
+
+    static ReadOnlyVar s_StreamingInfo("Renderer/Geometry Streaming", [] {
+        uint64_t residentPages = 0;
+        for (size_t index = 0; index < s_ChunkLifetimes.size(); ++index)
+            if (m_GeometryChunksGPU[index].GetResource())
+                residentPages += m_SlotsPerChunk - s_ChunkLifetimes[index].FreeSlots.size();
+        // Allocated bytes include empty chunks and resources awaiting their retirement fence.
+        return std::to_string(residentPages) + " pages | " +
+            std::to_string(s_AllocatedBytes >> 20) + " MiB (chunks)";
+    });
 
     std::deque<uint32_t> m_PagesToLoad;
     // Main bits describe the latest main cull; shadow bits persist until installation.
@@ -109,9 +97,7 @@ namespace GeometryStreaming
 	uint32_t m_PendingPageCount = 0;
 
 	static void SyncMemoryAndAddressTable(uint32_t frameIndex);
-	static void ImmediateEvict(uint32_t currentFrame, Renderer::GroupDataLocation* locations,
-        size_t requiredFreeSlots = SIZE_MAX, uint64_t budget = UINT64_MAX);
-    static void TrimChunks(uint32_t currentFrame, uint64_t budget);
+    static void UpdatePageResidency(uint32_t currentFrame, bool allowEviction);
 
 	std::vector<uint32_t> m_DirtyGroupIndices;
 
@@ -153,15 +139,17 @@ namespace GeometryStreaming
 		uint32_t CompressionType;
 	};
 
-    // Best fit: fill the fullest usable chunk before touching a sparse one.
+    // Prefer recently used chunks, then fill the fullest one; index breaks ties.
     static uint32_t FindAllocationChunk()
     {
         uint32_t best = INVALID_CHUNK_INDEX;
         for (uint32_t index = 0; index < s_ChunkLifetimes.size(); ++index)
         {
             const auto& chunk = s_ChunkLifetimes[index];
-            if (chunk.Draining || chunk.FreeSlots.empty()) continue;
-            if (best == INVALID_CHUNK_INDEX || chunk.FreeSlots.size() < s_ChunkLifetimes[best].FreeSlots.size())
+            if (!m_GeometryChunksGPU[index].GetResource() || chunk.FreeSlots.empty()) continue;
+            if (best == INVALID_CHUNK_INDEX || chunk.LastUsedFrame > s_ChunkLifetimes[best].LastUsedFrame ||
+                (chunk.LastUsedFrame == s_ChunkLifetimes[best].LastUsedFrame &&
+                    chunk.FreeSlots.size() < s_ChunkLifetimes[best].FreeSlots.size()))
                 best = index;
         }
         return best;
@@ -169,21 +157,17 @@ namespace GeometryStreaming
 
     static void LogChunkStats(const wchar_t* tag)
     {
-        Utility::Printf(L"GeometryStreaming: %ls allocated=%llu MB, pressure=%u, freeSlots=%zu\n",
-            tag, s_AllocatedBytes >> 20, unsigned(s_MemoryPressure), s_FreeSlotCount);
+        Utility::Printf(L"GeometryStreaming: %ls allocated=%llu MB, freeSlots=%zu\n",
+            tag, s_AllocatedBytes >> 20, s_FreeSlotCount);
     }
 
     static bool AllocateChunk()
     {
-        const auto now = Clock::now();
-        if (now < s_RetryAllocationAfter) return false;
-        // Any failed growth attempt backs off; success clears the deadline below.
-        s_RetryAllocationAfter = now + std::chrono::milliseconds(500);
-        if (AllocationHeadroom() < Renderer::kChunkSizeInBytes) return false;
         uint32_t index = 0;
         while (index < m_GeometryChunksGPU.size() &&
             (m_GeometryChunksGPU[index].GetResource() || s_ChunkLifetimes[index].Fence)) ++index;
-        if (index == m_GeometryChunksGPU.size())
+        const bool newSlot = index == m_GeometryChunksGPU.size();
+        if (newSlot)
         {
             const uint32_t descriptor = Renderer::AllocateGeometryDescriptor();
             if (descriptor == INVALID_CHUNK_INDEX) return false;
@@ -195,44 +179,35 @@ namespace GeometryStreaming
         const HRESULT result = chunk.TryCreate(L"Geometry Chunk", Renderer::kChunkSizeInBytes / 4, 4);
         if (FAILED(result))
         {
-            Utility::Printf("GeometryStreaming: chunk allocation failed (0x%08X)\n", result);
+            if (result != s_LastAllocationResult)
+                Utility::Printf("GeometryStreaming: chunk allocation failed (0x%08X)\n", result);
+            s_LastAllocationResult = result;
+            if (newSlot)
+            {
+                Renderer::FreeGeometryDescriptor(s_ChunkLifetimes.back().Descriptor);
+                s_ChunkLifetimes.pop_back();
+                m_GeometryChunksGPU.pop_back();
+            }
             return false;
         }
+        s_LastAllocationResult = S_OK;
         auto& lifetime = s_ChunkLifetimes[index];
-        lifetime.EmptySince = now;
-        lifetime.Draining = false;
+        lifetime.EmptySince = Clock::now();
+        lifetime.LastUsedFrame = 0;
         Graphics::g_Device->CopyDescriptorsSimple(1, Renderer::s_TextureHeap[lifetime.Descriptor],
             chunk.GetSRV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         s_AllocatedBytes += Renderer::kChunkSizeInBytes;
         lifetime.FreeSlots.resize(m_SlotsPerChunk);
         std::iota(lifetime.FreeSlots.begin(), lifetime.FreeSlots.end(), 0u);
         s_FreeSlotCount += m_SlotsPerChunk;
-        s_RetryAllocationAfter = {};
         LogChunkStats(L"allocated chunk");
         return true;
-    }
-
-    static bool ReactivateDrainingChunk()
-    {
-        for (uint32_t index = 0; index < s_ChunkLifetimes.size(); ++index)
-        {
-            auto& chunk = s_ChunkLifetimes[index];
-            // Retired chunks no longer have an active resource; leave them to fence collection.
-            if (!chunk.Draining || !m_GeometryChunksGPU[index].GetResource()) continue;
-            assert(chunk.FreeSlots.size() == m_SlotsPerChunk);
-            chunk.Draining = false;
-            chunk.EmptySince = Clock::now();
-            s_FreeSlotCount += chunk.FreeSlots.size();
-            LogChunkStats(L"reused draining chunk");
-            return true;
-        }
-        return false;
     }
 
     static bool EnsureFreeSlots(uint32_t requiredSlots)
     {
         while (s_FreeSlotCount < requiredSlots)
-            if (!ReactivateDrainingChunk() && !AllocateChunk()) return false;
+            if (!AllocateChunk()) return false;
         return true;
     }
 
@@ -256,14 +231,10 @@ namespace GeometryStreaming
                 continue;
             }
             if (!m_GeometryChunksGPU[index].GetResource()) continue;
-            if (lifetime.FreeSlots.size() != m_SlotsPerChunk)
-            {
-                lifetime.EmptySince = now;
-                continue;
-            }
-            if (now - lifetime.EmptySince < std::chrono::seconds(5) ||
-                (!lifetime.Draining && s_FreeSlotCount - m_SlotsPerChunk < m_PendingPageCount)) continue;
-            if (!lifetime.Draining) s_FreeSlotCount -= m_SlotsPerChunk;
+            if (lifetime.FreeSlots.size() != m_SlotsPerChunk ||
+                now - lifetime.EmptySince < std::chrono::seconds(5) ||
+                s_FreeSlotCount - m_SlotsPerChunk < m_PendingPageCount) continue;
+            s_FreeSlotCount -= m_SlotsPerChunk;
             lifetime.FreeSlots.clear();
             // All geometry consumers and address updates use the graphics queue.
             lifetime.Fence = Graphics::g_CommandManager.GetGraphicsQueue().IncrementFence();
@@ -493,7 +464,7 @@ namespace GeometryStreaming
     }
 
     static void InstallPage(GraphicsContext& gfx, const Model& model,
-        uint32_t pageIndex, const std::vector<uint8_t>& data)
+        uint32_t pageIndex, const std::vector<uint8_t>& data, uint32_t frameIndex)
     {
         const uint32_t chunkIndex = FindAllocationChunk();
         assert(chunkIndex != INVALID_CHUNK_INDEX);
@@ -510,7 +481,9 @@ namespace GeometryStreaming
             m_DirtyGroupIndices.push_back(id);
         }
         auto& residency = m_PageTableCPU[pageIndex];
-        s_ChunkLifetimes[chunkIndex].EmptySince = Clock::now();
+        chunk.EmptySince = {};
+        chunk.LastUsedFrame = std::max(chunk.LastUsedFrame, uint64_t(frameIndex));
+        residency.LastUsedFrame = frameIndex;
         residency.ChunkIndex = chunkIndex;
         residency.SlotIndex = slotIndex;
     }
@@ -554,8 +527,7 @@ bool GeometryStreaming::Initialize(const Model& model)
 	s_FreeSlotCount = 0;
 	m_GeometryChunksGPU.clear();
     s_AllocatedBytes = 0;
-    s_RetryAllocationAfter = {};
-    s_MemoryPressure = false;
+    s_LastAllocationResult = S_OK;
 
 	uint32_t numNodes = static_cast<uint32_t>(nodes.size());
 	m_HierarchyNodesGPU.Create(L"Hierarchy Nodes GPU", numNodes, sizeof(Renderer::HierarchyNode), nodes.data());
@@ -638,7 +610,7 @@ bool GeometryStreaming::PinRootPages(Model* model)
                 success = false;
                 break;
             }
-            InstallPage(gfx, *model, page, bytes);
+            InstallPage(gfx, *model, page, bytes, 0);
             m_PageTableCPU[page].IsPinned = true;
         }
         for (auto& chunk : m_GeometryChunksGPU)
@@ -681,7 +653,7 @@ void GeometryStreaming::Shutdown()
     }
     s_ChunkLifetimes.clear();
     s_AllocatedBytes = 0;
-    s_MemoryPressure = false;
+    s_LastAllocationResult = S_OK;
 	m_HierarchyNodesGPU.Destroy();
     m_GroupNodeIndicesGPU.Destroy();
 	for (auto& chunk : m_GeometryChunksGPU)
@@ -742,20 +714,10 @@ void GeometryStreaming::Update(uint32_t frameIndex)
 		m_ReadbackRequestMaskBuffer[slot].Unmap();
 	}
 
-    if (!readySlots.empty()) RebuildPendingPages(*sourceModel);
-    Graphics::VideoMemoryInfo memory{};
-    Graphics::QueryVideoMemoryInfo(memory);
-    const uint64_t budget = UpdateMemoryBudget(memory);
-    if (canEvict && hasEvictionFeedback)
+    if (!readySlots.empty())
     {
-        TrimChunks(frameIndex, budget);
-        // Slot pressure and physical allocation pressure have separate stopping conditions.
-        const size_t requiredSlots = m_PendingPageCount +
-            std::min<size_t>(m_PagesToLoad.size(), kMaxPendingPages - m_PendingPageCount);
-        // Failed growth can reuse cold slots even after the allocation retry deadline has expired.
-        if (s_FreeSlotCount < requiredSlots && (s_MemoryPressure || s_RetryAllocationAfter != Clock::time_point{} ||
-            AllocationHeadroom() < Renderer::kChunkSizeInBytes))
-            ImmediateEvict(frameIndex, m_GroupDataLocations.data(), requiredSlots);
+        UpdatePageResidency(frameIndex, canEvict && hasEvictionFeedback);
+        RebuildPendingPages(*sourceModel);
     }
 
     SyncMemoryAndAddressTable(frameIndex);
@@ -802,8 +764,7 @@ void GeometryStreaming::SyncMemoryAndAddressTable(uint32_t frameIndex)
         assert(m_PendingPageCount > 0 && m_PageTableCPU[page.PageIndex].IsLoading);
         if (page.Success)
         {
-            InstallPage(gfx, *sourceModel, page.PageIndex, page.Data);
-            m_PageTableCPU[page.PageIndex].LastUsedFrame = frameIndex;
+            InstallPage(gfx, *sourceModel, page.PageIndex, page.Data, frameIndex);
             ++uploadedPages;
         }
         // Failed pages remain nonresident; fresh GPU feedback may request them again.
@@ -843,77 +804,27 @@ namespace GeometryStreaming
         }
         auto& chunk = s_ChunkLifetimes[page.ChunkIndex];
         chunk.FreeSlots.push_back(page.SlotIndex);
-        if (!chunk.Draining) ++s_FreeSlotCount;
+        ++s_FreeSlotCount;
         if (chunk.FreeSlots.size() == m_SlotsPerChunk) chunk.EmptySince = Clock::now();
         page.ChunkIndex = INVALID_CHUNK_INDEX;
         page.SlotIndex = 0;
     }
 
-    static void TrimChunks(uint32_t currentFrame, uint64_t budget)
+    static void UpdatePageResidency(uint32_t currentFrame, bool allowEviction)
     {
-        ImmediateEvict(currentFrame, m_GroupDataLocations.data(), 0, budget);
-    }
-}
-
-void GeometryStreaming::ImmediateEvict(uint32_t currentFrame, Renderer::GroupDataLocation* pLocationTable,
-    size_t requiredFreeSlots, uint64_t budget)
-{
-    // Already-draining and fence-pending resources count toward the planned release.
-    uint64_t remainingBytes = 0;
-    for (uint32_t index = 0; index < s_ChunkLifetimes.size(); ++index)
-        if (m_GeometryChunksGPU[index].GetResource() && !s_ChunkLifetimes[index].Draining)
-            remainingBytes += Renderer::kChunkSizeInBytes;
-    if (s_FreeSlotCount >= requiredFreeSlots && remainingBytes <= budget) return;
-
-    std::vector<uint32_t> emptyChunks;
-    if (remainingBytes > budget)
-        for (uint32_t index = 0; index < s_ChunkLifetimes.size(); ++index)
-            if (m_GeometryChunksGPU[index].GetResource() && !s_ChunkLifetimes[index].Draining &&
-                s_ChunkLifetimes[index].FreeSlots.size() == m_SlotsPerChunk)
-                emptyChunks.push_back(index);
-    auto drainEmptyChunks = [&]()
-    {
-        while (remainingBytes > budget && !emptyChunks.empty())
+        // Recompute after eviction so removed pages cannot keep a chunk artificially hot.
+        for (auto& chunk : s_ChunkLifetimes) chunk.LastUsedFrame = 0;
+        for (uint32_t pageIndex = 0; pageIndex < m_PageTableCPU.size(); ++pageIndex)
         {
-            // Global IO reservations must still fit outside this empty chunk.
-            if (s_FreeSlotCount - m_SlotsPerChunk < m_PendingPageCount) break;
-            const uint32_t index = emptyChunks.back();
-            emptyChunks.pop_back();
-            s_ChunkLifetimes[index].Draining = true;
-            s_FreeSlotCount -= m_SlotsPerChunk;
-            remainingBytes -= Renderer::kChunkSizeInBytes;
-            Utility::Printf("GeometryStreaming: draining empty chunk %u\n", index);
-        }
-    };
-    drainEmptyChunks();
-    if (s_FreeSlotCount >= requiredFreeSlots && remainingBytes <= budget) return;
-
-	struct Candidate {
-		uint32_t pageIdx;
-		uint64_t lastFrame;
-	};
-	std::vector<Candidate> candidates;
-	candidates.reserve(m_PageTableCPU.size());
-
-    for (uint32_t page = 0; page < m_PageTableCPU.size(); ++page)
-        if (m_PageTableCPU[page].ChunkIndex != INVALID_CHUNK_INDEX && CanEvict(m_PageTableCPU[page], currentFrame))
-            candidates.push_back({page, m_PageTableCPU[page].LastUsedFrame});
-
-	std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
-		return a.lastFrame != b.lastFrame ? a.lastFrame < b.lastFrame : a.pageIdx < b.pageIdx;
-		});
-
-    for (const auto& candidate : candidates)
-    {
-        if (s_FreeSlotCount >= requiredFreeSlots && remainingBytes <= budget) break;
-        const uint32_t chunkIndex = m_PageTableCPU[candidate.pageIdx].ChunkIndex;
-        EvictPage(candidate.pageIdx, pLocationTable);
-        if (remainingBytes > budget)
-        {
-            if (s_ChunkLifetimes[chunkIndex].FreeSlots.size() == m_SlotsPerChunk)
-                emptyChunks.push_back(chunkIndex);
-            // New free slots may also unblock an empty chunk held back by IO reservations.
-            drainEmptyChunks();
+            const auto& page = m_PageTableCPU[pageIndex];
+            if (page.ChunkIndex == INVALID_CHUNK_INDEX) continue;
+            if (allowEviction && CanEvict(page, currentFrame))
+                EvictPage(pageIndex, m_GroupDataLocations.data());
+            else
+            {
+                auto& chunk = s_ChunkLifetimes[page.ChunkIndex];
+                chunk.LastUsedFrame = std::max(chunk.LastUsedFrame, page.LastUsedFrame);
+            }
         }
     }
 }
