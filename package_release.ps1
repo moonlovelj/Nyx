@@ -6,6 +6,7 @@ Examples:
   .\package_release.ps1 -Version "v2.0.0" -NoTimestamp
   .\package_release.ps1 -Version "v2.0.0" -NoTimestamp -KeepStaging
   .\package_release.ps1 -SourceDir "MiniEngine\Build\x64\Release\Output\SceneViewer" -IncludeSymbols
+  .\package_release.ps1 -ValidationBuild
 #>
 
 param(
@@ -16,6 +17,7 @@ param(
   [string]$EnvironmentMap = "citrus_orchard_road_puresky_4k.dds",
   [string]$VCRedistRoot = "",
   [switch]$IncludeSymbols,
+  [switch]$ValidationBuild,
   [switch]$NoTimestamp,
   [switch]$KeepStaging
 )
@@ -70,6 +72,17 @@ function Copy-PayloadFile {
   Copy-Item -LiteralPath $Source -Destination $destination -Force
 }
 
+function Copy-SlangBuildFile {
+  param([string]$RelativePath)
+  $builtFile = Join-Path $sourcePath $RelativePath
+  $sdkFile = Join-Path $slangBin $RelativePath
+  if ((Get-FileHash -LiteralPath $builtFile -Algorithm SHA256).Hash -ne
+      (Get-FileHash -LiteralPath $sdkFile -Algorithm SHA256).Hash) {
+    throw "Slang output differs from the bundled SDK: $RelativePath. Rebuild SceneViewer."
+  }
+  Copy-PayloadFile -Source $builtFile -RelativePath $RelativePath
+}
+
 function Assert-MiniCache {
   param([string]$Path, [string]$SourceModel)
   $stream = [IO.File]::OpenRead($Path)
@@ -114,8 +127,14 @@ $miniVersion = [uint32]$miniVersionMatch.Groups[1].Value
 $sourceCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0) { throw "Could not determine the source commit." }
 $sourceChanges = @(& git -C $repoRoot diff HEAD --name-only --ignore-submodules=untracked -- MiniEngine)
-if ($LASTEXITCODE -ne 0 -or $sourceChanges.Count -ne 0) {
+if ($LASTEXITCODE -ne 0) { throw "Could not check renderer source changes." }
+if ($sourceChanges.Count -ne 0 -and -not $ValidationBuild) {
   throw "Commit renderer source changes before packaging a release."
+}
+if ($ValidationBuild) {
+  $validationChanges = @(& git -C $repoRoot status --porcelain --untracked-files=normal --ignore-submodules=none -- MiniEngine)
+  if ($LASTEXITCODE -ne 0) { throw "Could not check the validation build source tree." }
+  $validationSourceState = if ($validationChanges.Count) { 'local changes' } else { 'clean' }
 }
 
 if (-not (Test-Path -LiteralPath $sourcePath)) {
@@ -149,6 +168,21 @@ if ($includeDlss) {
   }
 }
 
+$slangRoot = Join-Path $repoRoot 'MiniEngine\ThirdParty\Slang'
+$slangBin = Join-Path $slangRoot 'bin'
+$slangSdk = ([xml](Get-Content -LiteralPath (Join-Path $slangRoot 'NyxSlangSdk.props') -Raw)).Project.PropertyGroup
+$slangBuildPath = Join-Path $sourcePath 'NyxSlangBuild.txt'
+if (-not (Test-Path -LiteralPath $slangBuildPath -PathType Leaf)) {
+  throw "NyxSlangBuild.txt is missing. Rebuild SceneViewer before packaging."
+}
+$slangBuild = Get-Content -LiteralPath $slangBuildPath -Raw | ConvertFrom-StringData
+$slangModule = $slangBuild['ModuleDirectory']
+if ($slangBuild['Version'] -ne $slangSdk.NyxSlangVersion -or
+    $slangBuild['Sha256'] -notmatch '^[0-9a-fA-F]{64}$' -or $slangBuild['Sha256'] -ne $slangSdk.NyxSlangSha256 -or
+    $slangModule -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$' -or $slangModule -ne $slangSdk.NyxSlangModuleDirectory) {
+  throw "SourceDir Slang build metadata differs from the bundled SDK. Rebuild SceneViewer before packaging."
+}
+
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $nameParts = @($PackageName)
 if (-not [string]::IsNullOrWhiteSpace($Version)) {
@@ -156,6 +190,9 @@ if (-not [string]::IsNullOrWhiteSpace($Version)) {
     throw "Invalid Version format: '$Version'. Expected like v1.0.0 or v1.0.0-beta.1"
   }
   $nameParts += $Version
+}
+if ($ValidationBuild) {
+  $nameParts += 'validation'
 }
 if (-not $NoTimestamp) {
   $nameParts += $timestamp
@@ -174,7 +211,7 @@ if (Test-Path -LiteralPath $stagingRoot) {
 New-Item -ItemType Directory -Path $payloadRoot -Force | Out-Null
 
 Write-Host "Collecting release runtime from: $sourcePath"
-$runtimeFiles = @("SceneViewer.exe", "slang.dll", "slang-compiler.dll", "slang-rt.dll", "dxcompiler.dll", "dxil.dll", "WinPixEventRuntime.dll")
+$runtimeFiles = @("SceneViewer.exe", "dxcompiler.dll", "dxil.dll", "WinPixEventRuntime.dll")
 foreach ($runtimeFile in $runtimeFiles) {
   Copy-PayloadFile -Source (Join-Path $sourcePath $runtimeFile) -RelativePath $runtimeFile
 }
@@ -187,7 +224,15 @@ Copy-PayloadFile -Source (Join-Path $sourcePath "D3D12\D3D12Core.dll") -Relative
 if (Test-Path -LiteralPath (Join-Path $sourcePath "SceneViewer.exe.manifest")) {
   Copy-PayloadFile -Source (Join-Path $sourcePath "SceneViewer.exe.manifest") -RelativePath "SceneViewer.exe.manifest"
 }
-Copy-DirectoryContents -Source (Join-Path $sourcePath "slang-standard-module-2026.10") -Destination (Join-Path $payloadRoot "slang-standard-module-2026.10")
+Copy-PayloadFile -Source $slangBuildPath -RelativePath 'NyxSlangBuild.txt'
+foreach ($dll in @('slang.dll', 'slang-compiler.dll', 'slang-rt.dll')) {
+  Copy-SlangBuildFile -RelativePath $dll
+}
+$slangModuleFiles = @(Get-ChildItem -LiteralPath (Join-Path $slangBin $slangModule) -Recurse -File)
+if ($slangModuleFiles.Count -eq 0) { throw "Slang SDK module directory is empty: $slangModule" }
+foreach ($moduleFile in $slangModuleFiles) {
+  Copy-SlangBuildFile -RelativePath $moduleFile.FullName.Substring($slangBin.Length + 1)
+}
 
 # Use the compiler's redistributable directories, never arbitrary system DLLs.
 if ([string]::IsNullOrWhiteSpace($VCRedistRoot)) {
@@ -229,6 +274,7 @@ foreach ($shaderTree in $shaderTrees) {
 $modelShaderHeaders = @(
   "StructsIO.h",
   "MeshletStructs.h",
+  "GeometryStreamingShared.h",
   "VirtualShadowMapShared.h",
   "VirtualShadowMapCullShared.h"
 )
@@ -284,7 +330,7 @@ $extraFiles = @(
   "MiniEngine/ThirdParty/imgui/imstb_textedit.h", "MiniEngine/ThirdParty/imgui/imstb_truetype.h",
   "MiniEngine/ThirdParty/meshoptimizer/LICENSE.md", "MiniEngine/ThirdParty/lz4/LICENSE",
   "MiniEngine/ThirdParty/cgltf/LICENSE", "MiniEngine/Model/json.hpp",
-  "MiniEngine/ThirdParty/slang-2026.10/LICENSE",
+  "MiniEngine/ThirdParty/Slang/LICENSE",
   "MiniEngine/ThirdParty/dxc_2026_05_27/LICENSE-MIT.txt",
   "MiniEngine/ThirdParty/dxc_2026_05_27/LICENSE-LLVM.txt",
   "MiniEngine/ThirdParty/dxc_2026_05_27/LICENSE-MS.txt",
@@ -292,6 +338,17 @@ $extraFiles = @(
 )
 foreach ($name in $extraFiles) {
   Copy-PayloadFile -Source (Join-Path $repoRoot $name) -RelativePath $name
+}
+$slangNotices = Get-ChildItem -LiteralPath $slangRoot -Force | Where-Object {
+  $_.Name -ne 'LICENSE' -and $_.Name -match '^(?:licen[cs]es?|copying|notices?|third[-_]party[-_]notices?)(?:[._-][^/]*)?$'
+}
+foreach ($notice in $slangNotices) {
+  $relative = "MiniEngine\ThirdParty\Slang\$($notice.Name)"
+  if ($notice.PSIsContainer) {
+    Copy-DirectoryContents -Source $notice.FullName -Destination (Join-Path $payloadRoot $relative)
+  } else {
+    Copy-PayloadFile -Source $notice.FullName -RelativePath $relative
+  }
 }
 Copy-PayloadFile -Source (Join-Path $assetSourceRoot "bistro-metalrough\LICENSE") -RelativePath "Assets\bistro-metalrough\LICENSE"
 foreach ($dependencyName in @("directxmesh_desktop_win10.2024.10.29.1", "directxtex_desktop_win10.2024.10.29.1", "Microsoft.Direct3D.D3D12.1.616.1", "WinPixEventRuntime.1.0.210209001", "zlib-msvc-x64.1.2.11.8900")) {
@@ -353,15 +410,20 @@ $bistroCommit = (& git -C (Join-Path $assetSourceRoot "bistro-metalrough") rev-p
 $exeHash = (Get-FileHash -LiteralPath $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
 $buildInfo = "Version: $Version`r`nSource commit: $sourceCommit`r`nBistro commit: $bistroCommit`r`nConfiguration: Release x64`r`nMINI cache version: $miniVersion`r`nSceneViewer.exe SHA256: $exeHash`r`n"
 $buildInfo += "DLSS enabled: $($dlssBuild.Enabled)`r`n"
+$buildInfo += "Slang version: $($slangBuild.Version)`r`nSlang release archive SHA256: $($slangBuild.Sha256)`r`n"
+if ($ValidationBuild) {
+  $buildInfo += "Package type: local validation`r`nMiniEngine source tree: $validationSourceState`r`n"
+}
 [IO.File]::WriteAllText((Join-Path $payloadRoot "BUILDINFO.txt"), $buildInfo, [Text.Encoding]::ASCII)
 
 $requiredPackagePaths = @(
   "SceneViewer.exe",
   "NyxDlssBuild.txt",
+  "NyxSlangBuild.txt",
   "slang.dll",
   "slang-compiler.dll",
   "slang-rt.dll",
-  "slang-standard-module-2026.10",
+  $slangModule,
   "dxcompiler.dll",
   "dxil.dll",
   "D3D12\D3D12Core.dll",
@@ -373,6 +435,7 @@ $requiredPackagePaths = @(
   "MiniEngine\Model\Shaders\VBufferMesh.slang",
   "MiniEngine\Model\StructsIO.h",
   "MiniEngine\Model\MeshletStructs.h",
+  "MiniEngine\Model\GeometryStreamingShared.h",
   "MiniEngine\Model\VirtualShadowMapShared.h",
   "MiniEngine\Model\VirtualShadowMapCullShared.h",
   "MiniEngine\Core\Shaders\Math.hlsli",

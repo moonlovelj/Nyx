@@ -14,7 +14,7 @@ under their own licenses.
 | [LZ4](https://github.com/lz4/lz4) | BSD 2-Clause | [LICENSE](MiniEngine/ThirdParty/lz4/LICENSE) |
 | [cgltf](https://github.com/jkuhlmann/cgltf) | MIT | [LICENSE](MiniEngine/ThirdParty/cgltf/LICENSE) |
 | [nlohmann/json](https://github.com/nlohmann/json) | MIT; embedded notices retained | [json.hpp](MiniEngine/Model/json.hpp) |
-| [Slang](https://github.com/shader-slang/slang) | Apache-2.0 WITH LLVM-exception | [LICENSE](MiniEngine/ThirdParty/slang-2026.10/LICENSE) |
+| [Slang](https://github.com/shader-slang/slang) | Apache-2.0 WITH LLVM-exception | [LICENSE](MiniEngine/ThirdParty/Slang/LICENSE) |
 | [NVIDIA DLSS / NGX SDK 310.9.16](https://github.com/NVIDIA/DLSS/tree/v310.9.16), optional | NVIDIA RTX SDKs License | [LICENSE.txt](MiniEngine/ThirdParty/DLSS/LICENSE.txt) |
 | [DXC](https://github.com/microsoft/DirectXShaderCompiler) | MIT, LLVM/NCSA, Microsoft terms | [MIT](MiniEngine/ThirdParty/dxc_2026_05_27/LICENSE-MIT.txt), [LLVM](MiniEngine/ThirdParty/dxc_2026_05_27/LICENSE-LLVM.txt), [Microsoft](MiniEngine/ThirdParty/dxc_2026_05_27/LICENSE-MS.txt) |
 

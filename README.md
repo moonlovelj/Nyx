@@ -110,7 +110,7 @@ Download the Windows x64 ZIP from the [latest release](https://github.com/moonlo
 - NuGet package restore enabled
 - Git and Git LFS
 
-Slang and DXC are included under `MiniEngine/ThirdParty`; no separate shader compiler installation is required.
+Slang and DXC are included under `MiniEngine/ThirdParty`. Once the project dependencies are present, normal builds use the bundled compilers offline.
 
 Recommended for large scenes:
 
@@ -274,7 +274,7 @@ The retry budget and pending/retried page counts are available under
 
 - Language: **C++20**
 - Graphics API: **DirectX 12**
-- Shader language/compiler frontend: **Slang 2026.10**
+- Shader language/compiler frontend: **Slang** ([bundled version](MiniEngine/ThirdParty/Slang/NyxSlangSdk.props))
 - DXIL compiler backend: **DXC 2026-05-27**
 - Shader Model: **6.6**
 - Agility SDK package: `Microsoft.Direct3D.D3D12 1.616.1`

@@ -791,7 +791,7 @@ namespace GeometryStreaming
 {
     static bool CanEvict(const PageResidency& page, uint32_t frame)
     {
-        return !page.IsPinned && !page.IsLoading && frame >= page.LastUsedFrame && frame - page.LastUsedFrame > 16;
+        return !page.IsPinned && !page.IsLoading && frame >= page.LastUsedFrame && frame - page.LastUsedFrame > 32;
     }
 
     static void EvictPage(uint32_t pageIndex, Renderer::GroupDataLocation* locations)

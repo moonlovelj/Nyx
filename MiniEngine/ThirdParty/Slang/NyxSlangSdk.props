@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <NyxSlangVersion>2026.22</NyxSlangVersion>
+    <NyxSlangTag>v2026.22</NyxSlangTag>
+    <NyxSlangAsset>slang-2026.22-windows-x86_64.zip</NyxSlangAsset>
+    <NyxSlangSha256>dd0c4a86bd44cdb7e9cf712af0c8ebf2fff1bba19fa5e3c128ff87384e8ff17b</NyxSlangSha256>
+    <NyxSlangContentSha256>6644102c6de2c8fd78e0117cdfe9d55fba4f2c84f188d7813cbc41e99796c413</NyxSlangContentSha256>
+    <NyxSlangModuleDirectory>slang-standard-module-2026.22</NyxSlangModuleDirectory>
+  </PropertyGroup>
+</Project>

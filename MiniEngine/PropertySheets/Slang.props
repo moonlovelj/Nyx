@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <NyxSlangRoot>$(MSBuildThisFileDirectory)..\ThirdParty\Slang\</NyxSlangRoot>
+  </PropertyGroup>
+  <Import Project="$(NyxSlangRoot)NyxSlangSdk.props" Condition="Exists('$(NyxSlangRoot)NyxSlangSdk.props')" />
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(NyxSlangRoot)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link Condition="'$(ConfigurationType)'=='Application'">
+      <AdditionalDependencies>$(NyxSlangRoot)lib\slang.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <Target Name="NyxValidateSlangSdk" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(NyxSlangVersion)'=='' Or '$(NyxSlangSha256)'=='' Or '$(NyxSlangModuleDirectory)'==''"
+           Text="Missing or incomplete Slang SDK manifest at $(NyxSlangRoot)NyxSlangSdk.props." />
+    <Error Condition="!Exists('$(NyxSlangRoot)include\slang.h') Or !Exists('$(NyxSlangRoot)lib\slang.lib')"
+           Text="Slang SDK $(NyxSlangVersion) is missing its headers or import library in $(NyxSlangRoot)." />
+  </Target>
+  <Target Name="NyxCopySlangRuntime" AfterTargets="Build" DependsOnTargets="NyxValidateSlangSdk"
+          Condition="'$(ConfigurationType)'=='Application'">
+    <ItemGroup>
+      <NyxSlangRuntime Include="$(NyxSlangRoot)bin\slang.dll;$(NyxSlangRoot)bin\slang-compiler.dll;$(NyxSlangRoot)bin\slang-rt.dll" />
+      <NyxSlangModule Include="$(NyxSlangRoot)bin\$(NyxSlangModuleDirectory)\**\*" />
+      <NyxSlangBuildIdentity Include="Version=$(NyxSlangVersion);Sha256=$(NyxSlangSha256);ModuleDirectory=$(NyxSlangModuleDirectory)" />
+    </ItemGroup>
+    <Error Condition="'@(NyxSlangModule)'==''" Text="Slang SDK standard module is missing or empty: $(NyxSlangModuleDirectory)." />
+    <ReadLinesFromFile File="$(OutDir)NyxSlangBuild.txt" Condition="Exists('$(OutDir)NyxSlangBuild.txt')">
+      <Output TaskParameter="Lines" ItemName="NyxPreviousSlangBuildIdentity" />
+    </ReadLinesFromFile>
+    <!-- An SDK switch must replace DLLs even when archive timestamps and file sizes match. -->
+    <PropertyGroup>
+      <NyxSlangSkipUnchanged>false</NyxSlangSkipUnchanged>
+      <NyxSlangSkipUnchanged Condition="'@(NyxSlangBuildIdentity)'=='@(NyxPreviousSlangBuildIdentity)'">true</NyxSlangSkipUnchanged>
+    </PropertyGroup>
+    <Copy SourceFiles="@(NyxSlangRuntime)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="$(NyxSlangSkipUnchanged)" />
+    <Copy SourceFiles="@(NyxSlangModule)" SkipUnchangedFiles="$(NyxSlangSkipUnchanged)"
+          DestinationFiles="@(NyxSlangModule->'$(OutDir)$(NyxSlangModuleDirectory)\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <WriteLinesToFile File="$(OutDir)NyxSlangBuild.txt" Lines="@(NyxSlangBuildIdentity)"
+                      Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
+</Project>

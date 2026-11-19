@@ -1,0 +1,55 @@
+/**
+Neural network primitives for Slang.
+This module provides differentiable primitive data structures and operations for implementing
+inline MLP (Multilayer Perceptron) in Slang shaders. It includes vector types, storage abstractions,
+activation functions, optimizers, and automatic differentiation support for training small inline
+neural networks on the GPU.
+
+@remarks EXPERIMENTAL: This module is under active design and may change significantly
+or be removed in future versions. DO NOT USE IN PRODUCTION.
+
+@category neural
+
+Features:
+- Differentiable vector types (IVector, InlineVector)
+- Pointer-like address abstraction (IPointerLikeAddress)
+- Automatic differentiation support
+- Linear transformations with optional bias
+- Atomic operations for gradient accumulation
+- Permutohedral lattice encoding (PermutoEncoder)
+*/
+[ExperimentalModule]
+module neural;
+
+__include "ivector";
+__include "inline-vector";
+__include "istorages";
+__include "bindless-storage";
+__include "accelerate-vector-coopmat";
+__include "WaveMatrix";
+__include "mma-linear-layout-help";
+__include "network-parameter-layout-converter";
+__include "mma-tiled-cuda";
+__include "mma-tiled-vulkan";
+__include "mma-tiled-metal";
+__include "mma-tiled-layout-helper";
+__include "vectorized-reader";
+__include "shared-memory-pool";
+__include "hash-function";
+__include "permuto-encoder";
+__include "iencoder";
+// Frontend APIs built on the primitives above
+__include "iactivation";
+__include "activations";
+__include "ilayer";
+__include "layers";
+
+#ifdef UNIT_TEST
+__include "unit-test/unittest-mat-vec-mul";
+__include "unit-test/unittest-outerproduct-reduce";
+__include "unit-test/unittest-bias-reduce";
+__include "unit-test/unittest-mma-load";
+__include "unit-test/unittest-mma-backward";
+__include "unit-test/unittest-hash-function";
+__include "unit-test/unittest-permuto-encoder";
+#endif

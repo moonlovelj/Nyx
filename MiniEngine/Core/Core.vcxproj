@@ -45,6 +45,7 @@
   <ImportGroup Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\PropertySheets\Build.props" />
+    <Import Project="..\PropertySheets\Slang.props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Platform)'=='x64'" Label="PropertySheets">
     <Import Project="..\PropertySheets\Desktop.props" />
@@ -54,7 +55,7 @@
     <ClCompile>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..\ThirdParty\imgui;$(MSBuildThisFileDirectory)..\ThirdParty\imgui\backends;$(MSBuildThisFileDirectory)..\ThirdParty\slang-2026.10\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..\ThirdParty\imgui;$(MSBuildThisFileDirectory)..\ThirdParty\imgui\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
     </ClCompile>
   </ItemDefinitionGroup>
