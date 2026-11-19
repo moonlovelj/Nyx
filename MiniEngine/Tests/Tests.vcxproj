@@ -39,10 +39,8 @@
     <Import Project="..\PropertySheets\Build.props" />
     <Import Project="..\PropertySheets\Desktop.props" />
     <Import Project="..\PropertySheets\Slang.props" />
+    <Import Project="..\PropertySheets\Dxc.props" />
   </ImportGroup>
-  <PropertyGroup Label="UserMacros">
-    <DxcRuntimeDir>$(ProjectDir)..\ThirdParty\dxc_2026_05_27\bin\$(Platform)\</DxcRuntimeDir>
-  </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
@@ -84,14 +82,6 @@
   <ImportGroup Label="ExtensionTargets">
     <Import Project="..\..\Packages\WinPixEventRuntime.1.0.210209001\build\WinPixEventRuntime.targets" Condition="Exists('..\..\Packages\WinPixEventRuntime.1.0.210209001\build\WinPixEventRuntime.targets')" />
   </ImportGroup>
-  <Target Name="CopyDxcRuntimeDependencies" AfterTargets="Build">
-    <ItemGroup>
-      <DxcRuntimeDependency Include="$(DxcRuntimeDir)dxcompiler.dll" />
-      <DxcRuntimeDependency Include="$(DxcRuntimeDir)dxil.dll" />
-    </ItemGroup>
-    <Error Text="DXC runtime DLLs were not found in $(DxcRuntimeDir). Slang DXIL emission requires dxcompiler.dll and dxil.dll." Condition="!Exists('$(DxcRuntimeDir)dxcompiler.dll') Or !Exists('$(DxcRuntimeDir)dxil.dll')" />
-    <Copy SourceFiles="@(DxcRuntimeDependency)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
-  </Target>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them. The missing file is {0}.</ErrorText>

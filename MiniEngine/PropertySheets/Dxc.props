@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <NyxDxcRoot>$(MSBuildThisFileDirectory)..\ThirdParty\DXC\</NyxDxcRoot>
+  </PropertyGroup>
+  <Import Project="$(NyxDxcRoot)NyxDxcSdk.props" />
+  <Target Name="CopyDxcRuntimeDependencies" AfterTargets="Build">
+    <Error Condition="'$(NyxDxcTag)'=='' Or '$(NyxDxcSha256)'=='' Or ('$(NyxDxcChannel)'!='release' And '$(NyxDxcChannel)'!='preview')"
+           Text="Missing or invalid DXC SDK identity in $(NyxDxcRoot)NyxDxcSdk.props." />
+    <ItemGroup>
+      <NyxDxcRuntime Include="$(NyxDxcRoot)bin\$(Platform)\dxcompiler.dll;$(NyxDxcRoot)bin\$(Platform)\dxil.dll" />
+      <NyxDxcBuildIdentity Include="Tag=$(NyxDxcTag);Channel=$(NyxDxcChannel);Sha256=$(NyxDxcSha256)" />
+    </ItemGroup>
+    <ReadLinesFromFile File="$(OutDir)NyxDxcBuild.txt" Condition="Exists('$(OutDir)NyxDxcBuild.txt')">
+      <Output TaskParameter="Lines" ItemName="NyxPreviousDxcBuildIdentity" />
+    </ReadLinesFromFile>
+    <PropertyGroup>
+      <NyxDxcSkipUnchanged>false</NyxDxcSkipUnchanged>
+      <NyxDxcSkipUnchanged Condition="'@(NyxDxcBuildIdentity)'=='@(NyxPreviousDxcBuildIdentity)'">true</NyxDxcSkipUnchanged>
+    </PropertyGroup>
+    <Copy SourceFiles="@(NyxDxcRuntime)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="$(NyxDxcSkipUnchanged)" />
+    <WriteLinesToFile File="$(OutDir)NyxDxcBuild.txt" Lines="@(NyxDxcBuildIdentity)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
+</Project>

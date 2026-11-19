@@ -5,6 +5,7 @@
 /Packages
 
 **/bin/x64
+!/MiniEngine/ThirdParty/DXC/bin/x64/
 **/obj/x64
 **/src/packages
 **/src/bin

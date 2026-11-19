@@ -3,9 +3,11 @@
 .SYNOPSIS
 Checks or updates the vendored Slang Windows x64 SDK using the latest official stable release.
 .EXAMPLE
-.\update_slang.ps1 -CheckOnly
+.\Scripts\update_slang.ps1 -CheckOnly
+Check for an update from the repository root.
 .EXAMPLE
 .\update_slang.ps1
+Install the latest stable release from the Scripts directory.
 #>
 [CmdletBinding()]
 param([switch] $CheckOnly)
@@ -14,7 +16,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-$repo = $PSScriptRoot
+$repo = Split-Path -Parent $PSScriptRoot
 $relativeSdk = 'MiniEngine/ThirdParty/Slang'
 $sdk = [IO.Path]::GetFullPath((Join-Path $repo $relativeSdk))
 $parent = [IO.Path]::GetDirectoryName($sdk)

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <NyxDxcTag>v1.9.2609</NyxDxcTag>
+    <NyxDxcChannel>release</NyxDxcChannel>
+    <NyxDxcAsset>dxc_2026_09_29.zip</NyxDxcAsset>
+    <NyxDxcPublishedAt>2026-09-29T16:56:40Z</NyxDxcPublishedAt>
+    <NyxDxcSha256>ad31b1fc8443175d204f77a611fdb3ef2ec42759bdc2f1167368de24a4a7e7f1</NyxDxcSha256>
+    <NyxDxcContentSha256>92b1d801f7e4452aed6cbf00e7b7a3dd916373d8b6a746221bf4fe40c9c9bffe</NyxDxcContentSha256>
+  </PropertyGroup>
+</Project>

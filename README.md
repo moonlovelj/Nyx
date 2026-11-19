@@ -275,7 +275,7 @@ The retry budget and pending/retried page counts are available under
 - Language: **C++20**
 - Graphics API: **DirectX 12**
 - Shader language/compiler frontend: **Slang** ([bundled version](MiniEngine/ThirdParty/Slang/NyxSlangSdk.props))
-- DXIL compiler backend: **DXC 2026-05-27**
+- DXIL compiler backend: **DXC** ([bundled version and channel](MiniEngine/ThirdParty/DXC/NyxDxcSdk.props))
 - Shader Model: **6.6**
 - Agility SDK package: `Microsoft.Direct3D.D3D12 1.616.1`
 - Meshlet defaults: max vertices **64**, max triangles **84**, group size **32**, BVH node children **8**

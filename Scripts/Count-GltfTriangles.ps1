@@ -3,9 +3,13 @@ Count triangles in glTF/GLB:
 - RawTriangles: sum of triangles in meshes (geometry only, no instancing)
 - InstancedTriangles: sum over scene nodes that reference meshes (including EXT_mesh_gpu_instancing count)
 
-Usage:
-  .\Count-GltfTriangles.ps1 -Path "scene.gltf"
-  .\Count-GltfTriangles.ps1 -Path "scene.glb" -Detailed
+From the repository root
+  .\Scripts\Count-GltfTriangles.ps1 -Path .\MiniEngine\SceneViewer\Assets\bunny\bunny.gltf
+
+From the Scripts directory
+  .\Count-GltfTriangles.ps1 -Path ..\MiniEngine\SceneViewer\Assets\bunny\bunny.gltf -Detailed
+
+Relative .gltf and .glb paths are resolved from the current PowerShell directory.
 #>
 
 param(
@@ -25,8 +29,9 @@ function Has-Property {
 
 function To-Array {
   param($Obj)
-  if ($null -eq $Obj) { return @() }
-  return @($Obj)
+  # Keep empty and single-item arrays intact when PowerShell returns the result.
+  if ($null -eq $Obj) { return ,@() }
+  return ,@($Obj)
 }
 
 function Read-UInt32LE([byte[]]$Bytes, [int]$Offset) {
@@ -83,9 +88,11 @@ function Get-GltfJsonText {
 function Get-JsonRoot {
   param([string]$JsonText)
 
-  # Use System.Text.Json for speed/low overhead
   try {
-    return $JsonText | ConvertFrom-Json -Depth 200
+    if ((Get-Command ConvertFrom-Json).Parameters.ContainsKey('Depth')) {
+      return ConvertFrom-Json -InputObject $JsonText -Depth 200
+    }
+    return ConvertFrom-Json -InputObject $JsonText
   } catch {
     throw "Failed to parse JSON: $($_.Exception.Message)"
   }
@@ -245,7 +252,8 @@ function Traverse-SceneNodes {
 
 # ---------------- main ----------------
 
-$jsonText = Get-GltfJsonText -FilePath $Path
+$inputFile = (Resolve-Path -LiteralPath $Path).ProviderPath
+$jsonText = Get-GltfJsonText -FilePath $inputFile
 $gltf = Get-JsonRoot -JsonText $jsonText
 
 $meshes = To-Array $gltf.meshes

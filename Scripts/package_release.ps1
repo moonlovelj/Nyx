@@ -1,12 +1,16 @@
 <#
 Package Nyx SceneViewer with prebuilt Bistro assets and emit a ZIP and SHA256.
 
-Examples:
-  .\package_release.ps1
-  .\package_release.ps1 -Version "v2.0.0" -NoTimestamp
-  .\package_release.ps1 -Version "v2.0.0" -NoTimestamp -KeepStaging
+From the repository root
+  .\Scripts\package_release.ps1
+  .\Scripts\package_release.ps1 -Version "v2.0.0" -NoTimestamp
+  .\Scripts\package_release.ps1 -Version "v2.0.0" -NoTimestamp -KeepStaging
+
+From the Scripts directory
   .\package_release.ps1 -SourceDir "MiniEngine\Build\x64\Release\Output\SceneViewer" -IncludeSymbols
   .\package_release.ps1 -ValidationBuild
+
+Relative -SourceDir and -DistDir paths are resolved from the repository root.
 #>
 
 param(
@@ -72,13 +76,13 @@ function Copy-PayloadFile {
   Copy-Item -LiteralPath $Source -Destination $destination -Force
 }
 
-function Copy-SlangBuildFile {
-  param([string]$RelativePath)
+function Copy-SdkBuildFile {
+  param([string]$SdkName, [string]$SdkBin, [string]$RelativePath)
   $builtFile = Join-Path $sourcePath $RelativePath
-  $sdkFile = Join-Path $slangBin $RelativePath
+  $sdkFile = Join-Path $SdkBin $RelativePath
   if ((Get-FileHash -LiteralPath $builtFile -Algorithm SHA256).Hash -ne
       (Get-FileHash -LiteralPath $sdkFile -Algorithm SHA256).Hash) {
-    throw "Slang output differs from the bundled SDK: $RelativePath. Rebuild SceneViewer."
+    throw "$SdkName output differs from the bundled SDK: $RelativePath. Rebuild SceneViewer."
   }
   Copy-PayloadFile -Source $builtFile -RelativePath $RelativePath
 }
@@ -114,7 +118,7 @@ function Assert-DdsTexture {
   }
 }
 
-$repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = Split-Path -Parent $PSScriptRoot
 $sourcePath = Resolve-PathFromBase -Path $SourceDir -Base $repoRoot
 $distPath = Resolve-PathFromBase -Path $DistDir -Base $repoRoot
 
@@ -183,6 +187,20 @@ if ($slangBuild['Version'] -ne $slangSdk.NyxSlangVersion -or
   throw "SourceDir Slang build metadata differs from the bundled SDK. Rebuild SceneViewer before packaging."
 }
 
+$dxcRoot = Join-Path $repoRoot 'MiniEngine\ThirdParty\DXC'
+$dxcBin = Join-Path $dxcRoot 'bin\x64'
+$dxcSdk = ([xml](Get-Content -LiteralPath (Join-Path $dxcRoot 'NyxDxcSdk.props') -Raw)).Project.PropertyGroup
+$dxcBuildPath = Join-Path $sourcePath 'NyxDxcBuild.txt'
+if (-not (Test-Path -LiteralPath $dxcBuildPath -PathType Leaf)) {
+  throw "NyxDxcBuild.txt is missing. Rebuild SceneViewer before packaging."
+}
+$dxcBuild = Get-Content -LiteralPath $dxcBuildPath -Raw | ConvertFrom-StringData
+if ([string]::IsNullOrWhiteSpace($dxcBuild['Tag']) -or $dxcBuild['Tag'] -cne $dxcSdk.NyxDxcTag -or
+    $dxcBuild['Channel'] -notin @('release', 'preview') -or $dxcBuild['Channel'] -ne $dxcSdk.NyxDxcChannel -or
+    $dxcBuild['Sha256'] -notmatch '^[0-9a-fA-F]{64}$' -or $dxcBuild['Sha256'] -ne $dxcSdk.NyxDxcSha256) {
+  throw "SourceDir DXC build metadata differs from the bundled SDK. Rebuild SceneViewer before packaging."
+}
+
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $nameParts = @($PackageName)
 if (-not [string]::IsNullOrWhiteSpace($Version)) {
@@ -211,7 +229,7 @@ if (Test-Path -LiteralPath $stagingRoot) {
 New-Item -ItemType Directory -Path $payloadRoot -Force | Out-Null
 
 Write-Host "Collecting release runtime from: $sourcePath"
-$runtimeFiles = @("SceneViewer.exe", "dxcompiler.dll", "dxil.dll", "WinPixEventRuntime.dll")
+$runtimeFiles = @("SceneViewer.exe", "WinPixEventRuntime.dll")
 foreach ($runtimeFile in $runtimeFiles) {
   Copy-PayloadFile -Source (Join-Path $sourcePath $runtimeFile) -RelativePath $runtimeFile
 }
@@ -224,14 +242,18 @@ Copy-PayloadFile -Source (Join-Path $sourcePath "D3D12\D3D12Core.dll") -Relative
 if (Test-Path -LiteralPath (Join-Path $sourcePath "SceneViewer.exe.manifest")) {
   Copy-PayloadFile -Source (Join-Path $sourcePath "SceneViewer.exe.manifest") -RelativePath "SceneViewer.exe.manifest"
 }
+Copy-PayloadFile -Source $dxcBuildPath -RelativePath 'NyxDxcBuild.txt'
+foreach ($dll in @('dxcompiler.dll', 'dxil.dll')) {
+  Copy-SdkBuildFile -SdkName DXC -SdkBin $dxcBin -RelativePath $dll
+}
 Copy-PayloadFile -Source $slangBuildPath -RelativePath 'NyxSlangBuild.txt'
 foreach ($dll in @('slang.dll', 'slang-compiler.dll', 'slang-rt.dll')) {
-  Copy-SlangBuildFile -RelativePath $dll
+  Copy-SdkBuildFile -SdkName Slang -SdkBin $slangBin -RelativePath $dll
 }
 $slangModuleFiles = @(Get-ChildItem -LiteralPath (Join-Path $slangBin $slangModule) -Recurse -File)
 if ($slangModuleFiles.Count -eq 0) { throw "Slang SDK module directory is empty: $slangModule" }
 foreach ($moduleFile in $slangModuleFiles) {
-  Copy-SlangBuildFile -RelativePath $moduleFile.FullName.Substring($slangBin.Length + 1)
+  Copy-SdkBuildFile -SdkName Slang -SdkBin $slangBin -RelativePath $moduleFile.FullName.Substring($slangBin.Length + 1)
 }
 
 # Use the compiler's redistributable directories, never arbitrary system DLLs.
@@ -331,23 +353,26 @@ $extraFiles = @(
   "MiniEngine/ThirdParty/meshoptimizer/LICENSE.md", "MiniEngine/ThirdParty/lz4/LICENSE",
   "MiniEngine/ThirdParty/cgltf/LICENSE", "MiniEngine/Model/json.hpp",
   "MiniEngine/ThirdParty/Slang/LICENSE",
-  "MiniEngine/ThirdParty/dxc_2026_05_27/LICENSE-MIT.txt",
-  "MiniEngine/ThirdParty/dxc_2026_05_27/LICENSE-LLVM.txt",
-  "MiniEngine/ThirdParty/dxc_2026_05_27/LICENSE-MS.txt",
+  "MiniEngine/ThirdParty/DXC/LICENSE-MIT.txt",
+  "MiniEngine/ThirdParty/DXC/LICENSE-LLVM.txt",
+  "MiniEngine/ThirdParty/DXC/LICENSE-MS.txt",
   "MiniEngine/Core/XeGTAO.cpp", "MiniEngine/SceneViewer/Assets/bistro-metalrough/LICENSE"
 )
 foreach ($name in $extraFiles) {
   Copy-PayloadFile -Source (Join-Path $repoRoot $name) -RelativePath $name
 }
-$slangNotices = Get-ChildItem -LiteralPath $slangRoot -Force | Where-Object {
-  $_.Name -ne 'LICENSE' -and $_.Name -match '^(?:licen[cs]es?|copying|notices?|third[-_]party[-_]notices?)(?:[._-][^/]*)?$'
-}
-foreach ($notice in $slangNotices) {
-  $relative = "MiniEngine\ThirdParty\Slang\$($notice.Name)"
-  if ($notice.PSIsContainer) {
-    Copy-DirectoryContents -Source $notice.FullName -Destination (Join-Path $payloadRoot $relative)
-  } else {
-    Copy-PayloadFile -Source $notice.FullName -RelativePath $relative
+foreach ($sdkRoot in @($slangRoot, $dxcRoot)) {
+  $notices = Get-ChildItem -LiteralPath $sdkRoot -Force | Where-Object {
+    $_.Name -match '^(?:licen[cs]es?|copying|notices?|third[-_]party[-_]notices?)(?:[._-][^/]*)?$'
+  }
+  foreach ($notice in $notices) {
+    $relative = $notice.FullName.Substring($repoRoot.Length + 1).Replace('\', '/')
+    if ($relative -in $extraFiles) { continue }
+    if ($notice.PSIsContainer) {
+      Copy-DirectoryContents -Source $notice.FullName -Destination (Join-Path $payloadRoot $relative)
+    } else {
+      Copy-PayloadFile -Source $notice.FullName -RelativePath $relative
+    }
   }
 }
 Copy-PayloadFile -Source (Join-Path $assetSourceRoot "bistro-metalrough\LICENSE") -RelativePath "Assets\bistro-metalrough\LICENSE"
@@ -410,6 +435,7 @@ $bistroCommit = (& git -C (Join-Path $assetSourceRoot "bistro-metalrough") rev-p
 $exeHash = (Get-FileHash -LiteralPath $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
 $buildInfo = "Version: $Version`r`nSource commit: $sourceCommit`r`nBistro commit: $bistroCommit`r`nConfiguration: Release x64`r`nMINI cache version: $miniVersion`r`nSceneViewer.exe SHA256: $exeHash`r`n"
 $buildInfo += "DLSS enabled: $($dlssBuild.Enabled)`r`n"
+$buildInfo += "DXC tag: $($dxcBuild.Tag)`r`nDXC channel: $($dxcBuild.Channel)`r`nDXC archive SHA256: $($dxcBuild.Sha256)`r`n"
 $buildInfo += "Slang version: $($slangBuild.Version)`r`nSlang release archive SHA256: $($slangBuild.Sha256)`r`n"
 if ($ValidationBuild) {
   $buildInfo += "Package type: local validation`r`nMiniEngine source tree: $validationSourceState`r`n"
@@ -420,6 +446,7 @@ $requiredPackagePaths = @(
   "SceneViewer.exe",
   "NyxDlssBuild.txt",
   "NyxSlangBuild.txt",
+  "NyxDxcBuild.txt",
   "slang.dll",
   "slang-compiler.dll",
   "slang-rt.dll",
